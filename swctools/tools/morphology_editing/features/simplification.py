@@ -10,7 +10,11 @@ import numpy as np
 import pandas as pd
 
 from swctools.core.config import load_feature_config, merge_config
-from swctools.core.reporting import format_simplification_report_text, write_text_report
+from swctools.core.reporting import (
+    format_simplification_report_text,
+    simplification_log_path_for_file,
+    write_text_report,
+)
 from swctools.core.swc_io import parse_swc_text_preserve_tokens, write_swc_to_bytes_preserve_tokens
 from swctools.plugins.registry import register_builtin_method, resolve_method
 
@@ -316,8 +320,7 @@ def simplify_file(
         "removed_node_ids": list(out.get("removed_node_ids", [])),
     }
 
-    report_base = output_path if output_path is not None else fp
-    report_path = report_base.with_name(f"{report_base.stem}_simplification_log.txt")
+    report_path = simplification_log_path_for_file(fp)
     payload["log_path"] = write_text_report(report_path, format_simplification_report_text(payload))
     out["summary"] = payload
     out["input_path"] = str(fp)

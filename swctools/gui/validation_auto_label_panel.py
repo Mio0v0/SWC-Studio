@@ -18,6 +18,7 @@ from PySide6.QtWidgets import (
 
 from swctools.core.auto_typing import RuleBatchOptions, get_auto_rules_config, save_auto_rules_config
 from swctools.core.config import feature_config_path
+from .constants import color_for_type
 
 _CFG_PATH = feature_config_path("batch_processing", "auto_typing")
 
@@ -117,40 +118,39 @@ class ValidationAutoLabelPanel(QWidget):
         flags_row2 = QHBoxLayout()
         self._flag_soma = QCheckBox("--soma")
         self._flag_axon = QCheckBox("--axon")
-        self._flag_dend = QCheckBox("--dendrite")
         self._flag_apic = QCheckBox("--apic")
         self._flag_basal = QCheckBox("--basal")
-        self._flag_rad = QCheckBox("--rad")
 
         self._flag_soma.setChecked(True)
         self._flag_axon.setChecked(True)
         self._flag_basal.setChecked(True)
 
-        for cb in (self._flag_soma, self._flag_axon, self._flag_dend, self._flag_apic):
+        self._flag_soma.setStyleSheet(f"QCheckBox {{ color: {color_for_type(1)}; font-weight: 600; }}")
+        self._flag_axon.setStyleSheet(f"QCheckBox {{ color: {color_for_type(2)}; font-weight: 600; }}")
+        self._flag_basal.setStyleSheet(f"QCheckBox {{ color: {color_for_type(3)}; font-weight: 600; }}")
+        self._flag_apic.setStyleSheet(f"QCheckBox {{ color: {color_for_type(4)}; font-weight: 600; }}")
+
+        for cb in (self._flag_soma, self._flag_axon, self._flag_apic):
             flags_row1.addWidget(cb)
         flags_row1.addStretch()
-        for cb in (self._flag_basal, self._flag_rad):
+        for cb in (self._flag_basal,):
             flags_row2.addWidget(cb)
         flags_row2.addStretch()
         root.addLayout(flags_row1)
         root.addLayout(flags_row2)
 
         top_btns = QHBoxLayout()
-        self._btn_rule_guide = QPushButton("Show Auto Typing Guide")
-        self._btn_rule_guide.clicked.connect(self.guide_requested.emit)
-        top_btns.addWidget(self._btn_rule_guide)
-        self._btn_run = QPushButton("Run Auto Labeling on Current File")
+        self._btn_run = QPushButton("Run")
         self._btn_run.clicked.connect(lambda: self.process_requested.emit(self.current_options()))
         top_btns.addWidget(self._btn_run)
+        self._btn_rule_guide = QPushButton("Rule Guide")
+        self._btn_rule_guide.clicked.connect(self.guide_requested.emit)
+        top_btns.addWidget(self._btn_rule_guide)
+        self._btn_edit_cfg = QPushButton("Show JSON")
+        self._btn_edit_cfg.clicked.connect(self._on_edit_auto_typing_json)
+        top_btns.addWidget(self._btn_edit_cfg)
         top_btns.addStretch()
         root.addLayout(top_btns)
-
-        cfg_row = QHBoxLayout()
-        self._btn_edit_cfg = QPushButton("Edit Auto-Typing JSON…")
-        self._btn_edit_cfg.clicked.connect(self._on_edit_auto_typing_json)
-        cfg_row.addWidget(self._btn_edit_cfg)
-        cfg_row.addStretch()
-        root.addLayout(cfg_row)
 
         action_row = QHBoxLayout()
         self._btn_apply = QPushButton("Apply")
@@ -174,15 +174,14 @@ class ValidationAutoLabelPanel(QWidget):
         root.addWidget(self._summary, stretch=1)
 
     def current_options(self) -> RuleBatchOptions:
-        use_dendrite = bool(self._flag_dend.isChecked())
-        use_basal = bool(self._flag_basal.isChecked() or use_dendrite)
-        use_apic = bool(self._flag_apic.isChecked() or use_dendrite)
+        use_basal = bool(self._flag_basal.isChecked())
+        use_apic = bool(self._flag_apic.isChecked())
         return RuleBatchOptions(
             soma=bool(self._flag_soma.isChecked()),
             axon=bool(self._flag_axon.isChecked()),
             apic=use_apic,
             basal=use_basal,
-            rad=bool(self._flag_rad.isChecked()),
+            rad=False,
             zip_output=False,
         )
 
@@ -202,7 +201,7 @@ class ValidationAutoLabelPanel(QWidget):
         if not summary:
             self._summary.setPlainText(
                 "No auto-label preview yet.\n"
-                "Use Run Auto Labeling on Current File to generate a preview tab."
+                "Use Run to generate a preview tab."
             )
             return
 

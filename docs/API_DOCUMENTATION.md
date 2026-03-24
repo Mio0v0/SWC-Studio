@@ -34,8 +34,6 @@ Dataclass for auto-typing:
 - `axon: bool`
 - `apic: bool`
 - `basal: bool`
-- `rad: bool`
-- `zip_output: bool`
 
 ### Batch Processing
 

@@ -12,7 +12,11 @@ from typing import Any
 import zipfile
 import math
 from swctools.core.config import load_feature_config, merge_config, save_feature_config
-from swctools.core.reporting import format_auto_typing_report_text, write_text_report
+from swctools.core.reporting import (
+    auto_typing_log_path_for_file,
+    format_auto_typing_report_text,
+    write_text_report,
+)
 
 
 TOOL = "batch_processing"
@@ -24,15 +28,78 @@ def _default_rules_config() -> dict[str, Any]:
     return {
         "class_labels": {"1": "soma", "2": "axon", "3": "basal", "4": "apical"},
         "branch_score_weights": {
-            "axon": {"path": 0.32, "radial": 0.24, "radius": 0.20, "branch": 0.14, "prior": 0.10},
-            "apical": {"z": 0.30, "path": 0.22, "radius": 0.18, "branch": 0.15, "prior": 0.15},
-            "basal": {"z": 0.30, "branch": 0.22, "radius": 0.18, "path": 0.15, "prior": 0.15},
+            "axon": {
+                "path": 0.18,
+                "radial": 0.14,
+                "root_path": 0.28,
+                "root_radial": 0.16,
+                "radius": 0.14,
+                "branch": 0.06,
+                "prior": 0.04,
+            },
+            "apical": {
+                "z": 0.28,
+                "path": 0.16,
+                "root_path": 0.16,
+                "radius": 0.16,
+                "branch": 0.10,
+                "prior": 0.14,
+            },
+            "basal": {
+                "z": 0.18,
+                "branch": 0.16,
+                "radius": 0.18,
+                "path": 0.08,
+                "root_path": 0.20,
+                "root_radial": 0.12,
+                "prior": 0.08,
+            },
         },
+        "segmenting": {"max_chunk_path": 180.0},
         "ml_blend": 0.28,
         "ml_base_weight": 0.72,
         "seed_prior_threshold": 0.55,
         "assign_missing": {"min_score": 0.58, "min_gain": -0.06},
-        "smoothing": {"maj_fraction": 0.67, "flip_margin": 0.10},
+        "smoothing": {"maj_fraction": 0.67, "flip_margin": 0.10, "continuity_margin": 0.02},
+        "refinement": {
+            "iterations": 2,
+            "parent_weight": 0.14,
+            "child_weight": 0.18,
+            "island_max_path": 36.0,
+            "island_relative_max": 0.35,
+            "island_flip_margin": 0.14,
+        },
+        "soma_child_prior": {
+            "branch_weight": 0.38,
+            "branch_boost": 0.16,
+            "propagation_weight": 0.30,
+            "score_weights": {
+                "axon": {
+                    "path": 0.28,
+                    "radial": 0.22,
+                    "size": 0.18,
+                    "radius": 0.12,
+                    "branch": 0.08,
+                    "prior": 0.12,
+                },
+                "apical": {
+                    "z": 0.32,
+                    "path": 0.18,
+                    "size": 0.12,
+                    "radius": 0.12,
+                    "branch": 0.10,
+                    "prior": 0.16,
+                },
+                "basal": {
+                    "path": 0.26,
+                    "radial": 0.18,
+                    "radius": 0.18,
+                    "branch": 0.12,
+                    "z": 0.10,
+                    "prior": 0.16,
+                },
+            },
+        },
         "propagation_weights": {
             "self": 0.35,
             "parent": 0.35,
@@ -43,7 +110,7 @@ def _default_rules_config() -> dict[str, Any]:
         "radius": {"copy_parent_if_zero": True},
         "notes": (
             "This JSON controls the auto-labeling behavior "
-            "(weights, thresholds, and options). Edit carefully."
+            "(weights, thresholds, and options), including the topology-aware second pass. Edit carefully."
         ),
     }
 
@@ -202,17 +269,36 @@ def _normalize_map(vals: dict[int, float]) -> dict[int, float]:
     return {k: (v - lo) / scale for k, v in vals.items()}
 
 
-def _iter_subtree(start: int, children: list[list[int]]) -> list[int]:
+def _iter_branch_segment(
+    start: int,
+    rows: list[dict[str, Any]],
+    children: list[list[int]],
+    parent_idx: list[int | None],
+    max_chunk_path: float,
+) -> list[int]:
+    """Return a linear segment until a leaf, bifurcation, or chunk limit is reached."""
     out: list[int] = []
-    stack = [start]
+    cur = start
     seen = set()
-    while stack:
-        i = stack.pop()
-        if i in seen:
-            continue
-        seen.add(i)
-        out.append(i)
-        stack.extend(children[i])
+    chunk_path = 0.0
+    while cur not in seen:
+        seen.add(cur)
+        out.append(cur)
+        kids = children[cur]
+        if len(kids) != 1:
+            break
+        nxt = kids[0]
+        pidx = parent_idx[nxt]
+        if pidx is None:
+            break
+        dx = float(rows[nxt]["x"]) - float(rows[pidx]["x"])
+        dy = float(rows[nxt]["y"]) - float(rows[pidx]["y"])
+        dz = float(rows[nxt]["z"]) - float(rows[pidx]["z"])
+        seg_len = math.sqrt(dx * dx + dy * dy + dz * dz)
+        if out and chunk_path + seg_len > max_chunk_path:
+            break
+        chunk_path += seg_len
+        cur = nxt
     return out
 
 
@@ -222,50 +308,223 @@ def _branch_partition(
     children: list[list[int]],
     types: list[int],
 ) -> tuple[dict[int, list[int]], dict[int, int], list[int]]:
+    """Partition morphology into branch segments anchored at roots/bifurcations."""
     n = len(rows)
     roots = [i for i, p in enumerate(parent_idx) if p is None]
     soma_roots = [i for i in roots if int(types[i]) == 1]
     anchors = soma_roots if soma_roots else roots
+    max_chunk_path = float(_load_cfg().get("segmenting", {}).get("max_chunk_path", 180.0))
 
     node_branch = [-1] * n
     branch_nodes: dict[int, list[int]] = {}
     branch_anchor: dict[int, int] = {}
     bid = 0
+    seen_starts: set[int] = set()
+    pending: list[tuple[int, int]] = []
 
-    for a in anchors:
-        ch = sorted(children[a], key=lambda i: int(rows[i]["id"]))
-        if not ch and int(types[a]) != 1:
-            nodes = _iter_subtree(a, children)
-            branch_nodes[bid] = nodes
-            branch_anchor[bid] = a
-            for x in nodes:
-                node_branch[x] = bid
-            bid += 1
+    for anchor in anchors:
+        kids = sorted(children[anchor], key=lambda i: int(rows[i]["id"]))
+        if not kids and int(types[anchor]) != 1:
+            pending.append((parent_idx[anchor] if parent_idx[anchor] is not None else anchor, anchor))
+            continue
+        for child in kids:
+            pending.append((anchor, child))
+
+    while pending:
+        anchor, start = pending.pop(0)
+        if start in seen_starts:
+            continue
+        seen_starts.add(start)
+
+        nodes = _iter_branch_segment(start, rows, children, parent_idx, max_chunk_path)
+        if not nodes:
             continue
 
-        for c in ch:
-            nodes = _iter_subtree(c, children)
-            branch_nodes[bid] = nodes
-            branch_anchor[bid] = a
-            for x in nodes:
-                node_branch[x] = bid
-            bid += 1
-
-    # Include disconnected leftovers as standalone branches.
-    for i in range(n):
-        if node_branch[i] != -1:
-            continue
-        if int(types[i]) == 1:
-            continue
-        nodes = _iter_subtree(i, children)
         branch_nodes[bid] = nodes
-        branch_anchor[bid] = parent_idx[i] if parent_idx[i] is not None else i
+        branch_anchor[bid] = anchor
         for x in nodes:
             if node_branch[x] == -1:
                 node_branch[x] = bid
+
+        tail = nodes[-1]
+        kids = sorted(children[tail], key=lambda i: int(rows[i]["id"]))
+        if len(kids) == 1:
+            pending.append((tail, kids[0]))
+        else:
+            for child in kids:
+                pending.append((tail, child))
+        bid += 1
+
+    for i in range(n):
+        if node_branch[i] != -1 or int(types[i]) == 1:
+            continue
+        anchor = parent_idx[i] if parent_idx[i] is not None else i
+        nodes = _iter_branch_segment(i, rows, children, parent_idx, max_chunk_path)
+        branch_nodes[bid] = nodes
+        branch_anchor[bid] = anchor
+        for x in nodes:
+            if node_branch[x] == -1:
+                node_branch[x] = bid
+        tail = nodes[-1]
+        kids = sorted(children[tail], key=lambda j: int(rows[j]["id"]))
+        if len(kids) == 1:
+            pending.append((tail, kids[0]))
+        else:
+            for child in kids:
+                pending.append((tail, child))
         bid += 1
 
     return branch_nodes, branch_anchor, node_branch
+
+
+def _compute_root_metrics(
+    rows: list[dict[str, Any]],
+    parent_idx: list[int | None],
+    children: list[list[int]],
+    order: list[int],
+) -> tuple[list[float], list[float], list[int], int | None]:
+    n = len(rows)
+    roots = [i for i, p in enumerate(parent_idx) if p is None]
+    root_idx = roots[0] if roots else None
+    path_from_root = [0.0] * n
+    branch_order = [0] * n
+
+    for i in order:
+        pidx = parent_idx[i]
+        if pidx is None:
+            continue
+        dx = float(rows[i]["x"]) - float(rows[pidx]["x"])
+        dy = float(rows[i]["y"]) - float(rows[pidx]["y"])
+        dz = float(rows[i]["z"]) - float(rows[pidx]["z"])
+        path_from_root[i] = path_from_root[pidx] + math.sqrt(dx * dx + dy * dy + dz * dz)
+        branch_order[i] = branch_order[pidx] + (1 if len(children[pidx]) > 1 else 0)
+
+    if root_idx is None:
+        return path_from_root, [0.0] * n, branch_order, None
+
+    rx = float(rows[root_idx]["x"])
+    ry = float(rows[root_idx]["y"])
+    rz = float(rows[root_idx]["z"])
+    radial_from_root = [
+        math.sqrt(
+            (float(row["x"]) - rx) ** 2
+            + (float(row["y"]) - ry) ** 2
+            + (float(row["z"]) - rz) ** 2
+        )
+        for row in rows
+    ]
+    return path_from_root, radial_from_root, branch_order, root_idx
+
+
+def _soma_child_owners(
+    rows: list[dict[str, Any]],
+    parent_idx: list[int | None],
+    children: list[list[int]],
+    types: list[int],
+) -> tuple[int | None, dict[int, list[int]], list[int | None]]:
+    soma_roots = [i for i, p in enumerate(parent_idx) if p is None and int(types[i]) == 1]
+    root_idx = soma_roots[0] if soma_roots else next((i for i, p in enumerate(parent_idx) if p is None), None)
+    owners: list[int | None] = [None] * len(rows)
+    child_nodes: dict[int, list[int]] = {}
+    if root_idx is None:
+        return None, child_nodes, owners
+
+    for child in sorted(children[root_idx], key=lambda i: int(rows[i]["id"])):
+        stack = [child]
+        child_nodes[child] = []
+        while stack:
+            idx = stack.pop()
+            if owners[idx] is not None:
+                continue
+            owners[idx] = child
+            child_nodes[child].append(idx)
+            stack.extend(children[idx])
+    return root_idx, child_nodes, owners
+
+
+def _assign_soma_child_subtrees(
+    rows: list[dict[str, Any]],
+    parent_idx: list[int | None],
+    children: list[list[int]],
+    types: list[int],
+    enabled_neurites: set[int],
+    path_from_root: list[float],
+    radial_from_root: list[float],
+) -> tuple[dict[int, int], dict[int, dict[int, float]], list[int | None]]:
+    soma_idx, child_nodes, node_child_owner = _soma_child_owners(rows, parent_idx, children, types)
+    if soma_idx is None or not child_nodes or not enabled_neurites:
+        return {}, {}, node_child_owner
+
+    node_count = {child: float(len(nodes)) for child, nodes in child_nodes.items()}
+    path_max = {child: max(path_from_root[i] for i in nodes) for child, nodes in child_nodes.items()}
+    radial_max = {child: max(radial_from_root[i] for i in nodes) for child, nodes in child_nodes.items()}
+    mean_radius = {
+        child: sum(float(rows[i]["radius"]) for i in nodes) / max(1, len(nodes))
+        for child, nodes in child_nodes.items()
+    }
+    branch_density = {
+        child: sum(1 for i in nodes if len(children[i]) > 1) / max(1, len(nodes))
+        for child, nodes in child_nodes.items()
+    }
+    soma_z = float(rows[soma_idx]["z"])
+    z_max_rel = {
+        child: max(float(rows[i]["z"]) - soma_z for i in nodes)
+        for child, nodes in child_nodes.items()
+    }
+    existing_ratio: dict[tuple[int, int], float] = {}
+    for child, nodes in child_nodes.items():
+        for cls in enabled_neurites:
+            existing_ratio[(child, cls)] = sum(1 for i in nodes if int(types[i]) == cls) / max(1, len(nodes))
+
+    n_size = _normalize_map(node_count)
+    n_path = _normalize_map(path_max)
+    n_radial = _normalize_map(radial_max)
+    n_radius = _normalize_map(mean_radius)
+    n_branch = _normalize_map(branch_density)
+    n_z = _normalize_map(z_max_rel)
+
+    cfg = _load_cfg().get("soma_child_prior", {})
+    weights = cfg.get("score_weights", {})
+    child_scores: dict[int, dict[int, float]] = {}
+    for child in child_nodes:
+        sc: dict[int, float] = {}
+        for cls in enabled_neurites:
+            prior = existing_ratio.get((child, cls), 0.0)
+            if cls == 2:
+                w = weights.get("axon", {})
+                s = (
+                    w.get("path", 0.28) * n_path.get(child, 0.5)
+                    + w.get("radial", 0.22) * n_radial.get(child, 0.5)
+                    + w.get("size", 0.18) * n_size.get(child, 0.5)
+                    + w.get("radius", 0.12) * (1.0 - n_radius.get(child, 0.5))
+                    + w.get("branch", 0.08) * (1.0 - n_branch.get(child, 0.5))
+                    + w.get("prior", 0.12) * prior
+                )
+            elif cls == 4:
+                w = weights.get("apical", {})
+                s = (
+                    w.get("z", 0.32) * n_z.get(child, 0.5)
+                    + w.get("path", 0.18) * n_path.get(child, 0.5)
+                    + w.get("size", 0.12) * n_size.get(child, 0.5)
+                    + w.get("radius", 0.12) * n_radius.get(child, 0.5)
+                    + w.get("branch", 0.10) * n_branch.get(child, 0.5)
+                    + w.get("prior", 0.16) * prior
+                )
+            else:
+                w = weights.get("basal", {})
+                s = (
+                    w.get("path", 0.26) * (1.0 - n_path.get(child, 0.5))
+                    + w.get("radial", 0.18) * (1.0 - n_radial.get(child, 0.5))
+                    + w.get("radius", 0.18) * n_radius.get(child, 0.5)
+                    + w.get("branch", 0.12) * n_branch.get(child, 0.5)
+                    + w.get("z", 0.10) * (1.0 - n_z.get(child, 0.5))
+                    + w.get("prior", 0.16) * prior
+                )
+            sc[cls] = s
+        child_scores[child] = sc
+
+    child_class = _assign_branches(child_nodes, child_scores, enabled_neurites)
+    return child_class, child_scores, node_child_owner
 
 
 def _branch_scores(
@@ -276,7 +535,12 @@ def _branch_scores(
     branch_nodes: dict[int, list[int]],
     branch_anchor: dict[int, int],
     enabled_neurites: set[int],
-) -> tuple[dict[int, dict[int, float]], dict[int, tuple[float, float, float, float, float]], dict[tuple[int, int], float]]:
+    path_from_root: list[float],
+    radial_from_root: list[float],
+    node_child_owner: list[int | None],
+    child_class: dict[int, int],
+    child_scores: dict[int, dict[int, float]],
+) -> tuple[dict[int, dict[int, float]], dict[int, tuple[float, ...]], dict[tuple[int, int], float]]:
     x = [float(r["x"]) for r in rows]
     y = [float(r["y"]) for r in rows]
     z = [float(r["z"]) for r in rows]
@@ -287,6 +551,8 @@ def _branch_scores(
     mean_radius: dict[int, float] = {}
     branchiness: dict[int, float] = {}
     z_mean_rel: dict[int, float] = {}
+    root_path_mean: dict[int, float] = {}
+    root_radial_mean: dict[int, float] = {}
     existing_ratio: dict[tuple[int, int], float] = {}
 
     for bid, nodes in branch_nodes.items():
@@ -314,6 +580,8 @@ def _branch_scores(
         mean_radius[bid] = sum(rad[i] for i in nodes) / max(1, len(nodes))
         branchiness[bid] = bif / max(1, len(nodes))
         z_mean_rel[bid] = sum((z[i] - az) for i in nodes) / max(1, len(nodes))
+        root_path_mean[bid] = sum(path_from_root[i] for i in nodes) / max(1, len(nodes))
+        root_radial_mean[bid] = sum(radial_from_root[i] for i in nodes) / max(1, len(nodes))
 
         for cls in enabled_neurites:
             c = sum(1 for i in nodes if int(types[i]) == cls)
@@ -324,11 +592,16 @@ def _branch_scores(
     n_radius = _normalize_map(mean_radius)
     n_branch = _normalize_map(branchiness)
     n_z = _normalize_map(z_mean_rel)
+    n_root_path = _normalize_map(root_path_mean)
+    n_root_radial = _normalize_map(root_radial_mean)
 
     scores: dict[int, dict[int, float]] = {}
-    features: dict[int, tuple[float, float, float, float, float]] = {}
+    features: dict[int, tuple[float, ...]] = {}
     cfg = _load_cfg()
     weights = cfg.get("branch_score_weights", {})
+    child_prior_cfg = cfg.get("soma_child_prior", {})
+    child_branch_weight = float(child_prior_cfg.get("branch_weight", 0.38))
+    child_branch_boost = float(child_prior_cfg.get("branch_boost", 0.16))
     for bid in branch_nodes:
         features[bid] = (
             n_path.get(bid, 0.5),
@@ -336,37 +609,49 @@ def _branch_scores(
             n_radius.get(bid, 0.5),
             n_branch.get(bid, 0.5),
             n_z.get(bid, 0.5),
+            n_root_path.get(bid, 0.5),
+            n_root_radial.get(bid, 0.5),
         )
+        owner = next((node_child_owner[i] for i in branch_nodes[bid] if node_child_owner[i] is not None), None)
         br_scores: dict[int, float] = {}
         for cls in enabled_neurites:
             prior = existing_ratio.get((bid, cls), 0.0)
-            if cls == 2:  # axon
+            if cls == 2:
                 w = weights.get("axon", {})
                 s = (
-                    w.get("path", 0.32) * n_path.get(bid, 0.5)
-                    + w.get("radial", 0.24) * n_radial.get(bid, 0.5)
-                    + w.get("radius", 0.20) * (1.0 - n_radius.get(bid, 0.5))
-                    + w.get("branch", 0.14) * (1.0 - n_branch.get(bid, 0.5))
-                    + w.get("prior", 0.10) * prior
+                    w.get("path", 0.18) * n_path.get(bid, 0.5)
+                    + w.get("radial", 0.14) * n_radial.get(bid, 0.5)
+                    + w.get("root_path", 0.28) * n_root_path.get(bid, 0.5)
+                    + w.get("root_radial", 0.16) * n_root_radial.get(bid, 0.5)
+                    + w.get("radius", 0.14) * (1.0 - n_radius.get(bid, 0.5))
+                    + w.get("branch", 0.06) * (1.0 - n_branch.get(bid, 0.5))
+                    + w.get("prior", 0.04) * prior
                 )
-            elif cls == 4:  # apical
+            elif cls == 4:
                 w = weights.get("apical", {})
                 s = (
-                    w.get("z", 0.30) * n_z.get(bid, 0.5)
-                    + w.get("path", 0.22) * n_path.get(bid, 0.5)
-                    + w.get("radius", 0.18) * n_radius.get(bid, 0.5)
-                    + w.get("branch", 0.15) * n_branch.get(bid, 0.5)
-                    + w.get("prior", 0.15) * prior
+                    w.get("z", 0.28) * n_z.get(bid, 0.5)
+                    + w.get("path", 0.16) * n_path.get(bid, 0.5)
+                    + w.get("root_path", 0.16) * n_root_path.get(bid, 0.5)
+                    + w.get("radius", 0.16) * n_radius.get(bid, 0.5)
+                    + w.get("branch", 0.10) * n_branch.get(bid, 0.5)
+                    + w.get("prior", 0.14) * prior
                 )
-            else:  # basal
+            else:
                 w = weights.get("basal", {})
                 s = (
-                    w.get("z", 0.30) * (1.0 - n_z.get(bid, 0.5))
-                    + w.get("branch", 0.22) * n_branch.get(bid, 0.5)
+                    w.get("z", 0.18) * (1.0 - n_z.get(bid, 0.5))
+                    + w.get("branch", 0.16) * n_branch.get(bid, 0.5)
                     + w.get("radius", 0.18) * n_radius.get(bid, 0.5)
-                    + w.get("path", 0.15) * n_path.get(bid, 0.5)
-                    + w.get("prior", 0.15) * prior
+                    + w.get("path", 0.08) * (1.0 - n_path.get(bid, 0.5))
+                    + w.get("root_path", 0.20) * (1.0 - n_root_path.get(bid, 0.5))
+                    + w.get("root_radial", 0.12) * (1.0 - n_root_radial.get(bid, 0.5))
+                    + w.get("prior", 0.08) * prior
                 )
+            if owner is not None and owner in child_scores:
+                s += child_branch_weight * child_scores[owner].get(cls, 0.0)
+                if child_class.get(owner) == cls:
+                    s += child_branch_boost
             br_scores[cls] = s
         scores[bid] = br_scores
     return scores, features, existing_ratio
@@ -387,7 +672,7 @@ def _euclid_similarity(a: tuple[float, ...], b: tuple[float, ...]) -> float:
 
 def _ml_refine_scores(
     scores: dict[int, dict[int, float]],
-    features: dict[int, tuple[float, float, float, float, float]],
+    features: dict[int, tuple[float, ...]],
     existing_ratio: dict[tuple[int, int], float],
     enabled_neurites: set[int],
 ) -> dict[int, dict[int, float]]:
@@ -414,15 +699,16 @@ def _ml_refine_scores(
         best_bid = max(branch_ids, key=lambda b: scores.get(b, {}).get(c, -1e9))
         seed_map[c].append(best_bid)
 
-    prototypes: dict[int, tuple[float, float, float, float, float]] = {}
+    prototypes: dict[int, tuple[float, ...]] = {}
     for c in classes:
         seeds = seed_map[c]
         if not seeds:
             continue
-        acc = [0.0] * 5
+        dim = len(features[seeds[0]])
+        acc = [0.0] * dim
         for b in seeds:
             fv = features[b]
-            for i in range(5):
+            for i in range(dim):
                 acc[i] += fv[i]
         n = float(len(seeds))
         prototypes[c] = tuple(v / n for v in acc)
@@ -492,6 +778,7 @@ def _smooth_branch_labels(
     branch_class: dict[int, int],
     scores: dict[int, dict[int, float]],
     branch_anchor: dict[int, int],
+    node_branch: list[int] | None = None,
 ) -> dict[int, int]:
     if not branch_class:
         return branch_class
@@ -501,37 +788,155 @@ def _smooth_branch_labels(
     for bid, a in branch_anchor.items():
         anchor_to_branches.setdefault(a, []).append(bid)
 
+    smooth_cfg = _load_cfg().get("smoothing", {})
+    maj_frac = float(smooth_cfg.get("maj_fraction", 0.67))
+    flip_margin = float(smooth_cfg.get("flip_margin", 0.10))
+    continuity_margin = float(smooth_cfg.get("continuity_margin", 0.02))
+
     for bid, cur_cls in list(out.items()):
         anchor = branch_anchor.get(bid)
         sibs = [s for s in anchor_to_branches.get(anchor, []) if s != bid]
-        if len(sibs) < 2:
-            continue
+        if len(sibs) >= 2:
+            counts: dict[int, int] = {}
+            for s in sibs:
+                c = out.get(s)
+                if c is None:
+                    continue
+                counts[c] = counts.get(c, 0) + 1
+            if counts:
+                maj_cls, maj_count = max(counts.items(), key=lambda kv: kv[1])
+                if maj_cls != cur_cls and maj_count / max(1, len(sibs)) >= maj_frac:
+                    cur_score = scores.get(bid, {}).get(cur_cls, 0.0)
+                    maj_score = scores.get(bid, {}).get(maj_cls, 0.0)
+                    if cur_score - maj_score < flip_margin:
+                        out[bid] = maj_cls
+                        cur_cls = maj_cls
 
-        counts: dict[int, int] = {}
-        for s in sibs:
-            c = out.get(s)
-            if c is None:
-                continue
-            counts[c] = counts.get(c, 0) + 1
-        if not counts:
+        if node_branch is None or anchor is None or anchor < 0 or anchor >= len(node_branch):
             continue
-
-        maj_cls, maj_count = max(counts.items(), key=lambda kv: kv[1])
-        if maj_cls == cur_cls:
+        parent_bid = node_branch[anchor]
+        if parent_bid == -1 or parent_bid == bid or parent_bid not in out:
             continue
-        smooth_cfg = _load_cfg().get("smoothing", {})
-        maj_frac = float(smooth_cfg.get("maj_fraction", 0.67))
-        flip_margin = float(smooth_cfg.get("flip_margin", 0.10))
-        if maj_count / max(1, len(sibs)) < maj_frac:
+        parent_cls = out[parent_bid]
+        if parent_cls == cur_cls:
             continue
-
         cur_score = scores.get(bid, {}).get(cur_cls, 0.0)
-        maj_score = scores.get(bid, {}).get(maj_cls, 0.0)
-        if cur_score - maj_score < flip_margin:
-            out[bid] = maj_cls
+        parent_score = scores.get(bid, {}).get(parent_cls, 0.0)
+        if cur_score - parent_score < continuity_margin:
+            out[bid] = parent_cls
 
     return out
 
+
+
+def _branch_path_lengths(
+    rows: list[dict[str, Any]],
+    parent_idx: list[int | None],
+    branch_nodes: dict[int, list[int]],
+) -> dict[int, float]:
+    lengths: dict[int, float] = {}
+    for bid, nodes in branch_nodes.items():
+        plen = 0.0
+        for i in nodes:
+            pidx = parent_idx[i]
+            if pidx is None:
+                continue
+            dx = float(rows[i]["x"]) - float(rows[pidx]["x"])
+            dy = float(rows[i]["y"]) - float(rows[pidx]["y"])
+            dz = float(rows[i]["z"]) - float(rows[pidx]["z"])
+            plen += math.sqrt(dx * dx + dy * dy + dz * dz)
+        lengths[bid] = plen
+    return lengths
+
+
+def _branch_graph(
+    branch_anchor: dict[int, int],
+    node_branch: list[int],
+) -> tuple[dict[int, int], dict[int, list[int]]]:
+    branch_parent: dict[int, int] = {}
+    branch_children: dict[int, list[int]] = {}
+    for bid, anchor in branch_anchor.items():
+        if anchor < 0 or anchor >= len(node_branch):
+            continue
+        parent_bid = node_branch[anchor]
+        if parent_bid == -1 or parent_bid == bid:
+            continue
+        branch_parent[bid] = parent_bid
+        branch_children.setdefault(parent_bid, []).append(bid)
+    return branch_parent, branch_children
+
+
+def _neighbor_refine_scores(
+    scores: dict[int, dict[int, float]],
+    branch_class: dict[int, int],
+    branch_parent: dict[int, int],
+    branch_children: dict[int, list[int]],
+) -> dict[int, dict[int, float]]:
+    cfg = _load_cfg().get("refinement", {})
+    parent_weight = float(cfg.get("parent_weight", 0.14))
+    child_weight = float(cfg.get("child_weight", 0.18))
+    out = {bid: dict(sc) for bid, sc in scores.items()}
+    for bid, sc in out.items():
+        parent = branch_parent.get(bid)
+        if parent in branch_class:
+            cls = branch_class[parent]
+            sc[cls] = sc.get(cls, 0.0) + parent_weight
+        kids = branch_children.get(bid, [])
+        if kids:
+            weight = child_weight / max(1, len(kids))
+            for child in kids:
+                cls = branch_class.get(child)
+                if cls is None:
+                    continue
+                sc[cls] = sc.get(cls, 0.0) + weight
+    return out
+
+
+def _refine_topology_branch_labels(
+    branch_class: dict[int, int],
+    scores: dict[int, dict[int, float]],
+    branch_parent: dict[int, int],
+    branch_children: dict[int, list[int]],
+    branch_lengths: dict[int, float],
+) -> dict[int, int]:
+    if not branch_class:
+        return branch_class
+
+    cfg = _load_cfg().get("refinement", {})
+    iterations = max(1, int(cfg.get("iterations", 2)))
+    island_max_path = float(cfg.get("island_max_path", 36.0))
+    island_relative_max = float(cfg.get("island_relative_max", 0.35))
+    island_flip_margin = float(cfg.get("island_flip_margin", 0.14))
+
+    out = dict(branch_class)
+    for _ in range(iterations):
+        updated = dict(out)
+        for bid, cur_cls in out.items():
+            parent = branch_parent.get(bid)
+            if parent is None or parent not in out:
+                continue
+            parent_cls = out[parent]
+            if parent_cls == cur_cls:
+                continue
+            matching_children = [child for child in branch_children.get(bid, []) if out.get(child) == parent_cls]
+            if not matching_children:
+                continue
+
+            cur_score = scores.get(bid, {}).get(cur_cls, 0.0)
+            target_score = scores.get(bid, {}).get(parent_cls, 0.0)
+            branch_len = branch_lengths.get(bid, 0.0)
+            ref_len = max(
+                [branch_lengths.get(parent, 0.0)] + [branch_lengths.get(child, 0.0) for child in matching_children] + [1.0]
+            )
+            is_short_island = (
+                branch_len <= island_max_path
+                or branch_len <= island_relative_max * ref_len
+                or cur_score - target_score < island_flip_margin
+            )
+            if is_short_island:
+                updated[bid] = parent_cls
+        out = updated
+    return out
 
 def _apply_rules(rows: list[dict[str, Any]], opts: RuleBatchOptions) -> tuple[list[int], list[float], int, int]:
     orig_types = [int(row["type"]) for row in rows]
@@ -539,6 +944,7 @@ def _apply_rules(rows: list[dict[str, Any]], opts: RuleBatchOptions) -> tuple[li
     orig_radii = [float(row["radius"]) for row in rows]
     radii = list(orig_radii)
     parent_idx, children, order = _build_topology(rows)
+    path_from_root, radial_from_root, _, _ = _compute_root_metrics(rows, parent_idx, children, order)
 
     if opts.soma:
         for i, row in enumerate(rows):
@@ -554,13 +960,45 @@ def _apply_rules(rows: list[dict[str, Any]], opts: RuleBatchOptions) -> tuple[li
         enabled_neurites.add(4)
 
     if enabled_neurites:
+        child_class, child_scores, node_child_owner = _assign_soma_child_subtrees(
+            rows,
+            parent_idx,
+            children,
+            types,
+            enabled_neurites,
+            path_from_root,
+            radial_from_root,
+        )
         branch_nodes, branch_anchor, node_branch = _branch_partition(rows, parent_idx, children, types)
         scores, features, existing_ratio = _branch_scores(
-            rows, parent_idx, children, types, branch_nodes, branch_anchor, enabled_neurites
+            rows,
+            parent_idx,
+            children,
+            types,
+            branch_nodes,
+            branch_anchor,
+            enabled_neurites,
+            path_from_root,
+            radial_from_root,
+            node_child_owner,
+            child_class,
+            child_scores,
         )
         scores = _ml_refine_scores(scores, features, existing_ratio, enabled_neurites)
         branch_class = _assign_branches(branch_nodes, scores, enabled_neurites)
-        branch_class = _smooth_branch_labels(branch_class, scores, branch_anchor)
+        branch_class = _smooth_branch_labels(branch_class, scores, branch_anchor, node_branch)
+        branch_parent, branch_children = _branch_graph(branch_anchor, node_branch)
+        branch_lengths = _branch_path_lengths(rows, parent_idx, branch_nodes)
+        scores = _neighbor_refine_scores(scores, branch_class, branch_parent, branch_children)
+        branch_class = _assign_branches(branch_nodes, scores, enabled_neurites)
+        branch_class = _smooth_branch_labels(branch_class, scores, branch_anchor, node_branch)
+        branch_class = _refine_topology_branch_labels(
+            branch_class,
+            scores,
+            branch_parent,
+            branch_children,
+            branch_lengths,
+        )
 
         for bid, nodes in branch_nodes.items():
             cls = branch_class.get(bid)
@@ -576,6 +1014,7 @@ def _apply_rules(rows: list[dict[str, Any]], opts: RuleBatchOptions) -> tuple[li
         w_parent = float(prop_cfg.get("parent", 0.35))
         w_children_total = float(prop_cfg.get("children", 0.20))
         w_branch_prior = float(prop_cfg.get("branch_prior", 0.30))
+        w_child_subtree = float(_load_cfg().get("soma_child_prior", {}).get("propagation_weight", 0.30))
         prop_iters = int(prop_cfg.get("iterations", 4))
 
         for _ in range(prop_iters):
@@ -607,6 +1046,10 @@ def _apply_rules(rows: list[dict[str, Any]], opts: RuleBatchOptions) -> tuple[li
                 bid = node_branch[idx] if idx < len(node_branch) else -1
                 if bid in branch_class:
                     votes[branch_class[bid]] = votes.get(branch_class[bid], 0.0) + w_branch_prior
+
+                owner = node_child_owner[idx] if idx < len(node_child_owner) else None
+                if owner in child_class:
+                    votes[child_class[owner]] = votes.get(child_class[owner], 0.0) + w_child_subtree
 
                 if votes:
                     best = max(votes.items(), key=lambda kv: kv[1])[0]
@@ -723,11 +1166,7 @@ def run_rule_file(
 
     log_path: str | None = None
     if write_log:
-        log_target = (
-            out_path.with_name(f"{out_path.stem}_auto_typing_report.txt")
-            if out_path is not None
-            else in_path.with_name(f"{in_path.stem}_auto_typing_report.txt")
-        )
+        log_target = auto_typing_log_path_for_file(in_path)
         payload = {
             "folder": str(in_path.parent),
             "out_dir": str(out_path.parent if out_path is not None else in_path.parent),

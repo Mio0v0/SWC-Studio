@@ -26,6 +26,7 @@ from swctools.tools.batch_processing.features.auto_typing import run_folder as r
 from swctools.tools.batch_processing.features.batch_validation import validate_folder as run_batch_validation
 from swctools.tools.batch_processing.features.swc_splitter import split_folder
 from .report_popup import ReportPopupDialog
+from .constants import color_for_type
 from .radii_cleaning_panel import RadiiCleaningPanel
 
 _CFG_PATH = feature_config_path("batch_processing", "auto_typing")
@@ -179,41 +180,47 @@ class BatchTabWidget(QWidget):
         flags_row2 = QHBoxLayout()
         self._flag_soma = QCheckBox("--soma")
         self._flag_axon = QCheckBox("--axon")
-        self._flag_dend = QCheckBox("--dendrite")
         self._flag_apic = QCheckBox("--apic")
         self._flag_basal = QCheckBox("--basal")
-        self._flag_rad = QCheckBox("--rad")
-        self._flag_zip = QCheckBox("--zip")
 
         self._flag_soma.setChecked(True)
         self._flag_axon.setChecked(True)
         self._flag_basal.setChecked(True)
 
-        for cb in (self._flag_soma, self._flag_axon, self._flag_dend, self._flag_apic):
+        self._flag_soma.setStyleSheet(f"QCheckBox {{ color: {color_for_type(1)}; font-weight: 600; }}")
+        self._flag_axon.setStyleSheet(f"QCheckBox {{ color: {color_for_type(2)}; font-weight: 600; }}")
+        self._flag_basal.setStyleSheet(f"QCheckBox {{ color: {color_for_type(3)}; font-weight: 600; }}")
+        self._flag_apic.setStyleSheet(f"QCheckBox {{ color: {color_for_type(4)}; font-weight: 600; }}")
+
+        for cb in (self._flag_soma, self._flag_axon, self._flag_apic):
             flags_row1.addWidget(cb)
         flags_row1.addStretch()
-        for cb in (self._flag_basal, self._flag_rad, self._flag_zip):
+        for cb in (self._flag_basal,):
             flags_row2.addWidget(cb)
         flags_row2.addStretch()
         root.addLayout(flags_row1)
         root.addLayout(flags_row2)
 
-        self._btn_run_batch_check = QPushButton("Run Auto Labeling on Folder…")
+        action_row = QHBoxLayout()
+        self._btn_run_batch_check = QPushButton("Run")
         self._btn_run_batch_check.clicked.connect(self._on_run_batch_check)
-        root.addWidget(self._btn_run_batch_check)
+        action_row.addWidget(self._btn_run_batch_check)
 
-        cfg_row = QHBoxLayout()
-        self._btn_edit_auto_cfg = QPushButton("Edit Auto-Typing JSON…")
+        self._btn_show_precheck = QPushButton("Rule Guide")
+        self._btn_show_precheck.clicked.connect(self.precheck_requested.emit)
+        action_row.addWidget(self._btn_show_precheck)
+
+        self._btn_edit_auto_cfg = QPushButton("Show JSON")
         self._btn_edit_auto_cfg.clicked.connect(self._on_edit_auto_typing_json)
-        cfg_row.addWidget(self._btn_edit_auto_cfg)
-        cfg_row.addStretch()
-        root.addLayout(cfg_row)
+        action_row.addWidget(self._btn_edit_auto_cfg)
+        action_row.addStretch()
+        root.addLayout(action_row)
         # Keep controls pinned to the top of the tab even when there is extra height.
         root.addStretch(1)
         return page
 
     def _build_radii_page(self) -> QWidget:
-        page = RadiiCleaningPanel(self)
+        page = RadiiCleaningPanel(self, allow_loaded_swc_run=False)
         page.log_message.connect(self.log_message.emit)
         return page
 
@@ -232,12 +239,12 @@ class BatchTabWidget(QWidget):
         root.addWidget(desc)
 
         row = QHBoxLayout()
-        self._btn_show_precheck = QPushButton("Show Rule Guide")
-        self._btn_show_precheck.clicked.connect(self.precheck_requested.emit)
-        row.addWidget(self._btn_show_precheck)
-        self._btn_batch_validate = QPushButton("Run Validation on Folder…")
+        self._btn_batch_validate = QPushButton("Run")
         self._btn_batch_validate.clicked.connect(self._on_run_batch_validation)
         row.addWidget(self._btn_batch_validate)
+        self._btn_show_precheck = QPushButton("Rule Guide")
+        self._btn_show_precheck.clicked.connect(self.precheck_requested.emit)
+        row.addWidget(self._btn_show_precheck)
         row.addStretch()
         root.addLayout(row)
 
@@ -291,11 +298,8 @@ class BatchTabWidget(QWidget):
         for cb in (
             self._flag_soma,
             self._flag_axon,
-            self._flag_dend,
             self._flag_apic,
             self._flag_basal,
-            self._flag_rad,
-            self._flag_zip,
         ):
             if cb.isChecked():
                 flags.append(cb.text())
@@ -356,16 +360,15 @@ class BatchTabWidget(QWidget):
             return
 
         flags = set(self._selected_flags())
-        use_dendrite = "--dendrite" in flags
-        use_basal = ("--basal" in flags) or use_dendrite
-        use_apic = ("--apic" in flags) or use_dendrite
+        use_basal = "--basal" in flags
+        use_apic = "--apic" in flags
         opts = RuleBatchOptions(
             soma="--soma" in flags,
             axon="--axon" in flags,
             apic=use_apic,
             basal=use_basal,
-            rad="--rad" in flags,
-            zip_output="--zip" in flags,
+            rad=False,
+            zip_output=False,
         )
 
         try:

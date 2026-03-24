@@ -44,10 +44,12 @@ from .swc_table_widget import SWCTableWidget
 from .validation_auto_label_panel import ValidationAutoLabelPanel
 from .validation_tab import ValidationPrecheckWidget, ValidationTabWidget
 from swctools.core.reporting import (
+    auto_typing_log_path_for_file,
     format_auto_typing_report_text,
     format_morphology_session_log_text,
     format_simplification_report_text,
     morphology_session_log_path,
+    simplification_log_path_for_file,
     write_text_report,
 )
 from swctools.tools.morphology_editing.features.simplification import simplify_dataframe
@@ -65,6 +67,7 @@ class _DocumentState:
     file_path: str
     session_started_at: str = ""
     session_changes: list[dict] = field(default_factory=list)
+    session_events: list[dict] = field(default_factory=list)
     session_seq: int = 0
     is_preview: bool = False
     source_editor: EditorTab | None = None
@@ -844,6 +847,7 @@ class SWCMainWindow(QMainWindow):
             return
         doc.session_started_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         doc.session_changes = []
+        doc.session_events = []
         doc.session_seq = 0
         if doc is self._active_document():
             self._refresh_morph_edit_tab(doc)
@@ -881,6 +885,27 @@ class SWCMainWindow(QMainWindow):
             if doc is self._active_document():
                 self._refresh_morph_edit_tab(doc)
 
+    def _record_session_event(
+        self,
+        doc: _DocumentState,
+        *,
+        kind: str,
+        title: str,
+        summary: str,
+        details: list[str] | None = None,
+    ):
+        if doc.is_preview:
+            return
+        doc.session_events.append(
+            {
+                "time": datetime.now().strftime("%H:%M:%S"),
+                "kind": str(kind),
+                "title": str(title),
+                "summary": str(summary),
+                "details": list(details or []),
+            }
+        )
+
     def _refresh_morph_edit_tab(self, doc: _DocumentState | None = None):
         row = doc or self._active_document()
         if row is None or not row.session_changes:
@@ -904,7 +929,7 @@ class SWCMainWindow(QMainWindow):
         show_popup: bool,
         source_override: str | None = None,
     ) -> str | None:
-        if not doc.session_changes:
+        if not doc.session_changes and not doc.session_events:
             return None
 
         source = str(source_override or doc.file_path or "")
@@ -920,16 +945,18 @@ class SWCMainWindow(QMainWindow):
             session_started=doc.session_started_at or "",
             session_ended=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             changes=list(doc.session_changes),
+            events=list(doc.session_events),
         )
         out_path = write_text_report(log_path, txt)
-        self._append_log(f"Morphology session log written: {out_path}", "INFO")
+        self._append_log(f"Session report written: {out_path}", "INFO")
         if show_popup:
             try:
-                ReportPopupDialog.open_report(self, title="Morphology Session Log", report_path=out_path)
+                ReportPopupDialog.open_report(self, title="SWC Session Report", report_path=out_path)
             except Exception as e:  # noqa: BLE001
-                self._append_log(f"Could not open morphology log popup: {e}", "WARN")
+                self._append_log(f"Could not open session report popup: {e}", "WARN")
 
         doc.session_changes = []
+        doc.session_events = []
         doc.session_seq = 0
         if doc is self._active_document():
             self._refresh_morph_edit_tab(doc)
@@ -946,12 +973,15 @@ class SWCMainWindow(QMainWindow):
         return cand
 
     def _write_closed_copy_and_log(self, doc: _DocumentState):
-        if not doc.session_changes:
+        if not doc.session_changes and not doc.session_events:
             return
-        out_swc = self._next_closed_output_path(doc)
-        self._write_swc_file(str(out_swc), doc.df)
-        self._append_log(f"Closed tab saved to: {out_swc}", "INFO")
-        self._finalize_morphology_session(doc, show_popup=False, source_override=str(out_swc))
+        if doc.session_changes:
+            out_swc = self._next_closed_output_path(doc)
+            self._write_swc_file(str(out_swc), doc.df)
+            self._append_log(f"Closed tab saved to: {out_swc}", "INFO")
+            self._finalize_morphology_session(doc, show_popup=False)
+            return
+        self._finalize_morphology_session(doc, show_popup=False)
 
     # --------------------------------------------------------- Controls per feature
     def _is_simplification_preview(self, doc: _DocumentState | None) -> bool:
@@ -995,20 +1025,17 @@ class SWCMainWindow(QMainWindow):
         }
 
     def _write_simplification_log(self, payload: dict) -> str:
-        output_path = str(payload.get("output_path", "") or "").strip()
         input_path = str(payload.get("input_path", "") or "").strip()
+        output_path = str(payload.get("output_path", "") or "").strip()
 
-        if output_path:
-            base = Path(output_path)
-        elif input_path:
-            base = Path(input_path)
+        if input_path:
+            log_path = simplification_log_path_for_file(input_path)
+        elif output_path:
+            log_path = simplification_log_path_for_file(output_path)
         else:
             base = Path.cwd() / "simplified_preview.swc"
+            log_path = simplification_log_path_for_file(base)
 
-        if not base.suffix:
-            base = base.with_suffix(".swc")
-
-        log_path = base.with_name(f"{base.stem}_simplification_log.txt")
         return write_text_report(log_path, format_simplification_report_text(payload))
 
     def _resolve_simplification_context(self) -> tuple[_DocumentState | None, _DocumentState | None, dict | None]:
@@ -1128,9 +1155,8 @@ class SWCMainWindow(QMainWindow):
         preview_doc.editor.set_mode(self._editor_mode_for_feature())
 
         payload = self._simplification_log_payload(source_doc, result, output_path=None)
-        log_path = self._write_simplification_log(payload)
         result["summary"] = payload
-        result["log_path"] = log_path
+        result["log_path"] = ""
         self._simplify_result_by_preview[preview_doc.editor] = result
 
         self._append_log(
@@ -1139,7 +1165,6 @@ class SWCMainWindow(QMainWindow):
             f"({payload.get('reduction_percent', 0.0):.2f}%).",
             "INFO",
         )
-        self._append_log(f"Smart Decimation log written: {log_path}", "INFO")
 
         self._refresh_simplification_panel_state()
         self._sync_from_active_document(auto_run_validation=False)
@@ -1184,16 +1209,29 @@ class SWCMainWindow(QMainWindow):
             result = {}
         payload = self._simplification_log_payload(source_doc, result, output_path=str(out_path))
         payload["input_path"] = input_ref
-        log_path = self._write_simplification_log(payload)
         result["summary"] = payload
-        result["log_path"] = log_path
+        result["log_path"] = ""
+
+        self._record_session_event(
+            source_doc,
+            kind="simplification",
+            title="Smart Decimation Apply",
+            summary=(
+                f"Saved simplified SWC to {out_path}; "
+                f"{payload.get('original_node_count', 0)} -> {payload.get('new_node_count', 0)} nodes"
+            ),
+            details=[
+                f"Input: {input_ref}",
+                f"Output: {out_path}",
+                f"Reduction (%): {float(payload.get('reduction_percent', 0.0)):.2f}",
+                f"Removed nodes: {len(list(payload.get('removed_node_ids', []) or []))}",
+            ],
+        )
 
         self._remove_simplification_preview(preview_doc.editor, switch_to_source=True)
         self._update_recent_files(out_path)
-        self._start_morphology_session(source_doc)
         self._sync_from_active_document(auto_run_validation=False)
         self._append_log(f"Smart Decimation applied: {out_path}", "INFO")
-        self._append_log(f"Smart Decimation log written: {log_path}", "INFO")
         self._refresh_simplification_panel_state()
 
     def _on_simplification_redo_requested(self):
@@ -1438,7 +1476,8 @@ class SWCMainWindow(QMainWindow):
             "per_file": per_file,
             "change_details": list(result.get("change_details", [])),
         }
-        log_path = out_p.with_name(f"{out_p.stem}_auto_typing_report.txt")
+        source_path = str(source_doc.file_path or "").strip()
+        log_path = auto_typing_log_path_for_file(source_path or out_p)
         return write_text_report(log_path, format_auto_typing_report_text(payload))
 
     def _on_validation_auto_label_apply_requested(self):
@@ -1467,8 +1506,25 @@ class SWCMainWindow(QMainWindow):
             return
 
         self._write_swc_file(out_path, preview_doc.df)
-        log_path = self._write_validation_auto_label_log(source_doc, result, output_path=out_path)
-        result["log_path"] = log_path
+        result["log_path"] = ""
+
+        out_counts = dict(result.get("out_type_counts", {}))
+        self._record_session_event(
+            source_doc,
+            kind="auto_label",
+            title="Validation Auto Label Apply",
+            summary=(
+                f"Saved auto-labeled SWC to {out_path}; "
+                f"type_changes={int(result.get('type_changes', 0))}"
+            ),
+            details=[
+                f"Input: {source_doc.file_path or source_doc.filename}",
+                f"Output: {out_path}",
+                f"Nodes: {int(result.get('nodes_total', 0))}",
+                f"Type changes: {int(result.get('type_changes', 0))}",
+                f"Out types (1/2/3/4): {out_counts.get(1, 0)}/{out_counts.get(2, 0)}/{out_counts.get(3, 0)}/{out_counts.get(4, 0)}",
+            ] + list(result.get("change_details", [])[:12]),
+        )
 
         source_doc.df = preview_doc.df.copy()
         source_doc.file_path = str(out_path)
@@ -1482,10 +1538,8 @@ class SWCMainWindow(QMainWindow):
 
         self._remove_validation_auto_label_preview(preview_doc.editor, switch_to_source=True)
         self._update_recent_files(out_path)
-        self._start_morphology_session(source_doc)
         self._sync_from_active_document(auto_run_validation=False)
         self._append_log(f"Validation Auto Label applied: {out_path}", "INFO")
-        self._append_log(f"Validation Auto Label log written: {log_path}", "INFO")
 
     def _on_validation_auto_label_cancel_requested(self):
         source_doc, preview_doc, _result = self._resolve_validation_auto_label_context()

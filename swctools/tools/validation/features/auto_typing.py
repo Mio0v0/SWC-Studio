@@ -19,8 +19,8 @@ def _options_from_config(cfg: dict[str, Any]) -> RuleBatchOptions:
         axon=bool(opts.get("axon", True)),
         apic=bool(opts.get("apic", False)),
         basal=bool(opts.get("basal", True)),
-        rad=bool(opts.get("rad", False)),
-        zip_output=bool(opts.get("zip_output", False)),
+        rad=False,
+        zip_output=False,
     )
 
 

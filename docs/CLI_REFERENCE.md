@@ -98,8 +98,6 @@ Flags:
 - `--axon`
 - `--apic`
 - `--basal`
-- `--rad`
-- `--zip`
 - `--config-json JSON`
 
 Example:

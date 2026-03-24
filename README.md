@@ -28,6 +28,19 @@ Core workflows currently include:
 - Dendrogram subtree type reassignment
 - Smart Decimation (RDP-based simplification)
 
+## Documentation
+
+Short docs (Markdown):
+
+- [CLI Reference](docs/CLI_REFERENCE.md): command reference and options
+- [API / Library Documentation](docs/API_DOCUMENTATION.md): Python API surface
+- [Plugin Demonstration](docs/PLUGIN_DEMONSTRATION.md): lab handoff plugin workflow
+
+Comprehensive docs site (Sphinx source):
+
+- Live docs: `https://mio0v0.github.io/SWC-Studio/`
+- includes tutorials, architecture, logs/reporting, plugin development, and auto-generated API/module references
+
 ## Install
 
 ## Prerequisites
@@ -42,8 +55,9 @@ Core workflows currently include:
 Using a virtual environment is highly recommended (venv or conda), but not required.
 You can install into a base interpreter if needed.
 
-Single top-level requirements file for full setup (core + GUI + docs):
-
+- `pip install -e ".[gui]"`: editable install for local development/testing
+- `pip install -e ".[gui,build]"`: editable install with macOS packaging tools
+- `pip install -r requirements.txt`: full top-level setup (core + GUI + docs + build)
 
 macOS/Linux (GUI + CLI):
 
@@ -86,6 +100,8 @@ CLI-only install (all OS, with venv active):
 ```bash
 python -m pip install -e .
 ```
+
+Build dependencies for packaging are defined in `pyproject.toml` under the `build` extra.
 
 ## Run
 
@@ -167,18 +183,40 @@ swctools plugins load my_lab_plugins.brainglobe_adapter
 swctools plugins list-loaded
 ```
 
-## Documentation
+## macOS Packaging
 
-Short docs (Markdown):
+Reproducible macOS GUI packaging files are tracked in:
 
-- [CLI Reference](docs/CLI_REFERENCE.md): command reference and options
-- [API / Library Documentation](docs/API_DOCUMENTATION.md): Python API surface
-- [Plugin Demonstration](docs/PLUGIN_DEMONSTRATION.md): lab handoff plugin workflow
+- `packaging/swctools_gui.spec`
+- `packaging/build_macos.sh`
+- `packaging/README.md`
 
-Comprehensive docs site (Sphinx source):
+Build from a clean macOS environment with:
 
-- Live docs: `https://mio0v0.github.io/SWC-Studio/`
-- includes tutorials, architecture, logs/reporting, plugin development, and auto-generated API/module references
+```bash
+./packaging/build_macos.sh
+```
+
+This uses the `build` extra from `pyproject.toml` and outputs:
+
+- `dist/SWC-Studio.app`
+
+Keep in git:
+
+- packaging scripts
+- packaging docs
+- `*.spec` files
+
+Do not keep in git:
+
+- `build/`
+- `dist/`
+- generated `.app`, `.dmg`, `.pkg`, and `.zip` artifacts
+
+See also:
+
+- `packaging/README.md`
+- `docs/MACOS_PACKAGING.md`
 
 
 ## Architecture (High-Level)

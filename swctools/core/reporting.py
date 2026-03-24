@@ -27,6 +27,36 @@ def _now() -> str:
     return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
 
+def _timestamp_slug() -> str:
+    return datetime.now().strftime("%Y%m%d_%H%M%S")
+
+
+def _unique_path(path: Path) -> Path:
+    if not path.exists():
+        return path
+    stem = path.stem
+    suffix = path.suffix
+    parent = path.parent
+    i = 1
+    while True:
+        candidate = parent / f"{stem}_{i}{suffix}"
+        if not candidate.exists():
+            return candidate
+        i += 1
+
+
+def log_dir_for_file(path: str | Path) -> Path:
+    p = Path(path)
+    return p.parent / f"{p.stem}_logs"
+
+
+def report_path_for_file(path: str | Path, report_tag: str, *, extension: str = ".txt") -> Path:
+    p = Path(path)
+    log_dir = log_dir_for_file(p)
+    base = log_dir / f"{p.stem}_{report_tag}_{_timestamp_slug()}{extension}"
+    return _unique_path(base)
+
+
 def write_text_report(path: str | Path, text: str) -> str:
     p = Path(path)
     p.parent.mkdir(parents=True, exist_ok=True)
@@ -35,13 +65,23 @@ def write_text_report(path: str | Path, text: str) -> str:
 
 
 def validation_log_path_for_file(path: str | Path) -> Path:
-    p = Path(path)
-    return p.with_name(f"{p.stem}_validation_report.txt")
+    return report_path_for_file(path, "validation_report")
 
 
 def morphology_session_log_path(path: str | Path) -> Path:
-    p = Path(path)
-    return p.with_name(f"{p.stem}_morphology_session_log.txt")
+    return report_path_for_file(path, "morphology_session_log")
+
+
+def simplification_log_path_for_file(path: str | Path) -> Path:
+    return report_path_for_file(path, "simplification_log")
+
+
+def auto_typing_log_path_for_file(path: str | Path) -> Path:
+    return report_path_for_file(path, "auto_typing_report")
+
+
+def radii_cleaning_log_path_for_file(path: str | Path) -> Path:
+    return report_path_for_file(path, "radii_cleaning_report")
 
 
 def format_validation_precheck_text(report: dict[str, Any]) -> str:
@@ -313,20 +353,40 @@ def format_morphology_session_log_text(
     session_started: str,
     session_ended: str,
     changes: list[dict[str, Any]],
+    events: list[dict[str, Any]] | None = None,
 ) -> str:
+    events = list(events or [])
     lines: list[str] = []
-    lines.append("Morphology Editing Session Log")
-    lines.append("------------------------------")
+    lines.append("SWC Session Report")
+    lines.append("------------------")
     lines.append(f"Source file: {source_file}")
     lines.append(f"Session started: {session_started}")
     lines.append(f"Session ended: {session_ended}")
-    lines.append(f"Total type changes: {len(changes)}")
+    lines.append(f"Total morphology type changes: {len(changes)}")
+    lines.append(f"Total processing events: {len(events)}")
+
+    if events:
+        lines.append("")
+        lines.append("Processing Events")
+        lines.append("-----------------")
+        for event in events:
+            lines.append(f"* [{event.get('time', '')}] {event.get('title', event.get('kind', 'event'))}")
+            summary = str(event.get('summary', '')).strip()
+            if summary:
+                lines.append(f"  summary: {summary}")
+            for detail in list(event.get('details', []) or []):
+                lines.append(f"  - {detail}")
+
     lines.append("")
-    lines.append("Changes:")
-    lines.append("Seq\tTime\tNodeID\tOldType\tNewType")
-    for row in changes:
-        lines.append(
-            f"{row.get('seq', '')}\t{row.get('time', '')}\t{row.get('node_id', '')}\t"
-            f"{row.get('old_type', '')}\t{row.get('new_type', '')}"
-        )
+    lines.append("Morphology Type Changes")
+    lines.append("-----------------------")
+    if changes:
+        lines.append("Seq\tTime\tNodeID\tOldType\tNewType")
+        for row in changes:
+            lines.append(
+                f"{row.get('seq', '')}\t{row.get('time', '')}\t{row.get('node_id', '')}\t"
+                f"{row.get('old_type', '')}\t{row.get('new_type', '')}"
+            )
+    else:
+        lines.append("No direct node-type edits were recorded.")
     return "\n".join(lines).rstrip() + "\n"

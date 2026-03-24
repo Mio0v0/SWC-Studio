@@ -37,7 +37,11 @@ build/
 dist/
 *.egg-info/
 pip-wheel-metadata/
-*.spec
+*.app
+*.dmg
+*.pkg
+SWC-Studio-*.zip
+.venv-packaging-macos/
 
 # ----------------------------
 # Sphinx docs build

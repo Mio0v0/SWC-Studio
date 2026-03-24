@@ -278,8 +278,6 @@ def build_parser() -> argparse.ArgumentParser:
     batch_auto.add_argument("--axon", action="store_true", default=False)
     batch_auto.add_argument("--apic", action="store_true", default=False)
     batch_auto.add_argument("--basal", action="store_true", default=False)
-    batch_auto.add_argument("--rad", action="store_true", default=False)
-    batch_auto.add_argument("--zip", action="store_true", default=False)
     _feature_json_arg(batch_auto)
 
     batch_radii = batch_sub.add_parser("radii-clean", help="Radii cleaning on a file or folder")
@@ -451,7 +449,7 @@ def main(argv: list[str] | None = None) -> int:
             _print_auto_typing_guide()
             has_explicit_flags = any(
                 bool(v)
-                for v in (args.soma, args.axon, args.apic, args.basal, args.rad, args.zip)
+                for v in (args.soma, args.axon, args.apic, args.basal)
             )
             opts = (
                 RuleBatchOptions(
@@ -459,8 +457,8 @@ def main(argv: list[str] | None = None) -> int:
                     axon=bool(args.axon),
                     apic=bool(args.apic),
                     basal=bool(args.basal),
-                    rad=bool(args.rad),
-                    zip_output=bool(args.zip),
+                    rad=False,
+                    zip_output=False,
                 )
                 if has_explicit_flags
                 else None

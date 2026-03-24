@@ -151,12 +151,12 @@ class ValidationTabWidget(QWidget):
         title.setStyleSheet("font-size: 14px; font-weight: 600; color: #333;")
         header.addWidget(title)
         header.addStretch()
-        self._btn_show_precheck = QPushButton("Show Rule Guide")
-        self._btn_show_precheck.clicked.connect(self.precheck_requested.emit)
-        header.addWidget(self._btn_show_precheck)
-        self._btn_run = QPushButton("Run Validation")
+        self._btn_run = QPushButton("Run")
         self._btn_run.clicked.connect(self.run_validation)
         header.addWidget(self._btn_run)
+        self._btn_show_precheck = QPushButton("Rule Guide")
+        self._btn_show_precheck.clicked.connect(self.precheck_requested.emit)
+        header.addWidget(self._btn_show_precheck)
         results_root.addLayout(header)
 
         self._alert_banner = QLabel("")
@@ -236,7 +236,7 @@ class ValidationTabWidget(QWidget):
         self._tabs.addTab(self._build_config_page(), "Config JSON")
         self._tabs.currentChanged.connect(self._on_tab_changed)
 
-        self._clear_results_ui("Load an SWC and click Run Validation.")
+        self._clear_results_ui("Load an SWC and click Run.")
         self._load_validation_config_json()
 
     def _build_config_page(self) -> QWidget:
@@ -316,7 +316,7 @@ class ValidationTabWidget(QWidget):
 
         self._btn_export_json.setEnabled(False)
         self._btn_download_report.setEnabled(False)
-        self._clear_results_ui("Load complete. Click Run Validation to compute results.")
+        self._clear_results_ui("Load complete. Click Run to compute results.")
         if auto_run:
             self.run_validation()
 

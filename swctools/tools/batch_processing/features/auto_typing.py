@@ -21,8 +21,6 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "axon": True,
         "apic": False,
         "basal": True,
-        "rad": False,
-        "zip_output": False,
     },
     "rules": {
         "class_labels": {"1": "soma", "2": "axon", "3": "basal", "4": "apical"},
@@ -72,8 +70,8 @@ def _options_from_config(cfg: dict[str, Any]) -> RuleBatchOptions:
         axon=bool(opts.get("axon", True)),
         apic=bool(opts.get("apic", False)),
         basal=bool(opts.get("basal", True)),
-        rad=bool(opts.get("rad", False)),
-        zip_output=bool(opts.get("zip_output", False)),
+        rad=False,
+        zip_output=False,
     )
 
 

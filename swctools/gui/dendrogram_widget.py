@@ -36,17 +36,18 @@ class TypeChangeCommand(QUndoCommand):
         self._old_types = old_types
         self._new_type = new_type
 
-    def redo(self):
+    def _apply_types(self, values: list[int]) -> None:
         df = self._widget._df
-        for idx in self._indices:
-            df.at[idx, "type"] = self._new_type
+        for idx, value in zip(self._indices, values):
+            df.at[idx, "type"] = value
         self._widget._rebuild_and_draw()
+        self._widget._emit_df_changed()
+
+    def redo(self):
+        self._apply_types([self._new_type] * len(self._indices))
 
     def undo(self):
-        df = self._widget._df
-        for idx, old_t in zip(self._indices, self._old_types):
-            df.at[idx, "type"] = old_t
-        self._widget._rebuild_and_draw()
+        self._apply_types(self._old_types)
 
 
 # --------------------------------------------------------- Speech-bubble tooltip
@@ -311,6 +312,10 @@ class DendrogramWidget(QWidget):
         self._level_val = None
         self._btn_dl_swc.setEnabled(True)
         self._rebuild_and_draw()
+
+    def _emit_df_changed(self):
+        if self._df is not None:
+            self.df_changed.emit(self._df.copy())
 
     # ------------------------------------------------- Core rendering
     def _rebuild_and_draw(self):
@@ -613,7 +618,6 @@ class DendrogramWidget(QWidget):
             f"✓ Changed {len(df_indices)} node(s) to {label_for_type(new_type)}"
         )
         self._apply_msg.setStyleSheet("font-size: 11px; color: #2ca02c;")
-        self.df_changed.emit(self._df)
 
     def _get_subtree_indices(self, root_idx: int) -> list:
         """BFS from root_idx to collect all descendants (tree-array indices)."""

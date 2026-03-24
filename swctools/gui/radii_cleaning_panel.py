@@ -112,8 +112,9 @@ class RadiiCleaningPanel(QWidget):
 
     log_message = Signal(str)
 
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, *, allow_loaded_swc_run: bool = True):
         super().__init__(parent)
+        self._allow_loaded_swc_run = bool(allow_loaded_swc_run)
         self._cfg_dialog: _RadiiConfigDialog | None = None
         self._latest_stats: dict = {}
         self._latest_stats_path: str = ""
@@ -127,10 +128,13 @@ class RadiiCleaningPanel(QWidget):
         root.setContentsMargins(8, 8, 8, 8)
         root.setSpacing(8)
 
-        desc = QLabel(
+        desc_text = (
             "Radii cleaning is JSON-config driven.\n"
             "Edit `radii_cleaning.json`, then run on loaded SWC or folder."
+            if self._allow_loaded_swc_run
+            else "Radii cleaning is JSON-config driven.\nEdit `radii_cleaning.json`, then run on a folder."
         )
+        desc = QLabel(desc_text)
         desc.setWordWrap(True)
         desc.setStyleSheet("font-size: 12px; color: #555;")
         root.addWidget(desc)
@@ -147,19 +151,20 @@ class RadiiCleaningPanel(QWidget):
         root.addLayout(mode_row)
 
         row = QHBoxLayout()
-        b_run_loaded = QPushButton("Run on Loaded SWC")
-        b_run_loaded.clicked.connect(self._on_run_loaded)
-        row.addWidget(b_run_loaded)
+        if self._allow_loaded_swc_run:
+            b_run_loaded = QPushButton("Run")
+            b_run_loaded.clicked.connect(self._on_run_loaded)
+            row.addWidget(b_run_loaded)
 
-        b_folder = QPushButton("Run on Folder…")
+        b_folder = QPushButton("Run" if not self._allow_loaded_swc_run else "Run Folder…")
         b_folder.clicked.connect(self._on_run_folder)
         row.addWidget(b_folder)
 
-        b_cfg = QPushButton("Edit Radii JSON…")
+        b_cfg = QPushButton("Show JSON")
         b_cfg.clicked.connect(self._on_edit_cfg)
         row.addWidget(b_cfg)
 
-        b_stats = QPushButton("Refresh Histogram/Stats (Loaded SWC)")
+        b_stats = QPushButton("Refresh Stats")
         b_stats.clicked.connect(self._refresh_stats_from_loaded_swc)
         row.addWidget(b_stats)
 

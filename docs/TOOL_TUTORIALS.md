@@ -82,7 +82,6 @@ Behavior:
 
 - prints auto-typing rule guide before run
 - writes outputs into `<folder>/<folder>_auto_typing`
-- optional zip if `--zip` enabled
 - writes `auto_typing_report.txt`
 
 ### D. Batch Radii Cleaning

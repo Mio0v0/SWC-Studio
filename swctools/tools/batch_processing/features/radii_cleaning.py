@@ -15,7 +15,11 @@ import pandas as pd
 
 from swctools.core.config import load_feature_config, merge_config
 from swctools.core.radii_cleaning import clean_radii_dataframe
-from swctools.core.reporting import format_radii_cleaning_report_text, write_text_report
+from swctools.core.reporting import (
+    format_radii_cleaning_report_text,
+    radii_cleaning_log_path_for_file,
+    write_text_report,
+)
 from swctools.core.swc_io import parse_swc_text_preserve_tokens, write_swc_to_bytes_preserve_tokens
 from swctools.plugins.registry import register_builtin_method, resolve_method
 
@@ -186,8 +190,7 @@ def clean_file(
         "config_used": cfg,
     }
 
-    report_base = output_path if output_path is not None else in_path
-    report_path = report_base.with_name(f"{report_base.stem}_radii_cleaning_report.txt")
+    report_path = radii_cleaning_log_path_for_file(in_path)
     report["log_path"] = write_text_report(report_path, format_radii_cleaning_report_text(report))
     return report
 
