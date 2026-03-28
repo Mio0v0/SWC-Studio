@@ -1,4 +1,4 @@
-"""Main window layout for SWC-QT with unified menu + tools/features top bar."""
+"""Main window layout for the issue-driven SWC Studio workspace."""
 
 import os
 import tempfile
@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 
 from PySide6.QtCore import QEvent, Qt, Signal
@@ -14,6 +15,7 @@ from PySide6.QtWidgets import (
     QApplication,
     QComboBox,
     QDockWidget,
+    QDialog,
     QFrame,
     QGroupBox,
     QFileDialog,
@@ -23,6 +25,7 @@ from PySide6.QtWidgets import (
     QMenuBar,
     QPlainTextEdit,
     QPushButton,
+    QMessageBox,
     QScrollArea,
     QSizePolicy,
     QStackedWidget,
@@ -34,8 +37,12 @@ from PySide6.QtWidgets import (
 
 from .auto_typing_guide import AutoTypingGuideWidget
 from .batch_tab import BatchTabWidget
-from .constants import SWC_COLS
+from .constants import SWC_COLS, label_for_type
+from .context_inspector import ContextInspectorWidget
+from .custom_type_dialog import DefineCustomTypesDialog
 from .editor_tab import EditorTab
+from .issue_panel import IssuePanelWidget
+from .manual_radii_panel import ManualRadiiPanel
 from .neuron_3d_widget import Neuron3DWidget
 from .report_popup import ReportPopupDialog
 from .radii_cleaning_panel import RadiiCleaningPanel
@@ -43,8 +50,18 @@ from .simplification_panel import SimplificationPanel
 from .swc_table_widget import SWCTableWidget
 from .validation_auto_label_panel import ValidationAutoLabelPanel
 from .validation_tab import ValidationPrecheckWidget, ValidationTabWidget
+from swctools.core.issues import (
+    issues_from_radii_suspicion,
+    issues_from_type_suspicion,
+    issues_from_validation_report,
+    validation_prerequisite_summary,
+)
+from swctools.core.custom_types import save_custom_type_definitions
+from swctools.core.radii_cleaning import radii_stats_by_type
 from swctools.core.reporting import (
     auto_typing_log_path_for_file,
+    correction_summary_log_path_for_file,
+    format_correction_summary_report_text,
     format_auto_typing_report_text,
     format_morphology_session_log_text,
     format_simplification_report_text,
@@ -52,8 +69,12 @@ from swctools.core.reporting import (
     simplification_log_path_for_file,
     write_text_report,
 )
+from swctools.core.validation_engine import consolidate_complex_somas_array
 from swctools.tools.morphology_editing.features.simplification import simplify_dataframe
-from swctools.tools.validation.features.auto_typing import run_file as run_validation_auto_typing_file
+from swctools.tools.validation.features.auto_typing import (
+    RuleBatchOptions,
+    run_file as run_validation_auto_typing_file,
+)
 
 
 @dataclass
@@ -65,6 +86,7 @@ class _DocumentState:
     df: pd.DataFrame
     filename: str
     file_path: str
+    original_df: pd.DataFrame | None = None
     session_started_at: str = ""
     session_changes: list[dict] = field(default_factory=list)
     session_events: list[dict] = field(default_factory=list)
@@ -72,6 +94,19 @@ class _DocumentState:
     is_preview: bool = False
     source_editor: EditorTab | None = None
     preview_kind: str = ""
+    validation_report: dict | None = None
+    issues: list[dict] = field(default_factory=list)
+    issue_status_overrides: dict[str, str] = field(default_factory=dict)
+    fixed_issue_count: int = 0
+    pending_resolved_issue_ids: set[str] = field(default_factory=set)
+    selected_issue_id: str = ""
+    recovery_path: str = ""
+    history_snapshots: list[pd.DataFrame] = field(default_factory=list)
+    history_index: int = -1
+    last_auto_label_result: dict | None = None
+    last_auto_label_options: dict | None = None
+    auto_label_preview_df: pd.DataFrame | None = None
+    auto_label_preview_base_df: pd.DataFrame | None = None
 
 
 class _CanvasTabs(QTabWidget):
@@ -134,13 +169,13 @@ class _DetachedEditorWindow(QMainWindow):
 
 
 class SWCMainWindow(QMainWindow):
-    """Top-level app window with tabbed top bar, workspace, side panels, and log."""
+    """Top-level app window with tabbed top bar, workspace, side panels, and edit log."""
 
     swc_loaded = Signal(pd.DataFrame, str)
 
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("SWC-QT — Neuron Editor")
+        self.setWindowTitle("SWC Studio")
         self.resize(1480, 920)
         self.setAcceptDrops(False)
 
@@ -152,6 +187,7 @@ class SWCMainWindow(QMainWindow):
         self._documents: dict[EditorTab, _DocumentState] = {}
         self._detached_windows: dict[EditorTab, _DetachedEditorWindow] = {}
         self._control_wrappers: dict[int, QScrollArea] = {}
+        self._floating_control_dialogs: dict[str, QDialog] = {}
         self._simplify_preview_by_source: dict[EditorTab, EditorTab] = {}
         self._simplify_source_by_preview: dict[EditorTab, EditorTab] = {}
         self._simplify_result_by_preview: dict[EditorTab, dict] = {}
@@ -160,6 +196,7 @@ class SWCMainWindow(QMainWindow):
         self._auto_label_result_by_preview: dict[EditorTab, dict] = {}
         self._batch_has_results: bool = False
         self._closing_app: bool = False
+        self._runtime_log_lines: list[str] = []
 
         self._build_ui()
         self._build_status_bar()
@@ -174,7 +211,7 @@ class SWCMainWindow(QMainWindow):
 
         # ---------------- Center workspace ----------------
         self._canvas_empty = QWidget()
-        self._canvas_empty.setStyleSheet("background: #000;")
+        self._canvas_empty.setStyleSheet("background: #e9eef5; border-radius: 18px;")
 
         self._canvas_tabs = _CanvasTabs()
         self._canvas_tabs.currentChanged.connect(self._on_document_tab_changed)
@@ -189,11 +226,15 @@ class SWCMainWindow(QMainWindow):
         self._canvas_stack.addWidget(self._canvas_tabs)
         self._canvas_stack.addWidget(self._batch_canvas)
 
-        # ---------------- Right side: dockable Data Explorer + Control Center ----------------
+        # ---------------- Side docks: issue navigation + contextual inspector ----------------
         self._data_tabs = QTabWidget()
         self._data_tabs.setMinimumWidth(0)
         self._data_tabs.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Expanding)
         self._data_tabs.tabBar().setUsesScrollButtons(False)
+        self._issue_panel = IssuePanelWidget()
+        self._issue_panel.issue_selected.connect(self._on_issue_selected)
+        self._issue_panel.rule_guide_requested.connect(self._on_precheck_requested)
+        self._issue_panel.export_swc_requested.connect(self._on_issue_panel_export_swc_requested)
         self._table_widget = SWCTableWidget()
         self._table_widget.setMinimumWidth(0)
         self._table_widget.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Expanding)
@@ -201,11 +242,12 @@ class SWCMainWindow(QMainWindow):
         self._info_label = QLabel("No SWC file loaded.")
         self._info_label.setWordWrap(True)
         self._info_label.setStyleSheet("font-size: 13px; color: #444; padding: 8px;")
-        info_panel = QWidget()
-        info_layout = QVBoxLayout(info_panel)
-        info_layout.setContentsMargins(6, 6, 6, 6)
-        info_layout.addWidget(self._info_label)
-        info_layout.addStretch()
+        file_panel = QWidget()
+        file_layout = QVBoxLayout(file_panel)
+        file_layout.setContentsMargins(6, 6, 6, 6)
+        file_layout.setSpacing(8)
+        file_layout.addWidget(self._info_label, stretch=0)
+        file_layout.addWidget(self._table_widget, stretch=1)
 
         self._segment_label = QLabel(
             "Segment Info\n\nLoad an SWC file and select nodes in dendrogram mode."
@@ -228,11 +270,9 @@ class SWCMainWindow(QMainWindow):
         )
         self._edit_log_text.setPlainText("No morphology edits recorded for this session yet.")
 
-        self._data_tabs.addTab(self._table_widget, "SWC File")
-        self._data_tabs.addTab(info_panel, "Node Info")
+        self._data_tabs.addTab(self._issue_panel, "Issues")
+        self._data_tabs.addTab(file_panel, "SWC File")
         self._data_tabs.addTab(seg_panel, "Segment Info")
-        self._data_tabs.addTab(self._edit_log_text, "Edit Log")
-
         self._control_tabs = QTabWidget()
         self._control_tabs.setMinimumWidth(0)
         self._control_tabs.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Expanding)
@@ -242,6 +282,7 @@ class SWCMainWindow(QMainWindow):
         self._batch_tab.precheck_requested.connect(self._on_precheck_requested)
         self._validation_tab = ValidationTabWidget(as_panel=False)
         self._validation_tab.precheck_requested.connect(self._on_precheck_requested)
+        self._validation_tab.report_ready.connect(self._on_validation_report_ready)
         self._validation_auto_label_panel = ValidationAutoLabelPanel(self)
         self._validation_auto_label_panel.guide_requested.connect(self._show_auto_typing_guide_floating)
         self._validation_auto_label_panel.log_message.connect(lambda msg: self._append_log(msg, "AUTO"))
@@ -256,19 +297,32 @@ class SWCMainWindow(QMainWindow):
         )
         self._validation_radii_panel = RadiiCleaningPanel(self)
         self._validation_radii_panel.log_message.connect(lambda msg: self._append_log(msg, "RADII"))
+        self._manual_radii_panel = ManualRadiiPanel(self)
+        self._manual_radii_panel.apply_requested.connect(self._on_manual_radii_apply_requested)
         self._validation_precheck = ValidationPrecheckWidget()
         self._auto_typing_guide = AutoTypingGuideWidget()
         self._simplification_panel = SimplificationPanel(self)
         self._simplification_panel.log_message.connect(lambda msg: self._append_log(msg, "SIMPLIFY"))
         self._simplification_panel.process_requested.connect(self._on_simplification_process_requested)
         self._simplification_panel.apply_requested.connect(self._on_simplification_apply_requested)
-        self._simplification_panel.redo_requested.connect(self._on_simplification_redo_requested)
         self._simplification_panel.cancel_requested.connect(self._on_simplification_cancel_requested)
         self._viz_control = self._build_visualization_control_panel()
         self._control_tabs.currentChanged.connect(self._on_control_tab_changed)
         self._set_control_tabs_for_feature("")
+        self._context_inspector = ContextInspectorWidget(self)
+        self._context_inspector.apply_suggested_fix_requested.connect(self._on_apply_suggested_fix_requested)
+        self._context_inspector.open_tool_requested.connect(self._on_context_open_tool_requested)
+        self._context_inspector.skip_issue_requested.connect(self._on_skip_issue_requested)
+        self._context_inspector.custom_action_requested.connect(self._on_context_custom_action_requested)
+        self._inspector_host = QWidget()
+        self._inspector_layout = QVBoxLayout(self._inspector_host)
+        self._inspector_layout.setContentsMargins(0, 0, 0, 0)
+        self._inspector_layout.setSpacing(10)
+        self._inspector_layout.setAlignment(Qt.AlignTop)
+        self._inspector_layout.addWidget(self._context_inspector, stretch=0)
+        self._inspector_layout.addWidget(self._control_tabs, stretch=1)
 
-        self._data_dock = QDockWidget("Data Explorer", self)
+        self._data_dock = QDockWidget("Issue Navigator", self)
         self._data_dock.setObjectName("DataExplorerDock")
         self._data_dock.setFeatures(
             QDockWidget.DockWidgetMovable
@@ -280,7 +334,7 @@ class SWCMainWindow(QMainWindow):
         self._data_dock.setWidget(self._data_tabs)
         self.addDockWidget(Qt.LeftDockWidgetArea, self._data_dock)
 
-        self._control_dock = QDockWidget("Control Center", self)
+        self._control_dock = QDockWidget("Inspector", self)
         self._control_dock.setObjectName("ControlCenterDock")
         self._control_dock.setFeatures(
             QDockWidget.DockWidgetMovable
@@ -289,7 +343,7 @@ class SWCMainWindow(QMainWindow):
         )
         self._control_dock.setAllowedAreas(Qt.LeftDockWidgetArea | Qt.RightDockWidgetArea)
         self._control_dock.setMinimumWidth(24)
-        self._control_dock.setWidget(self._control_tabs)
+        self._control_dock.setWidget(self._inspector_host)
         self.addDockWidget(Qt.RightDockWidgetArea, self._control_dock)
 
         self._precheck_dock = QDockWidget("Rule Guide", self)
@@ -320,18 +374,13 @@ class SWCMainWindow(QMainWindow):
         self.addDockWidget(Qt.TopDockWidgetArea, self._auto_guide_dock)
         self._auto_guide_dock.hide()
 
-        # ---------------- Bottom log ----------------
-        self._log_console = QPlainTextEdit()
-        self._log_console.setReadOnly(True)
-        self._log_console.setMinimumHeight(110)
-        self._log_console.setMaximumHeight(240)
-        self._log_console.setStyleSheet(
-            "QPlainTextEdit {"
-            "  background: #111; border: 1px solid #333; color: #f1f1f1;"
-            "  font-family: Menlo, Consolas, monospace; font-size: 12px;"
-            "}"
-        )
         self._batch_tab.log_message.connect(lambda msg: self._append_log(msg, "BATCH"))
+
+        # ---------------- Bottom edit log ----------------
+        self._bottom_log_title = QLabel("Edit Log")
+        self._bottom_log_title.setStyleSheet("font-size: 13px; font-weight: 700; color: #132238; padding: 0 2px;")
+        self._edit_log_text.setMinimumHeight(110)
+        self._edit_log_text.setMaximumHeight(240)
 
         # ---------------- Root layout ----------------
         central = QWidget()
@@ -340,32 +389,26 @@ class SWCMainWindow(QMainWindow):
         root.setSpacing(6)
         root.addWidget(self._top_bar, stretch=0)
         root.addWidget(self._canvas_stack, stretch=1)
-        root.addWidget(self._log_console, stretch=0)
+        root.addWidget(self._bottom_log_title, stretch=0)
+        root.addWidget(self._edit_log_text, stretch=0)
         self.setCentralWidget(central)
-        # Make the dock/canvas boundary easier to grab and resize.
-        self.setStyleSheet(
-            "QMainWindow::separator {"
-            "  background: #bdbdbd;"
-            "  width: 8px;"
-            "  height: 8px;"
-            "}"
-        )
+        self._apply_modern_theme()
 
         self._refresh_canvas_surface()
         self._reset_layout()
         self._append_log("UI initialized. Open SWC files from File menu.", "INFO")
 
     def _build_top_bar(self) -> QWidget:
-        top_bg = "#f2f2f2"
-        top_fg = "#222222"
-        top_border = "#c7c7c7"
-        top_hover = "#e9e9e9"
+        top_bg = "#f7f9fc"
+        top_fg = "#132238"
+        top_border = "#d8e0eb"
+        top_hover = "#edf3fb"
 
         panel = QFrame()
         panel.setFrameShape(QFrame.StyledPanel)
         panel.setStyleSheet(
             "QFrame {"
-            f"  background: {top_bg}; border: 1px solid {top_border};"
+            f"  background: {top_bg}; border: 1px solid {top_border}; border-radius: 18px;"
             "}"
         )
 
@@ -380,7 +423,7 @@ class SWCMainWindow(QMainWindow):
             f"  background: {top_bg}; border-bottom: 1px solid {top_border}; color: {top_fg};"
             "}"
             "QMenuBar::item {"
-            "  padding: 6px 12px; background: transparent;"
+            "  padding: 8px 12px; background: transparent; border-radius: 8px;"
             "}"
             "QMenuBar::item:selected {"
             f"  background: {top_hover};"
@@ -400,27 +443,27 @@ class SWCMainWindow(QMainWindow):
 
         group = QGroupBox("Tools")
         group.setStyleSheet(
-            "QGroupBox { border: 1px solid #d0d0d0; margin-top: 6px; }"
-            "QGroupBox::title { subcontrol-origin: margin; left: 8px; padding: 0 4px; color: #444; }"
+            "QGroupBox { border: 1px solid #d8e0eb; margin-top: 8px; border-radius: 14px; }"
+            "QGroupBox::title { subcontrol-origin: margin; left: 10px; padding: 0 6px; color: #5f6b7a; }"
             "QPushButton#toolMenuItem {"
-            "  background: transparent; color: #222; border: none;"
-            "  padding: 6px 12px; text-align: left;"
+            "  background: transparent; color: #132238; border: none;"
+            "  padding: 8px 12px; text-align: left; border-radius: 10px;"
             "}"
             "QPushButton#toolMenuItem:hover {"
-            "  background: #e9e9e9; border-radius: 3px;"
+            "  background: #edf3fb;"
             "}"
             "QPushButton#toolMenuItem:checked {"
-            "  background: #d7e8f8; border: 1px solid #7ea8cf; border-radius: 3px; font-weight: 700;"
+            "  background: #d9e8fb; border: 1px solid #84aee8; font-weight: 700;"
             "}"
             "QPushButton#featureBtn {"
             f"  background: {top_bg}; color: {top_fg}; border: 1px solid {top_border};"
-            "  border-radius: 4px; padding: 6px 10px;"
+            "  border-radius: 10px; padding: 8px 12px;"
             "}"
             "QPushButton#featureBtn:hover {"
             f"  background: {top_hover};"
             "}"
             "QPushButton#featureBtn:checked {"
-            "  background: #d7e8f8; border: 1px solid #7ea8cf; font-weight: 700;"
+            "  background: #d9e8fb; border: 1px solid #84aee8; font-weight: 700;"
             "}"
         )
         group_layout = QVBoxLayout(group)
@@ -539,9 +582,9 @@ class SWCMainWindow(QMainWindow):
 
         # View
         view_menu = menu.addMenu("View")
-        show_log_action = QAction("Show/Hide Log", self)
+        show_log_action = QAction("Show/Hide Edit Log", self)
         show_log_action.triggered.connect(
-            lambda: self._toggle_log_panel(not self._log_console.isVisible())
+            lambda: self._toggle_log_panel(not self._edit_log_text.isVisible())
         )
         view_menu.addAction(show_log_action)
 
@@ -565,13 +608,13 @@ class SWCMainWindow(QMainWindow):
         reset_layout_action.triggered.connect(self._reset_layout)
         window_menu.addAction(reset_layout_action)
 
-        show_data_action = QAction("Show/Hide Data Explorer", self)
+        show_data_action = QAction("Show/Hide Issue Navigator", self)
         show_data_action.triggered.connect(
             lambda: self._toggle_data_panel(not self._data_dock.isVisible())
         )
         window_menu.addAction(show_data_action)
 
-        show_control_action = QAction("Show/Hide Control Center", self)
+        show_control_action = QAction("Show/Hide Inspector", self)
         show_control_action.triggered.connect(
             lambda: self._toggle_control_panel(not self._control_dock.isVisible())
         )
@@ -599,7 +642,7 @@ class SWCMainWindow(QMainWindow):
         help_menu.addAction(short_action)
         about_action = QAction("About", self)
         about_action.triggered.connect(
-            lambda: self._append_log("SWC-QT — neuron visualization and editing workspace.", "INFO")
+            lambda: self._append_log("SWC Studio - issue-driven neuron reconstruction workspace.", "INFO")
         )
         help_menu.addAction(about_action)
 
@@ -651,7 +694,81 @@ class SWCMainWindow(QMainWindow):
     def _build_status_bar(self):
         self._status = QStatusBar()
         self.setStatusBar(self._status)
-        self._status.showMessage("Ready — open an SWC file to start.")
+        self._issue_status_label = QLabel("Issues: 0")
+        self._issue_status_label.setStyleSheet("font-size: 12px; color: #5f6b7a; padding-right: 8px;")
+        self._status.addPermanentWidget(self._issue_status_label)
+        self._status.showMessage("Ready - open an SWC file to start.")
+
+    def _apply_modern_theme(self):
+        self.setStyleSheet(
+            """
+            QMainWindow {
+              background: #f4f7fb;
+            }
+            QMainWindow::separator {
+              background: #d8e0eb;
+              width: 8px;
+              height: 8px;
+            }
+            QDockWidget {
+              font-size: 13px;
+              color: #132238;
+            }
+            QDockWidget::title {
+              background: #eef3f9;
+              color: #132238;
+              text-align: left;
+              padding: 10px 12px;
+              border: 1px solid #d8e0eb;
+              border-bottom: none;
+            }
+            QTabWidget::pane, QScrollArea, QPlainTextEdit, QTreeWidget, QTableWidget {
+              background: #ffffff;
+              border: 1px solid #d8e0eb;
+              border-radius: 12px;
+            }
+            QTabBar::tab {
+              background: #eef3f9;
+              color: #415062;
+              border: 1px solid #d8e0eb;
+              padding: 8px 12px;
+              margin-right: 4px;
+              border-top-left-radius: 10px;
+              border-top-right-radius: 10px;
+            }
+            QTabBar::tab:selected {
+              background: #ffffff;
+              color: #132238;
+            }
+            QPushButton {
+              background: #ffffff;
+              color: #132238;
+              border: 1px solid #cfd9e6;
+              border-radius: 10px;
+              padding: 7px 12px;
+            }
+            QPushButton:hover {
+              background: #f4f7fb;
+            }
+            QPushButton:checked {
+              background: #d9e8fb;
+              border-color: #84aee8;
+            }
+            QLineEdit, QComboBox, QDoubleSpinBox {
+              background: #ffffff;
+              border: 1px solid #cfd9e6;
+              border-radius: 10px;
+              padding: 6px 10px;
+            }
+            QLabel {
+              color: #132238;
+            }
+            QStatusBar {
+              background: #eef3f9;
+              border-top: 1px solid #d8e0eb;
+            }
+            """
+        )
 
     def _clear_feature_row(self):
         while self._feature_row.count() > 0:
@@ -664,10 +781,10 @@ class SWCMainWindow(QMainWindow):
         key = str(tool_key if tool_key is not None else (self._active_tool or "")).strip().lower()
         mapping = {
             "batch": ["Split", "Validation", "Auto Label", "Radii Cleaning"],
-            "validation": ["Validation", "Auto Label", "Radii Cleaning"],
+            "validation": ["Validation"],
             "visualization": ["View Controls"],
-            "morphology_editing": ["Label Editing", "Simplification"],
-            "dendrogram": ["Label Editing", "Simplification"],
+            "morphology_editing": ["Label Editing", "Auto Label", "Manual Radii Editing", "Auto Radii Editing", "Simplification"],
+            "dendrogram": ["Label Editing", "Auto Label", "Manual Radii Editing", "Auto Radii Editing", "Simplification"],
             "atlas_registration": ["Registration"],
             "analysis": ["Summary"],
         }
@@ -732,6 +849,7 @@ class SWCMainWindow(QMainWindow):
         for i in range(self._control_tabs.count()):
             if (self._control_tabs.tabText(i) or "").strip().lower() == target:
                 self._control_tabs.setCurrentIndex(i)
+                self._control_tabs.setVisible(self._control_tabs.count() > 0)
                 return
 
         if self._active_tool in ("morphology_editing", "dendrogram") and self._active_document() is None:
@@ -762,6 +880,47 @@ class SWCMainWindow(QMainWindow):
         self._control_wrappers[key] = area
         return area
 
+    def _detach_control_wrapper(self, wrapper: QWidget) -> None:
+        for i in range(self._control_tabs.count()):
+            if self._control_tabs.widget(i) is wrapper:
+                self._control_tabs.removeTab(i)
+                break
+        wrapper.setParent(None)
+
+    def _show_floating_control_dialog(self, dialog_key: str, title: str, inner: QWidget, *, width: int = 520, height: int = 720) -> None:
+        existing = self._floating_control_dialogs.get(dialog_key)
+        if existing is not None:
+            existing.show()
+            existing.raise_()
+            existing.activateWindow()
+            return
+
+        wrapper = self._wrap_control_widget(inner)
+        self._detach_control_wrapper(wrapper)
+
+        dialog = QDialog(self)
+        dialog.setWindowTitle(title)
+        dialog.resize(width, height)
+        layout = QVBoxLayout(dialog)
+        layout.setContentsMargins(8, 8, 8, 8)
+        layout.addWidget(wrapper)
+
+        def _restore() -> None:
+            wrapper.setParent(None)
+            self._floating_control_dialogs.pop(dialog_key, None)
+            if self._active_document() is not None:
+                if self._active_tool in ("morphology_editing", "dendrogram"):
+                    self._set_control_tabs_for_feature("morphology_editing")
+                elif self._active_tool:
+                    self._set_control_tabs_for_feature(self._active_tool)
+            dialog.deleteLater()
+
+        dialog.finished.connect(lambda _result=0: _restore())
+        self._floating_control_dialogs[dialog_key] = dialog
+        dialog.show()
+        dialog.raise_()
+        dialog.activateWindow()
+
     # --------------------------------------------------------- Document helpers
     def _active_editor(self) -> EditorTab | None:
         idx = self._canvas_tabs.currentIndex()
@@ -789,6 +948,14 @@ class SWCMainWindow(QMainWindow):
         for doc in self._documents.values():
             doc.editor.set_mode(mode)
 
+    def _clear_active_editor_selection_if_unfocused(self):
+        doc = self._active_document()
+        if doc is None:
+            return
+        if str(doc.selected_issue_id or "").strip():
+            return
+        doc.editor.clear_selection()
+
     def _refresh_canvas_surface(self):
         if self._active_tool == "batch":
             if self._is_batch_validation_control_active():
@@ -813,7 +980,11 @@ class SWCMainWindow(QMainWindow):
             self._table_widget.load_dataframe(pd.DataFrame(columns=SWC_COLS), "No SWC loaded")
             self._info_label.setText("No SWC file loaded.")
             self._edit_log_text.setPlainText("No morphology edits recorded for this session yet.")
+            self._issue_panel.clear_issues("Open an SWC to populate issues automatically.")
+            self._set_issue_status([])
+            self._context_inspector.clear()
             self._validation_radii_panel.set_loaded_swc(None, "", "")
+            self._manual_radii_panel.set_loaded_swc(None, "")
             self._batch_tab.set_loaded_swc(None, "", "")
             self._refresh_canvas_surface()
             self._refresh_simplification_panel_state()
@@ -831,16 +1002,25 @@ class SWCMainWindow(QMainWindow):
         self._update_info_label(doc.df, n_roots, n_soma, filename=doc.filename)
         self._refresh_morph_edit_tab(doc)
         self._validation_radii_panel.set_loaded_swc(doc.df, doc.filename, doc.file_path)
+        self._manual_radii_panel.set_loaded_swc(doc.df, doc.filename)
         self._batch_tab.set_loaded_swc(doc.df, doc.filename, doc.file_path)
+        should_auto_run_validation = bool(auto_run_validation and not doc.is_preview and doc.validation_report is None)
         self._validation_tab.load_swc(
             doc.df,
             doc.filename,
             file_path=doc.file_path,
-            auto_run=bool(auto_run_validation and not doc.is_preview),
+            auto_run=should_auto_run_validation,
         )
+        if should_auto_run_validation:
+            self._issue_panel.clear_issues("Running validation and issue detectors...")
+            self._set_issue_status([])
+            self._context_inspector.clear()
+            doc.editor.clear_selection()
+        self._apply_issue_state(doc)
         self._refresh_canvas_surface()
         self._refresh_simplification_panel_state()
         self._refresh_validation_auto_label_panel_state()
+        self._refresh_edit_history_state(doc)
 
     def _start_morphology_session(self, doc: _DocumentState):
         if doc.is_preview:
@@ -849,8 +1029,79 @@ class SWCMainWindow(QMainWindow):
         doc.session_changes = []
         doc.session_events = []
         doc.session_seq = 0
+        doc.issue_status_overrides = {}
+        doc.fixed_issue_count = 0
+        doc.pending_resolved_issue_ids = set()
+        doc.selected_issue_id = ""
+        doc.recovery_path = ""
+        doc.history_snapshots = [doc.df.copy()] if isinstance(doc.df, pd.DataFrame) else []
+        doc.history_index = len(doc.history_snapshots) - 1
+        doc.last_auto_label_result = None
+        doc.last_auto_label_options = None
+        doc.auto_label_preview_df = None
+        doc.auto_label_preview_base_df = None
+        doc.editor.set_edit_history_state(False, False)
         if doc is self._active_document():
             self._refresh_morph_edit_tab(doc)
+
+    def _connect_editor_signals(self, editor: EditorTab):
+        editor.df_changed.connect(lambda new_df, ed=editor: self._on_editor_df_changed(ed, new_df))
+        editor.node_selected.connect(lambda swc_id, ed=editor: self._on_editor_node_selected(ed, swc_id))
+
+    def _push_document_history(self, doc: _DocumentState, df: pd.DataFrame):
+        if doc is None or doc.is_preview or not isinstance(df, pd.DataFrame):
+            return
+        snapshot = df.copy()
+        if doc.history_index >= 0 and doc.history_index < len(doc.history_snapshots):
+            try:
+                if doc.history_snapshots[doc.history_index].equals(snapshot):
+                    self._refresh_edit_history_state(doc)
+                    return
+            except Exception:
+                pass
+        if doc.history_index < len(doc.history_snapshots) - 1:
+            doc.history_snapshots = doc.history_snapshots[: doc.history_index + 1]
+        doc.history_snapshots.append(snapshot)
+        doc.history_index = len(doc.history_snapshots) - 1
+        self._refresh_edit_history_state(doc)
+
+    def _refresh_edit_history_state(self, doc: _DocumentState | None = None):
+        row = doc or self._active_document()
+        if row is None:
+            return
+        can_undo = (not row.is_preview) and row.history_index > 0
+        can_redo = (not row.is_preview) and row.history_index >= 0 and row.history_index < (len(row.history_snapshots) - 1)
+        row.editor.set_edit_history_state(can_undo, can_redo)
+
+    def _restore_document_history(self, doc: _DocumentState, target_index: int, *, direction: str):
+        if doc is None or doc.is_preview:
+            return False
+        if target_index < 0 or target_index >= len(doc.history_snapshots):
+            return False
+        doc.history_index = int(target_index)
+        snapshot = doc.history_snapshots[doc.history_index].copy()
+        self._apply_document_dataframe(
+            doc,
+            snapshot,
+            event_title=direction,
+            event_summary=f"{direction} one session edit step.",
+            event_details=[],
+            push_history=False,
+            record_type_changes=True,
+        )
+        self._refresh_edit_history_state(doc)
+        self._rerun_active_validation()
+        return True
+
+    def _undo_document(self, doc: _DocumentState | None) -> bool:
+        if doc is None:
+            return False
+        return self._restore_document_history(doc, doc.history_index - 1, direction="Undo")
+
+    def _redo_document(self, doc: _DocumentState | None) -> bool:
+        if doc is None:
+            return False
+        return self._restore_document_history(doc, doc.history_index + 1, direction="Redo")
 
     def _record_morph_type_changes(
         self,
@@ -905,21 +1156,43 @@ class SWCMainWindow(QMainWindow):
                 "details": list(details or []),
             }
         )
+        if doc is self._active_document():
+            self._refresh_morph_edit_tab(doc)
 
     def _refresh_morph_edit_tab(self, doc: _DocumentState | None = None):
         row = doc or self._active_document()
-        if row is None or not row.session_changes:
+        if row is None or (not row.session_changes and not row.session_events):
             self._edit_log_text.setPlainText("No morphology edits recorded for this session yet.")
             return
 
-        lines = [
-            f"Session changes ({row.filename}):",
-            "Seq\tTime\tNodeID\tOldType\tNewType",
-        ]
-        for c in row.session_changes:
-            lines.append(
-                f"{c.get('seq')}\t{c.get('time')}\t{c.get('node_id')}\t{c.get('old_type')}\t{c.get('new_type')}"
+        lines = [f"Session changes ({row.filename}):"]
+
+        if row.session_changes:
+            lines.extend(
+                [
+                    "",
+                    "Morphology Type Changes",
+                    "-----------------------",
+                    f"{'Seq':<5}{'Time':<10}{'NodeID':<10}{'OldType':<10}{'NewType':<10}",
+                ]
             )
+            for c in row.session_changes:
+                lines.append(
+                    f"{int(c.get('seq', 0)):<5}"
+                    f"{str(c.get('time', '')):<10}"
+                    f"{int(c.get('node_id', 0)):<10}"
+                    f"{int(c.get('old_type', 0)):<10}"
+                    f"{int(c.get('new_type', 0)):<10}"
+                )
+
+        if row.session_events:
+            lines.extend(["", "Morphology Edit Events", "----------------------"])
+            for event in row.session_events:
+                time_text = str(event.get("time", "")).strip()
+                title = str(event.get("title", "")).strip()
+                summary = str(event.get("summary", "")).strip()
+                lines.append(f"[{time_text}] {title}: {summary}")
+
         self._edit_log_text.setPlainText("\n".join(lines))
 
     def _finalize_morphology_session(
@@ -962,6 +1235,42 @@ class SWCMainWindow(QMainWindow):
             self._refresh_morph_edit_tab(doc)
         return str(out_path)
 
+    def _document_has_unsaved_edits(self, doc: _DocumentState) -> bool:
+        if doc is None:
+            return False
+        original = doc.original_df
+        current = doc.df
+        if not isinstance(current, pd.DataFrame):
+            return False
+        if not isinstance(original, pd.DataFrame):
+            return True
+        try:
+            return not original.equals(current)
+        except Exception:  # noqa: BLE001
+            return True
+
+    def _recovery_directory(self) -> Path:
+        path = Path.home() / ".swc_studio" / "recovery"
+        path.mkdir(parents=True, exist_ok=True)
+        return path
+
+    def _recovery_path_for_document(self, doc: _DocumentState) -> Path:
+        if str(doc.recovery_path or "").strip():
+            return Path(doc.recovery_path)
+        base_name = Path(doc.file_path).stem if str(doc.file_path or "").strip() else Path(doc.filename or "swc").stem
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+        path = self._recovery_directory() / f"{base_name}_recovery_{ts}.swc"
+        doc.recovery_path = str(path)
+        return path
+
+    def _write_recovery_copy(self, doc: _DocumentState):
+        if doc is None or doc.is_preview or doc.df is None or doc.df.empty:
+            return
+        if not self._document_has_unsaved_edits(doc):
+            return
+        recovery_path = self._recovery_path_for_document(doc)
+        self._write_swc_file(str(recovery_path), doc.df)
+
     def _next_closed_output_path(self, doc: _DocumentState) -> Path:
         base = Path(doc.file_path) if str(doc.file_path or "").strip() else Path.cwd() / (doc.filename or "swc")
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -973,9 +1282,9 @@ class SWCMainWindow(QMainWindow):
         return cand
 
     def _write_closed_copy_and_log(self, doc: _DocumentState):
-        if not doc.session_changes and not doc.session_events:
+        if not self._document_has_unsaved_edits(doc) and not doc.session_changes and not doc.session_events:
             return
-        if doc.session_changes:
+        if self._document_has_unsaved_edits(doc):
             out_swc = self._next_closed_output_path(doc)
             self._write_swc_file(str(out_swc), doc.df)
             self._append_log(f"Closed tab saved to: {out_swc}", "INFO")
@@ -1124,9 +1433,7 @@ class SWCMainWindow(QMainWindow):
         preview_name = "Simplified View"
         if preview_doc is None:
             preview_editor = EditorTab()
-            preview_editor.df_changed.connect(
-                lambda new_df, ed=preview_editor: self._on_editor_df_changed(ed, new_df)
-            )
+            self._connect_editor_signals(preview_editor)
             preview_controls = preview_editor.take_dendrogram_controls_panel()
             preview_doc = _DocumentState(
                 editor=preview_editor,
@@ -1330,16 +1637,11 @@ class SWCMainWindow(QMainWindow):
         return pd.DataFrame(data, columns=SWC_COLS)
 
     def _refresh_validation_auto_label_panel_state(self):
-        source_doc, preview_doc, result = self._resolve_validation_auto_label_context()
-        if (
-            source_doc is None
-            or preview_doc is None
-            or result is None
-            or not isinstance(result, dict)
-        ):
+        doc = self._active_source_document()
+        if doc is None or not isinstance(doc.last_auto_label_result, dict):
             self._validation_auto_label_panel.set_preview_state(False, None)
             return
-        self._validation_auto_label_panel.set_preview_state(True, result)
+        self._validation_auto_label_panel.set_preview_state(bool(doc.auto_label_preview_df is not None), doc.last_auto_label_result)
 
     def _on_validation_auto_label_process_requested(self, options: object):
         source_doc = self._active_source_document()
@@ -1379,42 +1681,6 @@ class SWCMainWindow(QMainWindow):
             self._validation_auto_label_panel.set_status_text("Auto Label output is empty.")
             return
 
-        preview_editor = self._auto_label_preview_by_source.get(source_doc.editor)
-        preview_doc = self._documents.get(preview_editor) if preview_editor is not None else None
-
-        preview_name = "Auto-Labeled View"
-        if preview_doc is None:
-            preview_editor = EditorTab()
-            preview_editor.df_changed.connect(
-                lambda new_df, ed=preview_editor: self._on_editor_df_changed(ed, new_df)
-            )
-            preview_controls = preview_editor.take_dendrogram_controls_panel()
-            preview_doc = _DocumentState(
-                editor=preview_editor,
-                controls=preview_controls,
-                df=preview_df.copy(),
-                filename=preview_name,
-                file_path=str(source_doc.file_path or ""),
-                is_preview=True,
-                source_editor=source_doc.editor,
-                preview_kind="validation_auto_label",
-            )
-            self._documents[preview_editor] = preview_doc
-            self._auto_label_preview_by_source[source_doc.editor] = preview_editor
-            self._auto_label_source_by_preview[preview_editor] = source_doc.editor
-            tab_idx = self._canvas_tabs.addTab(preview_editor, preview_name)
-            self._canvas_tabs.setCurrentIndex(tab_idx)
-        else:
-            preview_doc.df = preview_df.copy()
-            preview_doc.file_path = str(source_doc.file_path or "")
-            tab_idx = self._canvas_tabs.indexOf(preview_doc.editor)
-            if tab_idx >= 0:
-                self._canvas_tabs.setCurrentIndex(tab_idx)
-
-        preview_doc.df = preview_df.copy()
-        preview_doc.editor.load_swc(preview_df, preview_name)
-        preview_doc.editor.set_mode(self._editor_mode_for_feature())
-
         opts = options
         opts_dict = {
             "soma": bool(getattr(opts, "soma", False)),
@@ -1433,17 +1699,23 @@ class SWCMainWindow(QMainWindow):
             "options": opts_dict,
             "log_path": "",
         }
-        self._auto_label_result_by_preview[preview_doc.editor] = result_payload
-        self._validation_auto_label_panel.set_preview_state(True, result_payload)
+        source_doc.last_auto_label_options = dict(opts_dict)
+        source_doc.last_auto_label_result = dict(result_payload)
 
+        source_doc.auto_label_preview_base_df = source_doc.df.copy()
+        source_doc.auto_label_preview_df = preview_df.copy()
+        source_doc.editor.load_swc(preview_df, source_doc.filename)
+        source_doc.editor.set_mode(self._editor_mode_for_feature())
+        self._validation_auto_label_panel.set_preview_state(True, result_payload)
         self._append_log(
-            "Validation Auto Label preview created: "
+            "Validation Auto Label preview updated on current canvas: "
             f"nodes={result_payload['nodes_total']}, "
             f"type_changes={result_payload['type_changes']}, "
             f"radius_changes={result_payload['radius_changes']}",
             "INFO",
         )
-        self._sync_from_active_document(auto_run_validation=False)
+        self._refresh_edit_history_state(source_doc)
+        self._refresh_canvas_surface()
 
     def _write_validation_auto_label_log(
         self,
@@ -1481,78 +1753,89 @@ class SWCMainWindow(QMainWindow):
         return write_text_report(log_path, format_auto_typing_report_text(payload))
 
     def _on_validation_auto_label_apply_requested(self):
-        source_doc, preview_doc, result = self._resolve_validation_auto_label_context()
-        if source_doc is None or preview_doc is None or preview_doc.df is None or preview_doc.df.empty:
+        doc = self._active_source_document()
+        if (
+            doc is None
+            or not isinstance(doc.auto_label_preview_df, pd.DataFrame)
+            or doc.auto_label_preview_df.empty
+            or not isinstance(doc.last_auto_label_result, dict)
+        ):
             self._append_log("Validation Auto Label Apply: no preview available.", "WARN")
             return
-        if not isinstance(result, dict):
-            result = {}
-
-        src_path = str(source_doc.file_path or "")
-        if src_path:
-            src_p = Path(src_path)
-            default_out = str(src_p.with_name(f"{src_p.stem}_auto_labeled{src_p.suffix}"))
-        else:
-            default_out = f"{Path(source_doc.filename or 'swc').stem}_auto_labeled.swc"
-
-        out_path, _ = QFileDialog.getSaveFileName(
-            self,
-            "Save Auto-Labeled SWC",
-            default_out,
-            "SWC Files (*.swc);;All Files (*)",
-        )
-        if not out_path:
-            self._append_log("Validation Auto Label Apply cancelled.", "INFO")
-            return
-
-        self._write_swc_file(out_path, preview_doc.df)
-        result["log_path"] = ""
-
+        result = dict(doc.last_auto_label_result)
         out_counts = dict(result.get("out_type_counts", {}))
-        self._record_session_event(
-            source_doc,
-            kind="auto_label",
-            title="Validation Auto Label Apply",
-            summary=(
-                f"Saved auto-labeled SWC to {out_path}; "
-                f"type_changes={int(result.get('type_changes', 0))}"
-            ),
-            details=[
-                f"Input: {source_doc.file_path or source_doc.filename}",
-                f"Output: {out_path}",
-                f"Nodes: {int(result.get('nodes_total', 0))}",
-                f"Type changes: {int(result.get('type_changes', 0))}",
-                f"Out types (1/2/3/4): {out_counts.get(1, 0)}/{out_counts.get(2, 0)}/{out_counts.get(3, 0)}/{out_counts.get(4, 0)}",
-            ] + list(result.get("change_details", [])[:12]),
+        applied_df = doc.auto_label_preview_df.copy()
+        doc.auto_label_preview_df = None
+        doc.auto_label_preview_base_df = None
+        event_details = [
+            f"Input: {doc.file_path or doc.filename}",
+            f"Nodes: {int(result.get('nodes_total', 0))}",
+            f"Type changes: {int(result.get('type_changes', 0))}",
+            f"Out types (1/2/3/4): {out_counts.get(1, 0)}/{out_counts.get(2, 0)}/{out_counts.get(3, 0)}/{out_counts.get(4, 0)}",
+        ] + list(result.get("change_details", [])[:12])
+        self._apply_document_dataframe(
+            doc,
+            applied_df,
+            event_title="Validation Auto Label Apply",
+            event_summary=f"Applied auto-label preview to current SWC; type_changes={int(result.get('type_changes', 0))}",
+            event_details=event_details,
         )
-
-        source_doc.df = preview_doc.df.copy()
-        source_doc.file_path = str(out_path)
-        source_doc.filename = os.path.basename(out_path)
-        source_doc.editor.load_swc(source_doc.df, source_doc.filename)
-        source_doc.editor.set_mode(self._editor_mode_for_feature())
-
-        src_idx = self._canvas_tabs.indexOf(source_doc.editor)
-        if src_idx >= 0:
-            self._canvas_tabs.setTabText(src_idx, source_doc.filename)
-
-        self._remove_validation_auto_label_preview(preview_doc.editor, switch_to_source=True)
-        self._update_recent_files(out_path)
-        self._sync_from_active_document(auto_run_validation=False)
-        self._append_log(f"Validation Auto Label applied: {out_path}", "INFO")
+        self._validation_auto_label_panel.set_preview_state(False, result)
+        self._rerun_active_validation()
+        self._append_log("Validation Auto Label preview applied to current SWC.", "INFO")
 
     def _on_validation_auto_label_cancel_requested(self):
-        source_doc, preview_doc, _result = self._resolve_validation_auto_label_context()
-        if preview_doc is None:
+        doc = self._active_source_document()
+        if doc is None or not isinstance(doc.auto_label_preview_base_df, pd.DataFrame):
             self._append_log("Validation Auto Label Cancel: no preview to discard.", "INFO")
             return
-        self._remove_validation_auto_label_preview(preview_doc.editor, switch_to_source=True)
-        if source_doc is not None:
-            src_idx = self._canvas_tabs.indexOf(source_doc.editor)
-            if src_idx >= 0:
-                self._canvas_tabs.setCurrentIndex(src_idx)
-        self._sync_from_active_document(auto_run_validation=False)
+        base_df = doc.auto_label_preview_base_df.copy()
+        doc.auto_label_preview_base_df = None
+        doc.auto_label_preview_df = None
+        doc.editor.load_swc(base_df, doc.filename)
+        doc.editor.set_mode(self._editor_mode_for_feature())
+        self._validation_auto_label_panel.set_preview_state(False, doc.last_auto_label_result)
+        self._refresh_canvas_surface()
         self._append_log("Validation Auto Label preview discarded.", "INFO")
+
+    def _on_manual_radii_apply_requested(self, node_id: int, new_radius: float):
+        doc = self._active_source_document()
+        if doc is None or doc.df is None or doc.df.empty:
+            self._append_log("Manual Radii: no active SWC document.", "WARN")
+            return
+        mask = doc.df["id"].astype(int) == int(node_id)
+        if not bool(mask.any()):
+            self._append_log(f"Manual Radii: node {int(node_id)} is no longer present.", "WARN")
+            self._manual_radii_panel.clear_selection()
+            return
+        old_radius = float(doc.df.loc[mask, "radius"].iloc[0])
+        target_radius = float(new_radius)
+        if float(old_radius) == float(target_radius):
+            self._append_log(f"Manual Radii: node {int(node_id)} already has radius {target_radius:.6g}.", "INFO")
+            return
+
+        new_df = doc.df.copy()
+        new_df.loc[mask, "radius"] = target_radius
+        node_type = int(new_df.loc[mask, "type"].iloc[0])
+        self._apply_document_dataframe(
+            doc,
+            new_df,
+            event_title="Manual Radius Edit",
+            event_summary=f"Updated node {int(node_id)} radius from {old_radius:.6g} to {target_radius:.6g}.",
+            event_details=[
+                f"Node ID: {int(node_id)}",
+                f"Type: {label_for_type(node_type)} ({node_type})",
+                f"Old radius: {old_radius:.6g}",
+                f"New radius: {target_radius:.6g}",
+            ],
+            record_type_changes=False,
+        )
+        self._manual_radii_panel.set_selected_node(int(node_id))
+        self._append_log(
+            f"Manual Radii applied: node {int(node_id)} {old_radius:.6g} -> {target_radius:.6g}.",
+            "INFO",
+        )
+        self._rerun_active_validation()
 
     def _set_control_tabs_for_feature(self, feature: str):
         """Show only control tabs relevant to the active feature."""
@@ -1577,8 +1860,6 @@ class SWCMainWindow(QMainWindow):
             current_idx = 0
         elif key == "validation":
             self._control_tabs.addTab(self._wrap_control_widget(self._validation_tab), "Validation")
-            self._control_tabs.addTab(self._wrap_control_widget(self._validation_auto_label_panel), "Auto Label")
-            self._control_tabs.addTab(self._wrap_control_widget(self._validation_radii_panel), "Radii Cleaning")
             current_idx = 0
         elif key in ("morphology_editing", "dendrogram"):
             doc = self._active_document()
@@ -1587,8 +1868,17 @@ class SWCMainWindow(QMainWindow):
                 self._on_control_tab_changed(-1)
                 return
             self._control_tabs.addTab(self._wrap_control_widget(doc.controls), "Label Editing")
+            self._control_tabs.addTab(self._wrap_control_widget(self._validation_auto_label_panel), "Auto Label")
+            self._control_tabs.addTab(self._wrap_control_widget(self._manual_radii_panel), "Manual Radii Editing")
+            self._control_tabs.addTab(self._wrap_control_widget(self._validation_radii_panel), "Auto Radii Editing")
             self._control_tabs.addTab(self._wrap_control_widget(self._simplification_panel), "Simplification")
-            current_idx = 1 if previous_label == "simplification" else 0
+            current_idx = {
+                "label editing": 0,
+                "auto label": 1,
+                "manual radii editing": 2,
+                "auto radii editing": 3,
+                "simplification": 4,
+            }.get(previous_label, 0)
             self._refresh_simplification_panel_state()
         elif key in ("atlas_registration", "analysis"):
             current_idx = -1
@@ -1609,9 +1899,12 @@ class SWCMainWindow(QMainWindow):
     # --------------------------------------------------------- Feature routing
     def _activate_feature(self, name: str):
         key = (name or "").strip().lower()
+        current = (self._active_tool or "").strip().lower()
+        if key and key == current:
+            return
         if (
             key != "validation"
-            and key != (self._active_tool or "").strip().lower()
+            and key != current
             and hasattr(self, "_validation_tab")
             and self._validation_tab.is_running()
         ):
@@ -1621,6 +1914,7 @@ class SWCMainWindow(QMainWindow):
             self._active_tool = "batch"
             self._sync_tool_tab_selection()
             self._set_control_tabs_for_feature("batch")
+            self._control_tabs.setVisible(self._control_tabs.count() > 0)
             self._control_dock.show()
             self._on_control_tab_changed(self._control_tabs.currentIndex())
             self._feature_label.setText("Active feature: Batch Processing")
@@ -1630,6 +1924,7 @@ class SWCMainWindow(QMainWindow):
             self._active_tool = "validation"
             self._sync_tool_tab_selection()
             self._set_control_tabs_for_feature("validation")
+            self._control_tabs.setVisible(self._control_tabs.count() > 0)
             self._control_dock.show()
             self._precheck_dock.hide()
             self._auto_guide_dock.hide()
@@ -1642,6 +1937,7 @@ class SWCMainWindow(QMainWindow):
             self._active_tool = "visualization"
             self._sync_tool_tab_selection()
             self._set_control_tabs_for_feature("visualization")
+            self._control_tabs.setVisible(self._control_tabs.count() > 0)
             self._control_dock.show()
             self._precheck_dock.hide()
             self._auto_guide_dock.hide()
@@ -1654,11 +1950,13 @@ class SWCMainWindow(QMainWindow):
             self._active_tool = "morphology_editing"
             self._sync_tool_tab_selection()
             self._set_control_tabs_for_feature("morphology_editing")
+            self._control_tabs.setVisible(self._control_tabs.count() > 0)
             self._control_dock.show()
             self._precheck_dock.hide()
             self._auto_guide_dock.hide()
             self._apply_editor_modes()
             self._refresh_canvas_surface()
+            self._clear_active_editor_selection_if_unfocused()
             self._feature_label.setText("Active feature: Morphology Editing")
             self._append_log("Feature switched: Morphology Editing", "INFO")
             return
@@ -1666,6 +1964,7 @@ class SWCMainWindow(QMainWindow):
             self._active_tool = "atlas_registration"
             self._sync_tool_tab_selection()
             self._set_control_tabs_for_feature("atlas_registration")
+            self._control_tabs.setVisible(self._control_tabs.count() > 0)
             self._control_dock.show()
             self._precheck_dock.hide()
             self._auto_guide_dock.hide()
@@ -1678,6 +1977,7 @@ class SWCMainWindow(QMainWindow):
             self._active_tool = "analysis"
             self._sync_tool_tab_selection()
             self._set_control_tabs_for_feature("analysis")
+            self._control_tabs.setVisible(self._control_tabs.count() > 0)
             self._control_dock.show()
             self._precheck_dock.hide()
             self._auto_guide_dock.hide()
@@ -1741,7 +2041,7 @@ class SWCMainWindow(QMainWindow):
 
             filename = os.path.basename(path)
             editor = EditorTab()
-            editor.df_changed.connect(lambda new_df, ed=editor: self._on_editor_df_changed(ed, new_df))
+            self._connect_editor_signals(editor)
             controls = editor.take_dendrogram_controls_panel()
             editor.load_swc(df, filename)
 
@@ -1751,6 +2051,7 @@ class SWCMainWindow(QMainWindow):
                 df=df.copy(),
                 filename=filename,
                 file_path=str(path),
+                original_df=df.copy(),
             )
             self._documents[editor] = doc
             self._start_morphology_session(doc)
@@ -1760,7 +2061,7 @@ class SWCMainWindow(QMainWindow):
 
             self._update_recent_files(path)
             self._apply_editor_modes()
-            self._sync_from_active_document(auto_run_validation=(self._active_tool == "validation"))
+            self._sync_from_active_document(auto_run_validation=True)
             if self._active_tool in ("morphology_editing", "dendrogram"):
                 self._set_control_tabs_for_feature("morphology_editing")
 
@@ -1788,6 +2089,7 @@ class SWCMainWindow(QMainWindow):
             self._on_save_as()
             return
         self._write_swc_file(doc.file_path, doc.df)
+        self._after_document_write(doc, doc.file_path, action_name="Save")
         self._append_log(f"Saved {doc.file_path}", "INFO")
 
     def _on_save_as(self):
@@ -1813,6 +2115,7 @@ class SWCMainWindow(QMainWindow):
         if tab_idx >= 0:
             self._canvas_tabs.setTabText(tab_idx, doc.filename)
         self._sync_from_active_document(auto_run_validation=False)
+        self._after_document_write(doc, path, action_name="Save As")
         self._append_log(f"Saved As {path}", "INFO")
         self._update_recent_files(path)
 
@@ -1832,9 +2135,12 @@ class SWCMainWindow(QMainWindow):
             self._append_log("Export cancelled.", "INFO")
             return
         self._write_swc_file(path, doc.df)
+        self._after_document_write(doc, path, action_name="Export")
         self._append_log(f"Exported {path}", "INFO")
 
     def _write_swc_file(self, path: str, df: pd.DataFrame):
+        out_path = Path(path)
+        out_path.parent.mkdir(parents=True, exist_ok=True)
         lines = ["# id type x y z radius parent"]
         for _, row in df.iterrows():
             lines.append(
@@ -1842,8 +2148,94 @@ class SWCMainWindow(QMainWindow):
                 f"{row['x']:.4f} {row['y']:.4f} {row['z']:.4f} "
                 f"{row['radius']:.4f} {int(row['parent'])}"
             )
-        with open(path, "w", encoding="utf-8") as f:
-            f.write("\n".join(lines) + "\n")
+        payload = "\n".join(lines) + "\n"
+        fd, tmp_path = tempfile.mkstemp(prefix=f".{out_path.stem}_", suffix=".tmp", dir=str(out_path.parent))
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                f.write(payload)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(tmp_path, out_path)
+        except Exception:
+            try:
+                os.remove(tmp_path)
+            except FileNotFoundError:
+                pass
+            raise
+
+    def _build_document_diff_summary(self, doc: _DocumentState) -> dict[str, int]:
+        original = doc.original_df.copy() if isinstance(doc.original_df, pd.DataFrame) else pd.DataFrame(columns=SWC_COLS)
+        current = doc.df.copy() if isinstance(doc.df, pd.DataFrame) else pd.DataFrame(columns=SWC_COLS)
+        summary = {
+            "original_nodes": int(len(original)),
+            "current_nodes": int(len(current)),
+            "type_changes": 0,
+            "radius_changes": 0,
+            "parent_changes": 0,
+            "geometry_changes": 0,
+        }
+        if original.empty or current.empty:
+            return summary
+        common_ids = sorted(set(int(v) for v in original["id"].tolist()) & set(int(v) for v in current["id"].tolist()))
+        if not common_ids:
+            return summary
+        old_map = original.set_index("id")
+        new_map = current.set_index("id")
+        for node_id in common_ids:
+            old_row = old_map.loc[node_id]
+            new_row = new_map.loc[node_id]
+            if int(old_row["type"]) != int(new_row["type"]):
+                summary["type_changes"] += 1
+            if float(old_row["radius"]) != float(new_row["radius"]):
+                summary["radius_changes"] += 1
+            if int(old_row["parent"]) != int(new_row["parent"]):
+                summary["parent_changes"] += 1
+            if (
+                float(old_row["x"]) != float(new_row["x"])
+                or float(old_row["y"]) != float(new_row["y"])
+                or float(old_row["z"]) != float(new_row["z"])
+            ):
+                summary["geometry_changes"] += 1
+        return summary
+
+    def _write_correction_summary(self, doc: _DocumentState, output_path: str) -> str:
+        summary = self._build_document_diff_summary(doc)
+        skipped = sum(1 for item in doc.issues if str(item.get("status", "")) == "skipped")
+        remaining_titles = [str(item.get("title", "")) for item in doc.issues[:20]]
+        provenance_lines = [
+            f"[{event.get('time', '')}] {event.get('title', event.get('kind', 'event'))}: {event.get('summary', '')}"
+            for event in list(doc.session_events or [])
+        ]
+        payload = {
+            "input_path": str(doc.file_path or doc.filename),
+            "output_path": str(output_path),
+            "remaining_issues": len(doc.issues),
+            "fixed_issues": int(doc.fixed_issue_count),
+            "skipped_issues": int(skipped),
+            "diff_summary": summary,
+            "remaining_issue_titles": remaining_titles,
+            "provenance_lines": provenance_lines,
+        }
+        log_path = correction_summary_log_path_for_file(output_path)
+        return write_text_report(log_path, format_correction_summary_report_text(payload))
+
+    def _after_document_write(self, doc: _DocumentState, output_path: str, *, action_name: str):
+        report_path = self._write_correction_summary(doc, output_path)
+        self._record_session_event(
+            doc,
+            kind="export",
+            title=f"{action_name} SWC",
+            summary=f"Wrote corrected SWC to {output_path}",
+            details=[f"Correction summary: {report_path}"],
+        )
+        try:
+            ReportPopupDialog.open_report(self, title="SWC Correction Summary", report_path=report_path)
+        except Exception as e:  # noqa: BLE001
+            self._append_log(f"Could not open correction summary popup: {e}", "WARN")
+        doc.original_df = doc.df.copy()
+        doc.fixed_issue_count = 0
+        if not doc.is_preview:
+            self._write_recovery_copy(doc)
 
     # --------------------------------------------------- Drag & drop
     def dragEnterEvent(self, event: QDragEnterEvent):
@@ -1860,18 +2252,51 @@ class SWCMainWindow(QMainWindow):
 
         old_df = doc.df.copy() if doc.df is not None else None
         doc.df = df.copy()
+        doc.validation_report = None
+        doc.issues = []
         self._record_morph_type_changes(doc, old_df, doc.df)
+        self._push_document_history(doc, doc.df)
+        self._write_recovery_copy(doc)
+        self._refresh_edit_history_state(doc)
 
         if editor is self._active_editor():
-            self._sync_from_active_document(auto_run_validation=False)
+            self._sync_from_active_document(auto_run_validation=not doc.is_preview)
             if not doc.is_preview:
                 self._append_log("Dendrogram edits applied to current SWC.", "INFO")
             else:
                 self._append_log("Dendrogram edits applied to simplification preview.", "INFO")
 
+    def _on_editor_node_selected(self, editor: EditorTab, swc_id: int):
+        doc = self._documents.get(editor)
+        if doc is None or doc is not self._active_document():
+            return
+        self._manual_radii_panel.set_selected_node(int(swc_id))
+        if doc.selected_issue_id:
+            return
+        for issue in doc.issues:
+            if int(swc_id) in [int(v) for v in issue.get("node_ids", [])]:
+                issue_id = str(issue.get("issue_id", "")).strip()
+                if issue_id:
+                    self._issue_panel.select_issue(issue_id)
+                return
+
+    def _on_editor_undo_requested(self, editor: EditorTab):
+        doc = self._documents.get(editor)
+        if doc is None or doc is not self._active_document():
+            return
+        if self._undo_document(doc):
+            self._append_log("Undo.", "INFO")
+
+    def _on_editor_redo_requested(self, editor: EditorTab):
+        doc = self._documents.get(editor)
+        if doc is None or doc is not self._active_document():
+            return
+        if self._redo_document(doc):
+            self._append_log("Redo.", "INFO")
+
     # --------------------------------------------------- Document tabs/windows
     def _on_document_tab_changed(self, _index: int):
-        self._sync_from_active_document(auto_run_validation=False)
+        self._sync_from_active_document(auto_run_validation=True)
         if self._active_tool in ("morphology_editing", "dendrogram"):
             self._set_control_tabs_for_feature("morphology_editing")
             self._refresh_simplification_panel_state()
@@ -1966,9 +2391,13 @@ class SWCMainWindow(QMainWindow):
     def _append_log(self, text: str, level: str = "INFO"):
         stamp = datetime.now().strftime("%H:%M:%S")
         line = f"[{stamp}] [{level}] {text}".rstrip()
-        self._log_console.appendPlainText(line)
-        sb = self._log_console.verticalScrollBar()
-        sb.setValue(sb.maximum())
+        self._runtime_log_lines.append(line)
+        if len(self._runtime_log_lines) > 500:
+            self._runtime_log_lines = self._runtime_log_lines[-500:]
+        try:
+            self._status.showMessage(text, 5000)
+        except Exception:
+            pass
 
     def _set_current_file_label_text(self, filename: str):
         full = f"Current file: {filename or '(none)'}"
@@ -2013,10 +2442,1020 @@ class SWCMainWindow(QMainWindow):
             self.setDockOptions(QMainWindow.AnimatedDocks | QMainWindow.AllowNestedDocks | QMainWindow.AllowTabbedDocks)
             self.addDockWidget(Qt.LeftDockWidgetArea, self._data_dock)
             self.addDockWidget(Qt.RightDockWidgetArea, self._control_dock)
-            self.resizeDocks([self._data_dock, self._control_dock], [280, 280], Qt.Horizontal)
+            self.resizeDocks([self._data_dock, self._control_dock], [340, 360], Qt.Horizontal)
         except Exception:
             pass
         self._append_log("Layout reset (docks movable).", "INFO")
+
+    def _apply_issue_state(self, doc: _DocumentState | None):
+        issues = list(doc.issues) if doc is not None else []
+        self._issue_panel.set_issues(issues)
+        self._set_issue_status(issues)
+        if doc is None:
+            return
+        selected_issue = None
+        if doc.selected_issue_id:
+            selected_issue = next(
+                (item for item in issues if str(item.get("issue_id", "")).strip() == str(doc.selected_issue_id).strip()),
+                None,
+            )
+        doc.editor.set_issue_markers([selected_issue] if selected_issue else [])
+        if selected_issue is None:
+            self._issue_panel.clear_selection()
+            doc.editor.clear_selection()
+
+    def _set_issue_status(self, issues: list[dict]):
+        critical = sum(1 for item in issues if str(item.get("severity", "")) == "critical")
+        warning = sum(1 for item in issues if str(item.get("severity", "")) == "warning")
+        info = sum(1 for item in issues if str(item.get("severity", "")) == "info")
+        skipped = sum(1 for item in issues if str(item.get("status", "")) == "skipped")
+        fixed = 0
+        doc = self._active_document()
+        if doc is not None:
+            fixed = int(doc.fixed_issue_count)
+        self._issue_status_label.setText(
+            f"Issues: {len(issues)} total · {critical} critical · {warning} warning · "
+            f"{info} info · {skipped} skipped · {fixed} fixed"
+        )
+
+    def _build_all_issues_for_document(self, doc: _DocumentState, report: dict) -> list[dict]:
+        base_issues = issues_from_validation_report(report)
+        if doc.df is not None and not doc.df.empty:
+            type_by_id = {
+                int(row_id): int(row_type)
+                for row_id, row_type in zip(doc.df["id"].tolist(), doc.df["type"].tolist())
+                if pd.notna(row_id) and pd.notna(row_type)
+            }
+            filtered_base_issues: list[dict] = []
+            for item in base_issues:
+                issue = dict(item)
+                if str(issue.get("source_key", "")).strip() == "no_dangling_branches":
+                    original_node_ids = [int(v) for v in issue.get("node_ids", [])]
+                    kept_node_ids = [node_id for node_id in original_node_ids if type_by_id.get(int(node_id), -999) != 1]
+                    if not kept_node_ids:
+                        continue
+                    issue["node_ids"] = kept_node_ids
+                    payload = dict(issue.get("source_payload", {}) or {})
+                    payload["failing_node_ids"] = kept_node_ids
+                    issue["source_payload"] = payload
+                filtered_base_issues.append(issue)
+            base_issues = filtered_base_issues
+        prereq = validation_prerequisite_summary(report)
+        hard_blocked = bool(prereq.get("soma_gate_failed")) or bool(prereq.get("multiple_somas_failed"))
+        critical_radii_node_ids = {
+            int(node_id)
+            for item in base_issues
+            if str(item.get("domain", "")) == "radii" and str(item.get("severity", "")) == "critical"
+            for node_id in item.get("node_ids", [])
+        }
+        suspicious_radii: list[dict] = []
+        if not hard_blocked and not prereq.get("unsupported_section_types") and not prereq.get("missing_soma"):
+            suspicious_radii = issues_from_radii_suspicion(doc.df, ignore_node_ids=critical_radii_node_ids)
+
+        type_suspicious: list[dict] = []
+        if not hard_blocked and doc.df is not None and not doc.df.empty:
+            tmp_fd, tmp_in = tempfile.mkstemp(prefix="swctools_issue_type_", suffix=".swc")
+            os.close(tmp_fd)
+            tmp_path = Path(tmp_in)
+            try:
+                self._write_swc_file(str(tmp_path), doc.df)
+                result_obj = run_validation_auto_typing_file(
+                    str(tmp_path),
+                    write_output=False,
+                    write_log=False,
+                )
+                type_suspicious = issues_from_type_suspicion(
+                    list(getattr(result_obj, "rows", []) or []),
+                    list(getattr(result_obj, "types", []) or []),
+                )
+            except Exception:
+                type_suspicious = []
+            finally:
+                try:
+                    tmp_path.unlink(missing_ok=True)
+                except Exception:
+                    pass
+
+        all_issues = list(base_issues) + list(suspicious_radii) + list(type_suspicious)
+        def _issue_priority(item: dict) -> tuple[int, int, int, int, str]:
+            source_key = str(item.get("source_key", "")).strip()
+            severity = str(item.get("severity", "")).strip()
+            status = str(item.get("status", "")).strip()
+            certainty = str(item.get("certainty", "")).strip()
+            return (
+                0 if source_key == "has_soma" else 1,
+                {"critical": 0, "warning": 1, "info": 2}.get(severity, 9),
+                {"open": 0, "skipped": 1, "fixed": 2}.get(status, 9),
+                {"rule": 0, "suspicious": 1, "ai": 2}.get(certainty, 9),
+                str(item.get("title", "")).lower(),
+            )
+
+        all_issues.sort(
+            key=_issue_priority
+        )
+        return all_issues
+
+    def _on_validation_report_ready(self, report: dict):
+        doc = self._active_document()
+        if doc is None:
+            return
+        previous_issue_id = str(doc.selected_issue_id or "").strip()
+        previous_issue = self._find_issue_by_id(doc, previous_issue_id)
+        doc.validation_report = dict(report)
+        issues = self._build_all_issues_for_document(doc, report)
+        issue_ids = {str(item.get("issue_id", "")) for item in issues}
+        for item in issues:
+            issue_id = str(item.get("issue_id", "")).strip()
+            status = str(doc.issue_status_overrides.get(issue_id, "open")).strip()
+            if status:
+                item["status"] = status
+        if doc.pending_resolved_issue_ids:
+            resolved_now = [issue_id for issue_id in doc.pending_resolved_issue_ids if issue_id and issue_id not in issue_ids]
+            if resolved_now:
+                doc.fixed_issue_count += len(resolved_now)
+            doc.pending_resolved_issue_ids = set()
+        doc.issue_status_overrides = {
+            issue_id: status
+            for issue_id, status in doc.issue_status_overrides.items()
+            if issue_id in issue_ids and status in {"skipped"}
+        }
+        doc.issues = issues
+        self._apply_issue_state(doc)
+        self._data_tabs.setCurrentIndex(0)
+        self._data_dock.show()
+        self._append_log(f"Issue navigator updated: {len(doc.issues)} actionable findings.", "INFO")
+        if previous_issue_id and self._issue_panel.select_issue(previous_issue_id):
+            doc.selected_issue_id = previous_issue_id
+            return
+        replacement_issue = self._find_matching_issue(doc, previous_issue)
+        replacement_issue_id = str((replacement_issue or {}).get("issue_id", "")).strip()
+        if replacement_issue_id and self._issue_panel.select_issue(replacement_issue_id):
+            doc.selected_issue_id = replacement_issue_id
+            return
+        doc.selected_issue_id = ""
+        self._issue_panel.clear_selection()
+        doc.editor.set_issue_markers([])
+        self._context_inspector.clear(
+            title="No issue selected",
+            problem_detail="The previous issue was resolved.",
+            suggested_solution="Click another issue in the left panel to continue.",
+        )
+
+    def _on_validation_result_activated(self, row: dict):
+        issues = issues_from_validation_report({"results": [row]})
+        if not issues:
+            return
+        self._on_issue_selected(issues[0])
+
+    def _focus_issue(self, issue: dict):
+        doc = self._active_document()
+        if doc is None:
+            return
+        node_ids = [int(v) for v in issue.get("node_ids", [])]
+        if node_ids:
+            doc.editor.focus_node(node_ids[0])
+        elif issue.get("section_ids"):
+            self._append_log("Issue has section-level context but no direct node target yet.", "INFO")
+
+    def _select_control_tab_by_label(self, target: str):
+        wanted = str(target or "").strip().lower()
+        for i in range(self._control_tabs.count()):
+            label = (self._control_tabs.tabText(i) or "").strip().lower()
+            if label == wanted:
+                if self._control_tabs.currentIndex() != i:
+                    self._control_tabs.setCurrentIndex(i)
+                return True
+        return False
+
+    def _issue_uses_popup_only_controls(self, issue: dict | None) -> bool:
+        if not isinstance(issue, dict):
+            return False
+        return str(issue.get("source_key", "")).strip() in {
+            "valid_soma_format",
+            "multiple_somas",
+            "has_soma",
+            "has_axon",
+            "has_basal_dendrite",
+            "has_apical_dendrite",
+            "no_invalid_negative_types",
+            "custom_types_defined",
+        }
+
+    def _route_issue_to_tool(self, issue: dict):
+        tool_target = str(issue.get("tool_target", "")).strip().lower()
+        if not tool_target:
+            return
+        if tool_target in {"label_editing", "simplification", "auto_label", "radii_cleaning", "manual_radii"}:
+            self._activate_feature("morphology_editing")
+            target_tab = {
+                "label_editing": "label editing",
+                "auto_label": "auto label",
+                "manual_radii": "manual radii editing",
+                "radii_cleaning": "auto radii editing",
+                "simplification": "simplification",
+            }.get(tool_target, "label editing")
+            self._select_control_tab_by_label(target_tab)
+            return
+        self._activate_feature("validation")
+        self._select_control_tab_by_label("validation")
+
+    def _on_issue_selected(self, issue: dict):
+        doc = self._active_document()
+        if doc is not None:
+            doc.selected_issue_id = str(issue.get("issue_id", "")).strip()
+            doc.editor.clear_selection()
+            self._manual_radii_panel.clear_selection()
+            doc.editor.set_issue_markers([issue])
+        self._data_tabs.setCurrentIndex(0)
+        if self._issue_uses_popup_only_controls(issue):
+            self._control_tabs.setVisible(False)
+        else:
+            self._control_tabs.setVisible(True)
+            self._route_issue_to_tool(issue)
+        self._context_inspector.set_issue(issue, self._build_issue_context(issue))
+        title = str(issue.get("title", "Issue")).strip() or "Issue"
+        self._status.showMessage(f"Selected issue: {title}", 4000)
+
+    def _build_issue_context(self, issue: dict) -> dict:
+        node_ids = [int(v) for v in issue.get("node_ids", [])]
+        doc = self._active_document()
+        node_preview = ", ".join(str(v) for v in node_ids[:25]) if node_ids else "None"
+        remaining_nodes = max(0, len(node_ids) - 25)
+        section_ids = [int(v) for v in issue.get("section_ids", [])]
+        ctx = {
+            "node_ids_text": ", ".join(str(v) for v in node_ids) or "None",
+            "section_ids_text": ", ".join(str(v) for v in section_ids) or "None",
+            "problem_detail": str(issue.get("description", "")).strip() or "No extra detail provided.",
+            "suggested_solution": str(issue.get("suggested_fix", "")).strip() or "Inspect the affected morphology and fix the prerequisite issue first.",
+            "tool_button_label": {
+                "validation": "Open Validation",
+                "radii_cleaning": "Open Auto Radii Editing",
+                "manual_radii": "Open Manual Radii Editing",
+                "auto_label": "Open Auto Labeling",
+                "label_editing": "Open Manual Labeling",
+                "simplification": "Open Simplification",
+            }.get(str(issue.get("tool_target", "")).strip().lower(), "Open Related Tool"),
+            "auto_fix_available": False,
+            "auto_fix_label": "",
+            "detail_lines": [],
+        }
+        if node_ids or section_ids:
+            ctx["detail_lines"].extend(
+                [
+                    f"Total affected nodes: {len(node_ids)}",
+                    f"Affected node IDs: {node_preview}",
+                    *(["Additional nodes not shown here: " + str(remaining_nodes)] if remaining_nodes > 0 else []),
+                    f"Sections: {', '.join(str(v) for v in section_ids) or 'None'}",
+                ]
+            )
+        else:
+            ctx["detail_lines"].extend(
+                [
+                    "Affected nodes: not provided by this check",
+                    "Affected sections: not provided by this check",
+                ]
+            )
+        if doc is None or doc.df is None or doc.df.empty:
+            return ctx
+
+        payload = dict(issue.get("source_payload", {}) or {})
+        radii_stats = dict(radii_stats_by_type(doc.df, bins=20))
+        type_stats_map = dict(radii_stats.get("type_stats", {}) or {})
+        if node_ids:
+            ctx["focus_node_id"] = int(node_ids[0])
+
+        if str(issue.get("source_key", "")).strip() == "blocked_validation_checks":
+            blocked_checks = list(payload.get("blocked_checks", []) or [])
+            blocked_labels = [str(item.get("label", "")).strip() for item in blocked_checks if str(item.get("label", "")).strip()]
+            blocked_reason = str(payload.get("blocked_reason", "Unknown prerequisite issue")).strip()
+            preface_lines: list[str] = []
+            if blocked_reason.lower() == "unsupported section type: 0":
+                preface_lines = [
+                    "Some dependent checks are still blocked because neurite sections still contain unsupported type 0 labels.",
+                    "If you already assigned a soma, that part is fixed; the remaining blocked state comes from unlabeled neurite nodes.",
+                    "",
+                ]
+            ctx["detail_lines"] = [
+                *preface_lines,
+                f"Blocked reason: {blocked_reason}",
+                f"Checks that could not run ({len(blocked_labels)}):",
+                *[f"- {label}" for label in blocked_labels],
+                "",
+                "Suggested next step:",
+                str(ctx.get("suggested_solution", "")).strip(),
+            ]
+            return ctx
+
+        radii_issue_keys = {
+            "all_neurite_radii_nonzero",
+            "soma_radius_nonzero",
+            "no_ultranarrow_sections",
+            "no_ultranarrow_starts",
+            "no_fat_terminal_ends",
+            "radius_upper_bound",
+            "radii_outlier_batch",
+        }
+        if str(issue.get("domain", "")).strip() == "radii" or str(issue.get("source_key", "")).strip() in radii_issue_keys:
+            ctx.update(
+                {
+                    "custom_primary_label": "Open Manual Radii Editing",
+                    "custom_primary_action": "open_manual_radii_tool",
+                    "custom_secondary_label": "Open Auto Radii Editing",
+                    "custom_secondary_action": "open_auto_radii_tool",
+                    "hide_skip_button": True,
+                    "hide_apply_button": True,
+                }
+            )
+
+        if str(issue.get("source_key", "")).strip() == "valid_soma_format":
+            complex_groups = list(payload.get("metrics", {}).get("complex_groups", []) or [])
+            preview = []
+            for group in complex_groups[:10]:
+                preview.append(
+                    f"Group anchored at node {int(group.get('anchor_id', -1))}: "
+                    f"{len(list(group.get('node_ids', []) or []))} connected soma nodes"
+                )
+            ctx.update(
+                {
+                    "problem_detail": str(issue.get("description", "")).strip() or "Complex multi-node soma format detected.",
+                    "suggested_solution": (
+                        "Consolidate each connected soma group into one mega-node: isolate connected type-1 nodes, "
+                        "compute the centroid, set the radius to furthest-distance-plus-radius, and rewire all "
+                        "non-soma children to the surviving anchor node."
+                    ),
+                    "custom_primary_label": "Consolidate Soma",
+                    "custom_primary_action": "consolidate_soma",
+                    "hide_detail_section": True,
+                    "detail_lines": [
+                        f"Complex soma groups: {len(complex_groups)}",
+                        "",
+                        "Consolidation steps:",
+                        "1. Group connected soma nodes (type 1) by topology.",
+                        "2. Replace each group with one mega-node at the centroid.",
+                        "3. Set radius to furthest-node distance plus that node's radius.",
+                        "4. Rewire all axon/dendrite children to the new anchor node.",
+                        "",
+                        *preview,
+                    ],
+                }
+            )
+            return ctx
+
+        if str(issue.get("source_key", "")).strip() in {"has_soma", "has_axon", "has_basal_dendrite", "has_apical_dendrite"}:
+            missing_key = str(issue.get("source_key", "")).strip()
+            missing_label_map = {
+                "has_soma": "soma",
+                "has_axon": "axon",
+                "has_basal_dendrite": "basal dendrite",
+                "has_apical_dendrite": "apical dendrite",
+            }
+            missing_label = missing_label_map.get(missing_key, "neurite type")
+            ctx.update(
+                {
+                    "problem_detail": str(issue.get("description", "")).strip() or f"No {missing_label} node found.",
+                    "suggested_solution": (
+                        "Choose either manual labeling in Morphology Editing or Auto Labeling to assign the missing type. "
+                        "Dependent checks will rerun automatically after the change."
+                    ),
+                    "custom_primary_label": "Open Manual Labeling",
+                    "custom_primary_action": "open_manual_label_popup",
+                    "custom_secondary_label": "Open Auto Labeling",
+                    "custom_secondary_action": "open_auto_label_popup",
+                    "hide_skip_button": True,
+                    "hide_apply_button": True,
+                    "hide_detail_section": True,
+                }
+            )
+            return ctx
+
+        if str(issue.get("source_key", "")).strip() == "multiple_somas":
+            soma_ids = list(payload.get("metrics", {}).get("soma_ids_after_consolidation", []) or [])
+            ctx.update(
+                {
+                    "problem_detail": str(issue.get("description", "")).strip() or "Multiple disconnected soma groups detected.",
+                    "suggested_solution": "This file must be split into one SWC per disconnected tree.",
+                    "custom_primary_label": "Split",
+                    "custom_primary_action": "split_trees",
+                    "hide_detail_section": True,
+                    "detail_lines": [
+                        f"Disconnected soma groups: {len(soma_ids)}",
+                        f"Soma anchor IDs: {', '.join(str(int(v)) for v in soma_ids) if soma_ids else 'None'}",
+                        "",
+                        "Suggested fix:",
+                        "Split each disconnected tree into its own SWC file.",
+                    ],
+                }
+            )
+            return ctx
+
+        if str(issue.get("source_key", "")).strip() == "custom_types_defined":
+            undefined_custom_types = list(payload.get("metrics", {}).get("undefined_custom_types", []) or [])
+            detail_lines = [
+                f"Total affected nodes: {len(node_ids)}",
+                f"Affected node IDs: {node_preview}",
+                *(["Additional nodes not shown here: " + str(remaining_nodes)] if remaining_nodes > 0 else []),
+                "",
+                "Undefined custom type groups:",
+            ]
+            if undefined_custom_types:
+                for item in undefined_custom_types:
+                    type_id = int(item.get("type_id", -1))
+                    sample_ids = [int(v) for v in list(item.get("node_ids_sample", []) or [])]
+                    detail_lines.append(
+                        f"Type {type_id}: {int(item.get('node_count', 0))} node(s)"
+                    )
+                    if sample_ids:
+                        detail_lines.append(
+                            f"  sample node IDs: {', '.join(str(v) for v in sample_ids[:25])}"
+                        )
+            else:
+                affected_rows = doc.df.loc[doc.df["id"].astype(int).isin(node_ids)].copy() if node_ids else pd.DataFrame(columns=SWC_COLS)
+                for _, row in affected_rows.head(50).iterrows():
+                    detail_lines.append(
+                        f"Node {int(row['id'])}: current type={int(row['type'])}, "
+                        f"label={label_for_type(int(row['type']))}"
+                    )
+                if len(affected_rows) > 50:
+                    detail_lines.extend(["...", f"Only first 50 affected nodes shown here. Remaining nodes: {len(affected_rows) - 50}"])
+            ctx.update(
+                {
+                    "problem_detail": str(issue.get("description", "")).strip() or "Custom SWC type IDs need display definitions.",
+                    "suggested_solution": "Open Manual Labeling and define each custom type with a type ID, name, color, and notes.",
+                    "custom_primary_label": "Open Manual Labeling",
+                    "custom_primary_action": "open_manual_label_popup",
+                    "hide_skip_button": True,
+                    "hide_apply_button": True,
+                    "detail_lines": detail_lines,
+                }
+            )
+            return ctx
+
+        if str(issue.get("source_key", "")).strip() == "no_invalid_negative_types":
+            detail_lines = [
+                f"Total affected nodes: {len(node_ids)}",
+                f"Affected node IDs: {node_preview}",
+                *(["Additional nodes not shown here: " + str(remaining_nodes)] if remaining_nodes > 0 else []),
+                "",
+                "Invalid type values by node:",
+            ]
+            affected_rows = doc.df.loc[doc.df["id"].astype(int).isin(node_ids)].copy() if node_ids else pd.DataFrame(columns=SWC_COLS)
+            affected_rows = affected_rows.sort_values("id")
+            for _, row in affected_rows.head(50).iterrows():
+                detail_lines.append(
+                    f"Node {int(row['id'])}: current type={int(row['type'])}, "
+                    f"radius={float(row['radius']):.5g}, parent={int(row['parent'])}"
+                )
+            if len(affected_rows) > 50:
+                detail_lines.extend(["...", f"Only first 50 affected nodes shown here. Remaining nodes: {len(affected_rows) - 50}"])
+            ctx.update(
+                {
+                    "problem_detail": str(issue.get("description", "")).strip() or "One or more nodes use invalid negative SWC type values.",
+                    "suggested_solution": "Relabel nodes with invalid negative type values to supported SWC types.",
+                    "custom_primary_label": "Open Manual Labeling",
+                    "custom_primary_action": "open_manual_label_popup",
+                    "hide_skip_button": True,
+                    "hide_apply_button": True,
+                    "detail_lines": detail_lines,
+                }
+            )
+            return ctx
+
+        if (
+            str(issue.get("source_key", "")).strip() == "no_fat_terminal_ends"
+            and not node_ids
+            and not section_ids
+        ):
+            ctx.update(
+                {
+                    "problem_detail": "This warning means one or more terminal branch endings appear abnormally thick compared with the local branch trend.",
+                    "suggested_solution": "Inspect terminal tips in Auto Radii Editing or adjust individual nodes in Manual Radii Editing.",
+                    "detail_lines": [
+                        "This is a morphology-level NeuroM warning.",
+                        "The current backend reports pass/fail for this check but does not return exact terminal node IDs.",
+                        "",
+                        "Suggested review focus:",
+                        "- terminal tips with unusually large radii",
+                        "- sudden radius inflation at branch endings",
+                    ],
+                }
+            )
+            return ctx
+
+        radii_issue_keys = {
+            "all_neurite_radii_nonzero",
+            "soma_radius_nonzero",
+            "no_ultranarrow_sections",
+            "no_ultranarrow_starts",
+            "no_fat_terminal_ends",
+            "radius_upper_bound",
+            "radii_outlier_batch",
+        }
+        if str(issue.get("domain", "")).strip() == "radii" or str(issue.get("source_key", "")).strip() in radii_issue_keys:
+            detail_lines = [
+                f"Total affected nodes: {len(node_ids)}",
+                f"Affected node IDs: {node_preview}",
+                *(["Additional nodes not shown here: " + str(remaining_nodes)] if remaining_nodes > 0 else []),
+            ]
+            if section_ids:
+                detail_lines.append(f"Sections: {', '.join(str(v) for v in section_ids)}")
+            detail_lines.append("")
+            detail_lines.append("Affected node radii:")
+
+            affected_rows = doc.df.loc[doc.df["id"].astype(int).isin(node_ids)].copy() if node_ids else pd.DataFrame(columns=SWC_COLS)
+            affected_rows = affected_rows.sort_values("id")
+            for _, row in affected_rows.head(50).iterrows():
+                type_id = int(row["type"])
+                stats_row = dict(type_stats_map.get(str(type_id), {}) or {})
+                summary = []
+                if stats_row.get("median") is not None:
+                    summary.append(f"median={float(stats_row.get('median', 0.0)):.5g}")
+                if stats_row.get("q1") is not None and stats_row.get("q3") is not None:
+                    summary.append(
+                        f"q1={float(stats_row.get('q1', 0.0)):.5g}"
+                    )
+                    summary.append(
+                        f"q3={float(stats_row.get('q3', 0.0)):.5g}"
+                    )
+                summary_text = f" | type stats: {', '.join(summary)}" if summary else ""
+                detail_lines.append(
+                    f"Node {int(row['id'])}: radius={float(row['radius']):.5g}, "
+                    f"type={label_for_type(type_id)} ({type_id}){summary_text}"
+                )
+            if len(affected_rows) > 50:
+                detail_lines.extend(["...", f"Only first 50 affected nodes shown here. Remaining nodes: {len(affected_rows) - 50}"])
+            ctx["detail_lines"] = detail_lines
+            return ctx
+
+        if (
+            not node_ids
+            and not section_ids
+            and str(payload.get("source", "")).strip() == "neuron_morphology"
+        ):
+            recommended_tool = str(issue.get("tool_target", "") or "").strip()
+            ctx.update(
+                {
+                    "detail_lines": [
+                        "This is a morphology-level NeuroM check result.",
+                        "The current backend reports pass/fail for this warning but does not return exact node IDs or section IDs.",
+                        "",
+                        f"Check key: {issue.get('source_key', '') or 'n/a'}",
+                        *([f"Recommended tool: {recommended_tool}"] if recommended_tool else []),
+                    ],
+                }
+            )
+            return ctx
+
+        if str(issue.get("source_key", "")).strip() == "no_duplicate_3d_points":
+            duplicate_groups = list(payload.get("metrics", {}).get("duplicate_groups_sample", []) or [])
+            group_lines: list[str] = []
+            for idx, group in enumerate(duplicate_groups, start=1):
+                ids_in_group = [int(v) for v in list(group.get("ids", []) or [])]
+                xyz = list(group.get("xyz", []) or [])
+                xyz_text = ", ".join(f"{float(v):.5g}" for v in xyz[:3]) if len(xyz) >= 3 else "unknown"
+                group_lines.append(
+                    f"Group {idx}: nodes {', '.join(str(v) for v in ids_in_group)} share XYZ ({xyz_text})"
+                )
+            total_groups = int(payload.get("metrics", {}).get("duplicate_group_count", len(duplicate_groups)))
+            ctx.update(
+                {
+                    "problem_detail": str(issue.get("description", "")).strip() or "Multiple nodes share exactly the same 3D position.",
+                    "suggested_solution": "Review each duplicated node group and merge, delete, or simplify the redundant geometry.",
+                    "detail_lines": [
+                        f"Duplicate groups found: {total_groups}",
+                        f"Total affected nodes: {len(node_ids)}",
+                        "",
+                        "Duplicated node groups:",
+                        *group_lines,
+                        *(["...", f"Only first {len(duplicate_groups)} duplicate groups shown here."] if total_groups > len(duplicate_groups) else []),
+                    ],
+                }
+            )
+            return ctx
+
+        if str(issue.get("source_key", "")).strip() == "radii_outlier_batch":
+            changes = list(payload.get("changes", []) or [])
+            preview_lines = []
+            for item in changes[:50]:
+                reasons = ", ".join(str(reason) for reason in list(item.get("reasons", [])) if str(reason).strip())
+                preview_lines.append(
+                    f"Node {int(item.get('node_id', -1))}: {float(item.get('old_radius', 0.0)):.5g} -> "
+                    f"{float(item.get('new_radius', 0.0)):.5g}"
+                    + (f" ({reasons})" if reasons else "")
+                )
+            ctx.update(
+                {
+                    "auto_fix_available": True,
+                    "auto_fix_label": "Apply Suggested Radii",
+                    "problem_detail": f"{len(changes)} nodes have suspicious radii that likely need cleanup.",
+                    "suggested_solution": "Review the selected nodes in Manual Radii Editing or use Auto Radii Editing for broader cleanup.",
+                    "detail_lines": [
+                        f"Total affected nodes: {len(changes)}",
+                        f"Affected node IDs: {', '.join(str(int(item.get('node_id', -1))) for item in changes[:25])}",
+                        *(["Additional nodes not shown here: " + str(max(0, len(changes) - 25))] if len(changes) > 25 else []),
+                        "",
+                        "Problem details by node:",
+                        "Suggested updates:",
+                        *preview_lines,
+                        *(["...", f"Only first 50 node updates shown here. Remaining nodes: {max(0, len(changes) - 50)}"] if len(changes) > 50 else []),
+                    ],
+                }
+            )
+            return ctx
+
+        if str(issue.get("source_key", "")).strip() == "type_suspicion_batch":
+            changes = list(payload.get("changes", []) or [])
+            preview_lines = []
+            for item in changes[:50]:
+                preview_lines.append(
+                    f"Node {int(item.get('node_id', -1))}: type {int(item.get('old_type', -1))} -> "
+                    f"type {int(item.get('new_type', -1))}"
+                )
+            ctx.update(
+                {
+                    "auto_fix_available": True,
+                    "auto_fix_label": "Apply Suggested Labels",
+                    "problem_detail": f"{len(changes)} nodes have likely incorrect neurite labels.",
+                    "suggested_solution": "Apply the suggested labels automatically, or inspect the same nodes in Morphology Editing.",
+                    "detail_lines": [
+                        f"Total affected nodes: {len(changes)}",
+                        f"Affected node IDs: {', '.join(str(int(item.get('node_id', -1))) for item in changes[:25])}",
+                        *(["Additional nodes not shown here: " + str(max(0, len(changes) - 25))] if len(changes) > 25 else []),
+                        "",
+                        "Problem details by node:",
+                        "Suggested relabeling:",
+                        *preview_lines,
+                        *(["...", f"Only first 50 relabel suggestions shown here. Remaining nodes: {max(0, len(changes) - 50)}"] if len(changes) > 50 else []),
+                    ],
+                }
+            )
+            return ctx
+
+        if node_ids:
+            ctx["detail_lines"].extend(["", f"This issue is attached to {len(node_ids)} node(s). Use the highlighted nodes in the viewer to inspect the local morphology."])
+
+        ctx["detail_lines"].append(f"Check key: {issue.get('source_key', '') or 'n/a'}")
+        recommended_tool = str(issue.get("tool_target", "") or "").strip()
+        if recommended_tool:
+            ctx["detail_lines"].append(f"Recommended tool: {recommended_tool}")
+        return ctx
+
+    def _apply_document_dataframe(
+        self,
+        doc: _DocumentState,
+        df: pd.DataFrame,
+        *,
+        event_title: str = "",
+        event_summary: str = "",
+        event_details: list[str] | None = None,
+        push_history: bool = True,
+        record_type_changes: bool = True,
+    ):
+        old_df = doc.df.copy() if doc.df is not None else None
+        doc.df = df.copy()
+        if record_type_changes:
+            self._record_morph_type_changes(doc, old_df, doc.df)
+        if push_history:
+            self._push_document_history(doc, doc.df)
+        self._write_recovery_copy(doc)
+        doc.editor.load_swc(doc.df, doc.filename)
+        doc.editor.set_mode(self._editor_mode_for_feature())
+        self._refresh_edit_history_state(doc)
+        if event_title:
+            self._record_session_event(
+                doc,
+                kind="issue_fix",
+                title=event_title,
+                summary=event_summary,
+                details=event_details or [],
+            )
+        self._sync_from_active_document(auto_run_validation=False)
+
+    def _rerun_active_validation(self, *, resolved_issue_id: str | None = None):
+        doc = self._active_document()
+        if doc is None:
+            return
+        self._validation_tab.stop_worker(wait_ms=5000)
+        if resolved_issue_id:
+            doc.pending_resolved_issue_ids.add(str(resolved_issue_id))
+            doc.issue_status_overrides.pop(str(resolved_issue_id), None)
+        self._validation_tab.load_swc(doc.df, doc.filename, file_path=doc.file_path, auto_run=False)
+        self._validation_tab.run_validation()
+
+    def _find_issue_by_id(self, doc: _DocumentState | None, issue_id: str) -> dict | None:
+        if doc is None:
+            return None
+        wanted = str(issue_id or "").strip()
+        if not wanted:
+            return None
+        for item in doc.issues:
+            if str(item.get("issue_id", "")).strip() == wanted:
+                return dict(item)
+        return None
+
+    def _find_matching_issue(self, doc: _DocumentState | None, previous_issue: dict | None) -> dict | None:
+        if doc is None or not isinstance(previous_issue, dict):
+            return None
+        candidates = [dict(item) for item in doc.issues if isinstance(item, dict)]
+        if not candidates:
+            return None
+
+        previous_source_key = str(previous_issue.get("source_key", "")).strip()
+        previous_title = str(previous_issue.get("title", "")).strip()
+        previous_domain = str(previous_issue.get("domain", "")).strip()
+        previous_certainty = str(previous_issue.get("certainty", "")).strip()
+
+        scoped = candidates
+        if previous_source_key:
+            same_source = [
+                item for item in candidates
+                if str(item.get("source_key", "")).strip() == previous_source_key
+            ]
+            if same_source:
+                scoped = same_source
+        elif previous_title:
+            same_title = [
+                item for item in candidates
+                if str(item.get("title", "")).strip() == previous_title
+            ]
+            if same_title:
+                scoped = same_title
+
+        previous_nodes = {int(v) for v in previous_issue.get("node_ids", [])}
+        previous_sections = {int(v) for v in previous_issue.get("section_ids", [])}
+
+        def _score(candidate: dict) -> tuple[int, int, int, int, int, int, str]:
+            score = 0
+            candidate_source = str(candidate.get("source_key", "")).strip()
+            candidate_title = str(candidate.get("title", "")).strip()
+            candidate_domain = str(candidate.get("domain", "")).strip()
+            candidate_certainty = str(candidate.get("certainty", "")).strip()
+            if candidate_source and candidate_source == previous_source_key:
+                score += 1000
+            if candidate_title and candidate_title == previous_title:
+                score += 200
+            if candidate_domain and candidate_domain == previous_domain:
+                score += 100
+            if candidate_certainty and candidate_certainty == previous_certainty:
+                score += 50
+
+            candidate_nodes = {int(v) for v in candidate.get("node_ids", [])}
+            candidate_sections = {int(v) for v in candidate.get("section_ids", [])}
+            node_overlap = len(previous_nodes & candidate_nodes)
+            section_overlap = len(previous_sections & candidate_sections)
+            score += node_overlap * 10
+            score += section_overlap * 5
+
+            return (
+                score,
+                node_overlap,
+                section_overlap,
+                -abs(len(candidate_nodes) - len(previous_nodes)),
+                -abs(len(candidate_sections) - len(previous_sections)),
+                -len(candidate_nodes),
+                str(candidate.get("issue_id", "")).strip(),
+            )
+
+        best = max(scoped, key=_score, default=None)
+        if not isinstance(best, dict):
+            return None
+
+        best_source = str(best.get("source_key", "")).strip()
+        best_title = str(best.get("title", "")).strip()
+        best_nodes = {int(v) for v in best.get("node_ids", [])}
+        best_sections = {int(v) for v in best.get("section_ids", [])}
+        if previous_source_key and best_source == previous_source_key:
+            if (
+                len(scoped) == 1
+                or bool(previous_nodes & best_nodes)
+                or bool(previous_sections & best_sections)
+                or (not previous_nodes and not previous_sections)
+            ):
+                return best
+            return None
+        if previous_title and best_title == previous_title:
+            return best
+        return None
+
+    def _on_apply_suggested_fix_requested(self, issue_id: str):
+        doc = self._active_document()
+        if doc is None or doc.df is None or doc.df.empty:
+            return
+        issue = self._find_issue_by_id(doc, issue_id)
+        if not issue:
+            return
+        source_key = str(issue.get("source_key", "")).strip()
+        payload = dict(issue.get("source_payload", {}) or {})
+
+        if source_key == "radii_outlier_batch":
+            changes = list(payload.get("changes", []) or [])
+            if not changes:
+                return
+            df = doc.df.copy()
+            applied = []
+            for item in changes:
+                node_id = int(item.get("node_id", -1))
+                mask = df["id"] == node_id
+                if not bool(mask.any()):
+                    continue
+                old_radius = float(df.loc[mask, "radius"].iloc[0])
+                new_radius = float(item.get("new_radius", old_radius))
+                df.loc[mask, "radius"] = new_radius
+                applied.append(f"Node {node_id}: {old_radius:.5g} -> {new_radius:.5g}")
+            if not applied:
+                return
+            self._apply_document_dataframe(
+                doc,
+                df,
+                event_title="Apply Suggested Radii",
+                event_summary=f"Applied suggested radii to {len(applied)} nodes.",
+                event_details=applied[:20] + [f"Issue: {issue_id}"],
+            )
+            self._append_log(f"Applied suggested radii to {len(applied)} nodes.", "INFO")
+            self._rerun_active_validation(resolved_issue_id=issue_id)
+            return
+
+        if source_key == "type_suspicion_batch":
+            changes = list(payload.get("changes", []) or [])
+            if not changes:
+                return
+            df = doc.df.copy()
+            applied = []
+            for item in changes:
+                node_id = int(item.get("node_id", -1))
+                mask = df["id"] == node_id
+                if not bool(mask.any()):
+                    continue
+                old_type = int(df.loc[mask, "type"].iloc[0])
+                new_type = int(item.get("new_type", old_type))
+                df.loc[mask, "type"] = new_type
+                applied.append(f"Node {node_id}: {old_type} -> {new_type}")
+            if not applied:
+                return
+            self._apply_document_dataframe(
+                doc,
+                df,
+                event_title="Apply Suggested Labels",
+                event_summary=f"Applied suggested labels to {len(applied)} nodes.",
+                event_details=applied[:20] + [f"Issue: {issue_id}"],
+            )
+            self._append_log(f"Applied suggested labels to {len(applied)} nodes.", "INFO")
+            self._rerun_active_validation(resolved_issue_id=issue_id)
+
+    def _on_skip_issue_requested(self, issue_id: str, skipping: bool):
+        doc = self._active_document()
+        if doc is None:
+            return
+        key = str(issue_id or "").strip()
+        if not key:
+            return
+        if skipping:
+            doc.issue_status_overrides[key] = "skipped"
+        else:
+            doc.issue_status_overrides.pop(key, None)
+        for item in doc.issues:
+            if str(item.get("issue_id", "")).strip() == key:
+                item["status"] = "skipped" if skipping else "open"
+        self._apply_issue_state(doc)
+        if self._issue_panel.select_issue(key):
+            self._on_issue_selected(next((item for item in doc.issues if str(item.get("issue_id", "")).strip() == key), None) or {})
+
+    def _on_context_open_tool_requested(self, tool_target: str):
+        target = str(tool_target or "").strip().lower()
+        if target in {"label_editing", "simplification", "auto_label", "radii_cleaning", "manual_radii"}:
+            self._activate_feature("morphology_editing")
+            target_tab = {
+                "label_editing": "label editing",
+                "auto_label": "auto label",
+                "manual_radii": "manual radii editing",
+                "radii_cleaning": "auto radii editing",
+                "simplification": "simplification",
+            }.get(target, "label editing")
+            self._select_control_tab_by_label(target_tab)
+            return
+        self._route_issue_to_tool({"tool_target": target})
+
+    def _on_context_custom_action_requested(self, issue_id: str, action_id: str):
+        action = str(action_id or "").strip().lower()
+        if action == "open_manual_label_popup":
+            self._control_tabs.setVisible(True)
+            self._activate_feature("morphology_editing")
+            self._select_control_tab_by_label("label editing")
+            return
+        if action == "open_auto_label_popup":
+            self._control_tabs.setVisible(True)
+            self._activate_feature("morphology_editing")
+            self._select_control_tab_by_label("auto label")
+            return
+        if action == "open_manual_radii_tool":
+            self._control_tabs.setVisible(True)
+            self._activate_feature("morphology_editing")
+            self._select_control_tab_by_label("manual radii editing")
+            return
+        if action == "open_auto_radii_tool":
+            self._control_tabs.setVisible(True)
+            self._activate_feature("morphology_editing")
+            self._select_control_tab_by_label("auto radii editing")
+            return
+        if action == "consolidate_soma":
+            doc = self._active_document()
+            issue = self._find_issue_by_id(doc, issue_id)
+            if doc is None or issue is None or doc.df is None or doc.df.empty:
+                return
+            arr = np.zeros(
+                len(doc.df),
+                dtype=[
+                    ("id", np.int64),
+                    ("type", np.int64),
+                    ("x", np.float64),
+                    ("y", np.float64),
+                    ("z", np.float64),
+                    ("radius", np.float64),
+                    ("parent", np.int64),
+                ],
+            )
+            for col in SWC_COLS:
+                arr[col] = doc.df[col].to_numpy()
+            result = consolidate_complex_somas_array(arr)
+            final_arr = np.array(result.get("array", arr), copy=True)
+            if final_arr.size == 0:
+                return
+            new_df = pd.DataFrame({col: final_arr[col] for col in SWC_COLS}, columns=SWC_COLS)
+            new_df["id"] = new_df["id"].astype(int)
+            new_df["type"] = new_df["type"].astype(int)
+            new_df["parent"] = new_df["parent"].astype(int)
+            group_infos = list(result.get("groups", []) or [])
+            changed = bool(result.get("changed"))
+            removed_nodes = max(0, int(arr.size) - int(final_arr.size))
+            event_details = [
+                f"Collapsed soma groups: {int(result.get('group_count', 0))}",
+                f"Complex groups changed: {len(list(result.get('complex_groups', []) or []))}",
+                f"Removed soma nodes: {removed_nodes}",
+            ]
+            for group in group_infos[:10]:
+                event_details.append(
+                    f"Anchor {int(group.get('anchor_id', -1))}: "
+                    f"{int(group.get('group_size', 0))} node(s) -> radius {float(group.get('radius', 0.0)):.5g}"
+                )
+            if not changed:
+                event_details.append("No connected multi-node soma groups required consolidation.")
+            self._apply_document_dataframe(
+                doc,
+                new_df,
+                event_title="Consolidate Soma",
+                event_summary=(
+                    f"Collapsed {len(list(result.get('complex_groups', []) or []))} complex soma group(s) "
+                    f"into mega-node representation."
+                ),
+                event_details=event_details,
+            )
+            self._append_log(
+                f"Consolidated soma representation: groups={int(result.get('group_count', 0))}, removed_nodes={removed_nodes}.",
+                "INFO",
+            )
+            self._rerun_active_validation(resolved_issue_id=issue_id)
+            return
+        if action == "split_trees":
+            saved_paths = list(self._validation_tab._on_save_all() or [])
+            if not saved_paths:
+                return
+            first_path = str(saved_paths[0])
+            reply = QMessageBox.question(
+                self,
+                "Open First Split Tree",
+                (
+                    f"Saved {len(saved_paths)} split SWC file(s).\n\n"
+                    f"Do you want to open the first tree now?\n{first_path}"
+                ),
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.Yes,
+            )
+            if reply == QMessageBox.Yes:
+                self._load_swc(first_path)
+            return
+        if action == "download_validation_report":
+            self._validation_tab._on_download_report()
+            return
+        if action == "define_custom_types":
+            doc = self._active_document()
+            issue = self._find_issue_by_id(doc, issue_id)
+            if not issue:
+                return
+            payload = dict(issue.get("source_payload", {}) or {})
+            missing_defs = list(payload.get("metrics", {}).get("undefined_custom_types", []) or [])
+            if not missing_defs:
+                return
+            dialog = DefineCustomTypesDialog(missing_defs, self)
+            if dialog.exec() != QDialog.Accepted:
+                return
+            if doc is not None:
+                doc.editor.load_swc(doc.df, doc.filename)
+                self._table_widget.load_dataframe(doc.df, doc.filename)
+            self._append_log(f"Saved {len(missing_defs)} custom type definition(s).", "INFO")
+            self._rerun_active_validation(resolved_issue_id=issue_id)
+            return
+
+    def _on_issue_panel_export_swc_requested(self):
+        self._on_export()
 
     def _toggle_data_panel(self, checked: bool):
         self._data_dock.setVisible(bool(checked))
@@ -2044,7 +3483,8 @@ class SWCMainWindow(QMainWindow):
             self._auto_guide_dock.hide()
 
     def _toggle_log_panel(self, checked: bool):
-        self._log_console.setVisible(bool(checked))
+        self._bottom_log_title.setVisible(bool(checked))
+        self._edit_log_text.setVisible(bool(checked))
 
     def _show_precheck_floating(self):
         self._precheck_dock.show()
@@ -2119,22 +3559,18 @@ class SWCMainWindow(QMainWindow):
         )
 
     def _undo_edit(self):
-        ed = self._active_editor()
-        if ed is not None and hasattr(ed, "_dendro"):
-            ed._dendro._undo_stack.undo()
+        if self._undo_document(self._active_source_document()):
             self._append_log("Undo.", "INFO")
 
     def _redo_edit(self):
-        ed = self._active_editor()
-        if ed is not None and hasattr(ed, "_dendro"):
-            ed._dendro._undo_stack.redo()
+        if self._redo_document(self._active_source_document()):
             self._append_log("Redo.", "INFO")
 
     def closeEvent(self, event):
         self._closing_app = True
         try:
             if hasattr(self, "_validation_tab"):
-                self._validation_tab.stop_worker(wait_ms=2000)
+                self._validation_tab.stop_worker(wait_ms=5000)
             for doc in list(self._documents.values()):
                 self._write_closed_copy_and_log(doc)
         finally:
@@ -2150,12 +3586,12 @@ class SWCMainWindow(QMainWindow):
             "Quick Manual:\n"
             "1) Top menu row: File/Edit/View/Window/Help dropdown menus.\n"
             "2) Tools bar: choose a tool, then choose its feature row under it.\n"
-            "3) Data Explorer and Control Center are dock windows (close, float, resize, move).\n"
+            "3) Issue Navigator and Inspector are dock windows (close, float, resize, move).\n"
             "4) You can open multiple SWC files as canvas tabs.\n"
             "5) Drag a canvas tab outside the tab bar to detach it into a floating window.\n"
             "6) Closing a SWC tab/window auto-saves edited SWC copy and morphology log.\n"
-            "7) Validation uses a floating Rule Guide window above the canvas.\n"
-            "8) Auto Label tabs use a floating Auto Typing Guide window with decision boundaries.\n"
+            "7) Opening an SWC runs checks and populates the Issue Navigator automatically.\n"
+            "8) Clicking an issue focuses the viewer and opens the related repair workflow.\n"
             "9) Bottom panel shows all logs and warnings."
         )
         self._append_log(text, "HELP")

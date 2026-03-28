@@ -52,6 +52,8 @@ Validation rules are grouped into these categories:
 
 ## Structural presence
 
+- Soma format is simple
+- Only one connected soma group remains
 - Soma present
 - Axon present
 - Basal dendrite present
@@ -83,7 +85,7 @@ Validation rules are grouped into these categories:
 ## Index consistency
 
 - No section index gaps
-- No root index gaps
+- Neurite roots too far from soma
 
 These labels/rules are centralized in:
 

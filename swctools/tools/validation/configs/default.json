@@ -1,6 +1,10 @@
 {
   "checks": {
+    "valid_soma_format": {"enabled": true, "severity": "warning", "params": {}},
+    "multiple_somas": {"enabled": true, "severity": "error", "params": {}},
     "has_soma": {"enabled": true, "severity": "error", "params": {}},
+    "no_invalid_negative_types": {"enabled": true, "severity": "error", "params": {}},
+    "custom_types_defined": {"enabled": true, "severity": "warning", "params": {}},
     "has_axon": {"enabled": true, "severity": "warning", "params": {}},
     "has_basal_dendrite": {"enabled": true, "severity": "warning", "params": {}},
     "has_apical_dendrite": {"enabled": true, "severity": "warning", "params": {}},
@@ -10,15 +14,73 @@
     "has_multifurcation": {"enabled": true, "severity": "warning", "params": {}},
     "no_back_tracking": {"enabled": false, "severity": "warning", "params": {}},
     "no_dangling_branches": {"enabled": true, "severity": "error", "params": {}},
-    "no_fat_terminal_ends": {"enabled": true, "severity": "warning", "params": {}},
-    "no_flat_neurites": {"enabled": true, "severity": "warning", "params": {}},
-    "no_section_index_jumps": {"enabled": true, "severity": "error", "params": {}},
-    "no_ultranarrow_sections": {"enabled": true, "severity": "warning", "params": {}},
-    "no_ultranarrow_starts": {"enabled": true, "severity": "warning", "params": {}},
+    "no_self_loop": {"enabled": true, "severity": "error", "params": {}},
+    "no_fat_terminal_ends": {
+      "enabled": true,
+      "severity": "warning",
+      "params": {
+        "multiple_of_mean": 2.0,
+        "final_point_count": 5
+      }
+    },
+    "no_flat_neurites": {
+      "enabled": true,
+      "severity": "warning",
+      "params": {
+        "tol": 0.1,
+        "method": "ratio"
+      }
+    },
+    "no_extreme_spatial_jump": {
+      "enabled": true,
+      "severity": "warning",
+      "params": {
+        "min_jump_um": 200.0,
+        "median_ratio": 10.0,
+        "mad_scale": 12.0,
+        "mad_floor_um": 1.0
+      }
+    },
+    "no_section_index_jumps": {
+      "enabled": true,
+      "severity": "error",
+      "params": {
+        "max_distance": 30.0,
+        "axis": "z"
+      }
+    },
+    "no_ultranarrow_sections": {
+      "enabled": true,
+      "severity": "warning",
+      "params": {
+        "radius_threshold": 0.05,
+        "considered_section_min_length": 50.0
+      }
+    },
+    "no_ultranarrow_starts": {
+      "enabled": true,
+      "severity": "warning",
+      "params": {
+        "frac": 0.9
+      }
+    },
     "no_duplicate_3d_points": {"enabled": true, "severity": "error", "params": {}},
-    "no_root_index_jumps": {"enabled": true, "severity": "error", "params": {}},
+    "no_root_index_jumps": {
+      "enabled": true,
+      "severity": "error",
+      "params": {
+        "radius_multiplier": 2.0
+      }
+    },
+    "parent_id_less_than_child_id": {"enabled": true, "severity": "warning", "params": {}},
     "no_single_child_chains": {"enabled": true, "severity": "warning", "params": {}},
-    "soma_radius_nonzero": {"enabled": true, "severity": "warning", "params": {}},
+    "soma_radius_nonzero": {
+      "enabled": true,
+      "severity": "warning",
+      "params": {
+        "threshold": 0.0
+      }
+    },
     "has_unifurcation": {"enabled": true, "severity": "warning", "params": {}},
     "radius_upper_bound": {
       "enabled": false,

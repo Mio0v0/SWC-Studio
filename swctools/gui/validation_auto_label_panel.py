@@ -1,4 +1,4 @@
-"""Validation control panel: single-file auto labeling with preview/apply/cancel."""
+"""Validation control panel: single-file auto labeling applied in-place."""
 
 from __future__ import annotations
 
@@ -114,12 +114,13 @@ class ValidationAutoLabelPanel(QWidget):
         desc.setStyleSheet("font-size: 12px; color: #555;")
         root.addWidget(desc)
 
-        flags_row1 = QHBoxLayout()
-        flags_row2 = QHBoxLayout()
-        self._flag_soma = QCheckBox("--soma")
-        self._flag_axon = QCheckBox("--axon")
-        self._flag_apic = QCheckBox("--apic")
-        self._flag_basal = QCheckBox("--basal")
+        flags_row = QHBoxLayout()
+        flags_row.setContentsMargins(0, 0, 0, 0)
+        flags_row.setSpacing(12)
+        self._flag_soma = QCheckBox("soma")
+        self._flag_axon = QCheckBox("axon")
+        self._flag_apic = QCheckBox("apical")
+        self._flag_basal = QCheckBox("basal")
 
         self._flag_soma.setChecked(True)
         self._flag_axon.setChecked(True)
@@ -130,14 +131,10 @@ class ValidationAutoLabelPanel(QWidget):
         self._flag_basal.setStyleSheet(f"QCheckBox {{ color: {color_for_type(3)}; font-weight: 600; }}")
         self._flag_apic.setStyleSheet(f"QCheckBox {{ color: {color_for_type(4)}; font-weight: 600; }}")
 
-        for cb in (self._flag_soma, self._flag_axon, self._flag_apic):
-            flags_row1.addWidget(cb)
-        flags_row1.addStretch()
-        for cb in (self._flag_basal,):
-            flags_row2.addWidget(cb)
-        flags_row2.addStretch()
-        root.addLayout(flags_row1)
-        root.addLayout(flags_row2)
+        for cb in (self._flag_soma, self._flag_axon, self._flag_apic, self._flag_basal):
+            flags_row.addWidget(cb)
+        flags_row.addStretch()
+        root.addLayout(flags_row)
 
         top_btns = QHBoxLayout()
         self._btn_run = QPushButton("Run")
@@ -201,7 +198,7 @@ class ValidationAutoLabelPanel(QWidget):
         if not summary:
             self._summary.setPlainText(
                 "No auto-label preview yet.\n"
-                "Use Run to generate a preview tab."
+                "Use Run to preview auto labeling on the current canvas."
             )
             return
 

@@ -19,7 +19,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from .constants import DEFAULT_COLORS, label_for_type
+from .constants import color_for_type
 from .dendrogram_widget import DendrogramWidget
 from .neuron_3d_widget import Neuron3DWidget
 from swctools.core.validation_catalog import CHECK_ORDER
@@ -64,6 +64,10 @@ class _Projection2DWidget(QWidget):
         self._highlight_id = swc_id
         self._draw()
 
+    def clear_highlight(self):
+        self._highlight_id = None
+        self._draw()
+
     def _draw(self):
         self._plot.clear()
         if self._df is None or self._df.empty:
@@ -77,35 +81,34 @@ class _Projection2DWidget(QWidget):
         y = df[self._y_col].to_numpy(dtype=float)
         id2idx = {int(ids[i]): i for i in range(len(ids))}
 
-        lines_by_label: dict[str, list[float]] = {}
+        lines_by_type: dict[int, list[float]] = {}
         for i in range(len(ids)):
             pid = int(parents[i])
             if pid < 0 or pid not in id2idx:
                 continue
             p_idx = id2idx[pid]
-            label = label_for_type(int(types[i]))
-            lines = lines_by_label.setdefault(label, [])
+            type_id = int(types[i])
+            lines = lines_by_type.setdefault(type_id, [])
             lines.extend([x[p_idx], x[i], np.nan])
 
-        y_by_label: dict[str, list[float]] = {}
+        y_by_type: dict[int, list[float]] = {}
         for i in range(len(ids)):
             pid = int(parents[i])
             if pid < 0 or pid not in id2idx:
                 continue
             p_idx = id2idx[pid]
-            label = label_for_type(int(types[i]))
-            rows = y_by_label.setdefault(label, [])
+            type_id = int(types[i])
+            rows = y_by_type.setdefault(type_id, [])
             rows.extend([y[p_idx], y[i], np.nan])
 
-        for label, color in DEFAULT_COLORS.items():
-            xs = lines_by_label.get(label)
-            ys = y_by_label.get(label)
+        for type_id, xs in lines_by_type.items():
+            ys = y_by_type.get(type_id)
             if not xs or not ys:
                 continue
             self._plot.plot(
                 np.asarray(xs, dtype=float),
                 np.asarray(ys, dtype=float),
-                pen=pg.mkPen(color=color, width=1.2),
+                pen=pg.mkPen(color=color_for_type(int(type_id)), width=1.2),
                 connect="finite",
             )
 
@@ -127,6 +130,7 @@ class EditorTab(QWidget):
     """Workspace with mode switching: canvas, dendrogram, and visualization."""
 
     df_changed = Signal(pd.DataFrame)
+    node_selected = Signal(int)
 
     MODE_CANVAS = "canvas"
     MODE_EMPTY = "empty"
@@ -139,6 +143,7 @@ class EditorTab(QWidget):
         self._df: pd.DataFrame | None = None
         self._mode = self.MODE_CANVAS
         self._has_data = False
+        self._issue_marker_signature: tuple[tuple[int, ...], ...] = ()
 
         root_layout = QVBoxLayout(self)
         root_layout.setContentsMargins(0, 0, 0, 0)
@@ -225,6 +230,9 @@ class EditorTab(QWidget):
 
         self._dendro.df_changed.connect(self._on_df_changed)
         self._dendro.node_selected.connect(self._on_node_selected)
+        self._view3d_canvas.node_clicked.connect(self._on_view_node_clicked)
+        self._view3d_dendro.node_clicked.connect(self._on_view_node_clicked)
+        self._view3d_visual.node_clicked.connect(self._on_view_node_clicked)
 
         self._show_current_mode()
 
@@ -351,6 +359,39 @@ class EditorTab(QWidget):
         self._view3d_dendro.set_render_mode(mode_id)
         self._view3d_visual.set_render_mode(mode_id)
 
+    def set_edit_history_state(self, can_undo: bool, can_redo: bool):
+        self._dendro.set_history_state(can_undo, can_redo)
+
+    def set_issue_markers(self, issues: list[dict]):
+        signature = tuple(
+            tuple(sorted(int(node_id) for node_id in issue.get("node_ids", [])))
+            for issue in issues
+        )
+        if signature == self._issue_marker_signature:
+            return
+        self._issue_marker_signature = signature
+        self._view3d_canvas.set_issue_markers(issues)
+        self._view3d_dendro.set_issue_markers(issues)
+        self._view3d_visual.set_issue_markers(issues)
+
+    def clear_selection(self):
+        self._view3d_canvas.clear_selection()
+        self._view3d_dendro.clear_selection()
+        self._view3d_visual.clear_selection()
+        self._dendro.clear_selection()
+        self._proj_xy.clear_highlight()
+        self._proj_xz.clear_highlight()
+        self._proj_yz.clear_highlight()
+
+    def focus_node(self, swc_id: int):
+        self._view3d_canvas.focus_node(swc_id)
+        self._view3d_dendro.focus_node(swc_id)
+        self._view3d_visual.focus_node(swc_id)
+        self._dendro.select_node_by_id(swc_id, emit_signal=False)
+        self._proj_xy.highlight_node(swc_id)
+        self._proj_xz.highlight_node(swc_id)
+        self._proj_yz.highlight_node(swc_id)
+
     def set_camera_view(self, preset: str):
         self._active_view().set_camera_view(preset)
 
@@ -367,6 +408,7 @@ class EditorTab(QWidget):
     # ------------------------------------------------- Sync
     def _on_df_changed(self, df: pd.DataFrame):
         self._df = df.copy()
+        self._issue_marker_signature = ()
         self._view3d_canvas.refresh(df)
         self._view3d_dendro.refresh(df)
         self._view3d_visual.refresh(df)
@@ -382,6 +424,17 @@ class EditorTab(QWidget):
         self._proj_xy.highlight_node(swc_id)
         self._proj_xz.highlight_node(swc_id)
         self._proj_yz.highlight_node(swc_id)
+        self.node_selected.emit(int(swc_id))
+
+    def _on_view_node_clicked(self, swc_id: int):
+        self._view3d_canvas.highlight_node(swc_id)
+        self._view3d_dendro.highlight_node(swc_id)
+        self._view3d_visual.highlight_node(swc_id)
+        self._dendro.select_node_by_id(swc_id, emit_signal=False)
+        self._proj_xy.highlight_node(swc_id)
+        self._proj_xz.highlight_node(swc_id)
+        self._proj_yz.highlight_node(swc_id)
+        self.node_selected.emit(int(swc_id))
 
     def _show_current_mode(self):
         if self._mode == self.MODE_EMPTY:

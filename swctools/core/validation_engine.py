@@ -15,6 +15,7 @@ import numpy as np
 from neurom.core import Morphology
 
 from swctools.core.config import merge_config
+from swctools.core.validation_catalog import CHECK_ORDER, display_label_for_result
 from swctools.core.validation_registry import get_check
 from swctools.core.validation_results import CheckResult, PreCheckItem, ValidationReport
 
@@ -37,8 +38,12 @@ _ANSI_RE = re.compile(r"\x1B\[[0-9;]*[A-Za-z]")
 
 class ValidationContext:
     def __init__(self, swc_text: str):
-        self.swc_text = swc_text
-        self.arr = _load_swc_to_array(swc_text)
+        self.original_swc_text = swc_text
+        self.original_arr = _load_swc_to_array(swc_text)
+        prepared = build_validation_working_copy_from_array(self.original_arr)
+        self.arr = prepared["array"]
+        self.swc_text = prepared["swc_text"]
+        self.soma_consolidation = dict(prepared.get("soma_consolidation", {}))
         self._morph: Morphology | None = None
         self._morph_error: str | None = None
         self._raw = None
@@ -128,6 +133,184 @@ def _strip_ansi(text: str) -> str:
     return _ANSI_RE.sub("", text or "")
 
 
+def _array_to_swc_text(arr: np.ndarray) -> str:
+    if arr.size == 0:
+        return "# id type x y z radius parent\n"
+    buf = io.StringIO()
+    stacked = np.column_stack(
+        [
+            arr["id"],
+            arr["type"],
+            arr["x"],
+            arr["y"],
+            arr["z"],
+            arr["radius"],
+            arr["parent"],
+        ]
+    )
+    np.savetxt(
+        buf,
+        stacked,
+        fmt=["%d", "%d", "%.10g", "%.10g", "%.10g", "%.10g", "%d"],
+        delimiter=" ",
+    )
+    return "# id type x y z radius parent\n" + buf.getvalue()
+
+
+def consolidate_complex_somas_array(arr: np.ndarray) -> dict[str, Any]:
+    out = np.array(arr, copy=True)
+    if out.size == 0:
+        return {
+            "array": out,
+            "soma_count_before": 0,
+            "soma_count_after": 0,
+            "group_count": 0,
+            "groups": [],
+            "complex_groups": [],
+            "anchor_map": {},
+            "changed": False,
+        }
+
+    ids = np.asarray(out["id"], dtype=np.int64)
+    types = np.asarray(out["type"], dtype=np.int64)
+    parents = np.asarray(out["parent"], dtype=np.int64)
+    xyz = np.column_stack((out["x"], out["y"], out["z"])).astype(np.float64)
+    radii = np.asarray(out["radius"], dtype=np.float64)
+
+    soma_idx = np.flatnonzero(types == 1)
+    if soma_idx.size == 0:
+        return {
+            "array": out,
+            "soma_count_before": 0,
+            "soma_count_after": 0,
+            "group_count": 0,
+            "groups": [],
+            "complex_groups": [],
+            "anchor_map": {},
+            "changed": False,
+        }
+
+    id_to_index = {int(ids[i]): int(i) for i in range(len(ids))}
+    children: list[list[int]] = [[] for _ in range(len(ids))]
+    for i, pid in enumerate(parents):
+        pidx = id_to_index.get(int(pid))
+        if pidx is not None:
+            children[pidx].append(i)
+
+    soma_index_set = {int(i) for i in soma_idx.tolist()}
+    visited: set[int] = set()
+    groups: list[list[int]] = []
+    for start in soma_idx.tolist():
+        start_i = int(start)
+        if start_i in visited:
+            continue
+        stack = [start_i]
+        component: list[int] = []
+        visited.add(start_i)
+        while stack:
+            idx = stack.pop()
+            component.append(idx)
+            parent_idx = id_to_index.get(int(parents[idx]))
+            if parent_idx is not None and parent_idx in soma_index_set and parent_idx not in visited:
+                visited.add(parent_idx)
+                stack.append(parent_idx)
+            for child_idx in children[idx]:
+                if child_idx in soma_index_set and child_idx not in visited:
+                    visited.add(child_idx)
+                    stack.append(child_idx)
+        groups.append(sorted(component))
+
+    keep_mask = np.ones(len(out), dtype=bool)
+    anchor_map: dict[int, int] = {}
+    group_infos: list[dict[str, Any]] = []
+
+    for group in groups:
+        group_ids = [int(ids[i]) for i in group]
+        anchor_idx = next((i for i in group if int(parents[i]) == -1), group[0])
+        anchor_id = int(ids[anchor_idx])
+        group_xyz = xyz[group]
+        centroid = np.mean(group_xyz, axis=0) if len(group) else np.zeros(3, dtype=np.float64)
+        distances = np.linalg.norm(group_xyz - centroid, axis=1) if len(group) else np.zeros(0, dtype=np.float64)
+        if distances.size:
+            furthest_pos = int(np.argmax(distances))
+            furthest_idx = group[furthest_pos]
+            mega_radius = float(distances[furthest_pos] + max(float(radii[furthest_idx]), 0.0))
+        else:
+            furthest_idx = anchor_idx
+            mega_radius = float(max(float(radii[anchor_idx]), 0.0))
+
+        out["type"][anchor_idx] = 1
+        out["x"][anchor_idx] = float(centroid[0])
+        out["y"][anchor_idx] = float(centroid[1])
+        out["z"][anchor_idx] = float(centroid[2])
+        out["radius"][anchor_idx] = float(mega_radius)
+        out["parent"][anchor_idx] = -1
+
+        for idx in group:
+            anchor_map[int(ids[idx])] = anchor_id
+            if idx != anchor_idx:
+                keep_mask[idx] = False
+
+        group_infos.append(
+            {
+                "anchor_id": anchor_id,
+                "node_ids": group_ids,
+                "group_size": len(group),
+                "centroid": [float(centroid[0]), float(centroid[1]), float(centroid[2])],
+                "radius": float(mega_radius),
+                "furthest_node_id": int(ids[furthest_idx]),
+            }
+        )
+
+    for i in range(len(out)):
+        if not keep_mask[i]:
+            continue
+        if int(out["type"][i]) == 1:
+            continue
+        parent_id = int(out["parent"][i])
+        if parent_id in anchor_map:
+            out["parent"][i] = int(anchor_map[parent_id])
+
+    final_arr = np.array(out[keep_mask], copy=True)
+    reindex_map: dict[int, int] = {}
+    if final_arr.size:
+        old_ids = np.asarray(final_arr["id"], dtype=np.int64)
+        new_ids = np.arange(1, len(final_arr) + 1, dtype=np.int64)
+        reindex_map = {int(old_id): int(new_id) for old_id, new_id in zip(old_ids.tolist(), new_ids.tolist())}
+        final_arr["id"] = new_ids
+        remapped_parents = np.asarray(final_arr["parent"], dtype=np.int64).copy()
+        for i in range(len(remapped_parents)):
+            parent_id = int(remapped_parents[i])
+            if parent_id == -1:
+                continue
+            if parent_id in reindex_map:
+                remapped_parents[i] = int(reindex_map[parent_id])
+        final_arr["parent"] = remapped_parents
+    complex_groups = [group for group in group_infos if int(group.get("group_size", 0)) > 1]
+    return {
+        "array": final_arr,
+        "soma_count_before": int(soma_idx.size),
+        "soma_count_after": int(np.sum(final_arr["type"] == 1)),
+        "group_count": len(group_infos),
+        "groups": group_infos,
+        "complex_groups": complex_groups,
+        "anchor_map": anchor_map,
+        "reindex_map": reindex_map,
+        "changed": bool(complex_groups),
+    }
+
+
+def build_validation_working_copy_from_array(arr: np.ndarray) -> dict[str, Any]:
+    working_arr = np.array(arr, copy=True)
+    soma_consolidation = consolidate_complex_somas_array(working_arr)
+    final_arr = np.array(soma_consolidation.get("array", working_arr), copy=True)
+    return {
+        "array": final_arr,
+        "swc_text": _array_to_swc_text(final_arr),
+        "soma_consolidation": soma_consolidation,
+    }
+
+
 def _ensure_builtin_checks_registered() -> None:
     # Local import keeps startup cost low and avoids circular imports.
     from swctools.core.validation_checks.native_checks import register_native_checks
@@ -156,7 +339,8 @@ def build_precheck_summary(config: dict[str, Any]) -> list[PreCheckItem]:
     _ensure_builtin_checks_registered()
     checks_cfg = config.get("checks", {})
     out: list[PreCheckItem] = []
-    for key in sorted(checks_cfg.keys()):
+    ordered_keys = sorted(checks_cfg.keys(), key=lambda key: (CHECK_ORDER.get(str(key), 10_000), str(key)))
+    for key in ordered_keys:
         rule = checks_cfg.get(key, {})
         if not bool(rule.get("enabled", True)):
             continue
@@ -239,7 +423,12 @@ def run_validation_text(
                 result.status = "warning"
             else:
                 result.status = "fail"
+            result.label = display_label_for_result(item.key, bool(result.passed), item.label)
             results.append(result)
+            if item.key == "valid_soma_format" and not bool(result.passed):
+                break
+            if item.key == "multiple_somas" and not bool(result.passed):
+                break
         except Exception as e:  # noqa: BLE001
             results.append(
                 CheckResult.from_pass_fail(
@@ -254,5 +443,7 @@ def run_validation_text(
                     error=True,
                 )
             )
+            if item.key in {"valid_soma_format", "multiple_somas"}:
+                break
 
     return ValidationReport(profile="default", precheck=precheck, results=results)

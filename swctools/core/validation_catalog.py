@@ -9,7 +9,27 @@ CHECK_CATALOG: list[tuple[str, list[tuple[str, str, str]]]] = [
     (
         "Structural presence",
         [
+            (
+                "valid_soma_format",
+                "Soma format is simple",
+                "Warns when a soma is represented by multiple connected type-1 nodes; validation uses a temporary consolidated soma working copy.",
+            ),
+            (
+                "multiple_somas",
+                "Only one connected soma group remains",
+                "After temporary soma consolidation, more than one remaining soma means the file likely contains disconnected cells.",
+            ),
             ("has_soma", "Soma present", "At least one node is labeled as soma (type 1)."),
+            (
+                "no_invalid_negative_types",
+                "No invalid negative node types",
+                "Type values below 0 are invalid and treated as hard errors.",
+            ),
+            (
+                "custom_types_defined",
+                "Custom node types are defined",
+                "Any node type value >= 5 is treated as a custom type and should have a user-defined display name and color.",
+            ),
             ("has_axon", "Axon present", "At least one node is labeled as axon (type 2)."),
             (
                 "has_basal_dendrite",
@@ -81,6 +101,11 @@ CHECK_CATALOG: list[tuple[str, list[tuple[str, str, str]]]] = [
                 "No duplicate 3D points",
                 "Two different nodes should not share identical XYZ coordinates.",
             ),
+            (
+                "no_extreme_spatial_jump",
+                "No extreme spatial jumps",
+                "Flags parent-child segments whose 3D length is an extreme outlier relative to the morphology and above a conservative absolute jump threshold.",
+            ),
         ],
     ),
     (
@@ -89,7 +114,12 @@ CHECK_CATALOG: list[tuple[str, list[tuple[str, str, str]]]] = [
             (
                 "no_dangling_branches",
                 "No dangling branches",
-                "Morphology should be one connected tree without extra disconnected roots.",
+                "Any non-soma node with parent -1 is treated as a dangling branch.",
+            ),
+            (
+                "no_self_loop",
+                "No self loops",
+                "A node must never list itself as its own parent.",
             ),
             (
                 "no_single_child_chains",
@@ -118,8 +148,13 @@ CHECK_CATALOG: list[tuple[str, list[tuple[str, str, str]]]] = [
             ),
             (
                 "no_root_index_jumps",
-                "No root index gaps",
-                "Root-level indexing should remain continuous and consistent.",
+                "Neurite roots too far from soma",
+                "Checks whether neurite root points start too far from the soma center relative to soma radius.",
+            ),
+            (
+                "parent_id_less_than_child_id",
+                "Parent ID is less than child ID",
+                "Warns when a valid parent ID is greater than or equal to its child ID, which violates the usual SWC topological ordering convention.",
             ),
         ],
     ),
@@ -130,6 +165,36 @@ CHECK_ORDER: dict[str, int] = {}
 CHECK_CATEGORY: dict[str, str] = {}
 CHECK_LABEL: dict[str, str] = {}
 CHECK_RULE: dict[str, str] = {}
+CHECK_FAILURE_LABEL: dict[str, str] = {
+    "valid_soma_format": "Complex soma format found",
+    "multiple_somas": "Multiple somas found",
+    "has_soma": "Soma missing",
+    "no_invalid_negative_types": "Invalid negative types found",
+    "custom_types_defined": "Custom types need definitions",
+    "has_axon": "Axon missing",
+    "has_basal_dendrite": "Basal dendrite missing",
+    "has_apical_dendrite": "Apical dendrite missing",
+    "all_neurite_radii_nonzero": "Invalid neurite radii found",
+    "soma_radius_nonzero": "Invalid soma radius found",
+    "no_ultranarrow_sections": "Ultranarrow sections found",
+    "no_ultranarrow_starts": "Ultranarrow branch starts found",
+    "no_fat_terminal_ends": "Oversized terminal ends found",
+    "all_section_lengths_nonzero": "Zero-length sections found",
+    "all_segment_lengths_nonzero": "Zero-length segments found",
+    "no_back_tracking": "Geometric backtracking found",
+    "no_flat_neurites": "Flattened neurites found",
+    "no_duplicate_3d_points": "Duplicated points found",
+    "no_extreme_spatial_jump": "Extreme spatial jumps found",
+    "no_dangling_branches": "Dangling branches found",
+    "no_self_loop": "Self loops found",
+    "no_single_child_chains": "Single-child chains found",
+    "has_unifurcation": "Unifurcation found",
+    "has_multifurcation": "Multifurcation found",
+    "no_section_index_jumps": "Section index gaps found",
+    "no_root_index_jumps": "Neurite roots too far from soma",
+    "parent_id_less_than_child_id": "Parent-child ID order violations found",
+    "radius_upper_bound": "Oversized radii found",
+}
 for _idx, (_category, _items) in enumerate(CHECK_CATALOG):
     for _j, (_key, _label, _rule) in enumerate(_items):
         CHECK_ORDER[_key] = _idx * 100 + _j
@@ -144,6 +209,13 @@ def sort_key_for_check(key: str, label: str) -> tuple[int, str]:
 
 def rule_for_key(key: str) -> str:
     return str(CHECK_RULE.get(str(key), ""))
+
+
+def display_label_for_result(key: str, passed: bool, label: str | None = None) -> str:
+    key = str(key or "").strip()
+    if passed:
+        return str(label or CHECK_LABEL.get(key) or key)
+    return str(CHECK_FAILURE_LABEL.get(key) or label or CHECK_LABEL.get(key) or key)
 
 
 def group_rows_by_category(rows: list[dict[str, Any]]) -> list[tuple[str, list[dict[str, Any]]]]:

@@ -130,7 +130,7 @@ class RadiiCleaningPanel(QWidget):
 
         desc_text = (
             "Radii cleaning is JSON-config driven.\n"
-            "Edit `radii_cleaning.json`, then run on loaded SWC or folder."
+            "Edit `radii_cleaning.json`, then run on the loaded SWC."
             if self._allow_loaded_swc_run
             else "Radii cleaning is JSON-config driven.\nEdit `radii_cleaning.json`, then run on a folder."
         )
@@ -155,18 +155,14 @@ class RadiiCleaningPanel(QWidget):
             b_run_loaded = QPushButton("Run")
             b_run_loaded.clicked.connect(self._on_run_loaded)
             row.addWidget(b_run_loaded)
-
-        b_folder = QPushButton("Run" if not self._allow_loaded_swc_run else "Run Folder…")
-        b_folder.clicked.connect(self._on_run_folder)
-        row.addWidget(b_folder)
+        else:
+            b_folder = QPushButton("Run")
+            b_folder.clicked.connect(self._on_run_folder)
+            row.addWidget(b_folder)
 
         b_cfg = QPushButton("Show JSON")
         b_cfg.clicked.connect(self._on_edit_cfg)
         row.addWidget(b_cfg)
-
-        b_stats = QPushButton("Refresh Stats")
-        b_stats.clicked.connect(self._refresh_stats_from_loaded_swc)
-        row.addWidget(b_stats)
 
         row.addStretch()
         root.addLayout(row)

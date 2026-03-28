@@ -1,4 +1,4 @@
-"""SWC-QT — PySide6-based SWC neuron editor."""
+"""SWC Studio GUI entrypoint."""
 
 import sys
 
@@ -24,7 +24,7 @@ def main():
     from PySide6.QtWidgets import QApplication
 
     app = QApplication(sys.argv)
-    app.setApplicationName("SWC-QT")
+    app.setApplicationName("SWC Studio")
     app.setStyle("Fusion")
     app.setFont(_pick_app_font())
 

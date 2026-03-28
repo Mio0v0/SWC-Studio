@@ -36,7 +36,7 @@ FRIENDLY_LABELS = {
     "has_no_narrow_neurite_section":    "No extremely narrow sections",
     "has_no_narrow_start":              "No extremely narrow branch starts",
     "has_no_overlapping_point":         "No duplicate 3D points",
-    "has_no_root_node_jumps":           "No root index gaps",
+    "has_no_root_node_jumps":           "Neurite roots too far from soma",
     "has_no_single_children":           "No single-child chains",
     "has_nonzero_soma_radius":          "Soma radius is positive",
     "has_unifurcation":                 "Contains unifurcation",
@@ -131,6 +131,25 @@ def _write_array_to_tmp_swc(arr: np.ndarray) -> str:
     ])
     np.savetxt(tmp_path, stacked, fmt=["%d","%d","%.10g","%.10g","%.10g","%.10g","%d"], delimiter=" ")
     return tmp_path
+
+
+def _reindex_swc_array(arr: np.ndarray) -> np.ndarray:
+    """Return a copy with continuous 1..N ids and remapped parent ids."""
+    out = np.array(arr, copy=True)
+    if out.size == 0:
+        return out
+    old_ids = np.asarray(out["id"], dtype=np.int64)
+    new_ids = np.arange(1, len(out) + 1, dtype=np.int64)
+    id_map = {int(old_id): int(new_id) for old_id, new_id in zip(old_ids.tolist(), new_ids.tolist())}
+    out["id"] = new_ids
+    remapped_parents = np.asarray(out["parent"], dtype=np.int64).copy()
+    for i in range(len(remapped_parents)):
+        parent_id = int(remapped_parents[i])
+        if parent_id == -1:
+            continue
+        remapped_parents[i] = int(id_map.get(parent_id, -1))
+    out["parent"] = remapped_parents
+    return out
 
 
 def _sha1(data: bytes) -> str:
@@ -350,7 +369,7 @@ def _split_swc_by_trees(swc_text: str):
         if not sub_rows:
             continue
 
-        sub_arr = np.array(sub_rows, dtype=_SWCTYPE)
+        sub_arr = _reindex_swc_array(np.array(sub_rows, dtype=_SWCTYPE))
         tmp_path = _write_array_to_tmp_swc(sub_arr)
         try:
             with open(tmp_path, "r") as f:
@@ -442,7 +461,7 @@ def _split_swc_by_soma_roots(swc_text: str):
         if not sub_rows:
             continue
 
-        sub_arr = np.array(sub_rows, dtype=_SWCTYPE)
+        sub_arr = _reindex_swc_array(np.array(sub_rows, dtype=_SWCTYPE))
         tmp_path = _write_array_to_tmp_swc(sub_arr)
         try:
             with open(tmp_path, "r") as f:

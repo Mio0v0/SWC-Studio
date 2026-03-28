@@ -6,6 +6,7 @@ from typing import Any
 
 import numpy as np
 
+from swctools.core.custom_types import load_custom_type_definitions
 from swctools.core.validation_registry import register_check
 from swctools.core.validation_results import CheckResult
 
@@ -80,6 +81,72 @@ def _check_has_soma(ctx, params: dict[str, Any]) -> CheckResult:
     )
 
 
+def _check_valid_soma_format(ctx, params: dict[str, Any]) -> CheckResult:
+    _ = params
+    meta = dict(getattr(ctx, "soma_consolidation", {}) or {})
+    complex_groups = list(meta.get("complex_groups", []) or [])
+    bad_ids: list[int] = []
+    for group in complex_groups:
+        for node_id in group.get("node_ids", []) or []:
+            try:
+                bad_ids.append(int(node_id))
+            except Exception:
+                continue
+    passed = len(complex_groups) == 0
+    if passed:
+        msg = "Soma format is a single-node representation or already simple."
+    else:
+        msg = (
+            f"Found {len(complex_groups)} connected multi-node soma group(s). "
+            "Complex somas may render poorly; downstream checks use a temporary consolidated soma working copy."
+        )
+    return CheckResult.from_pass_fail(
+        key="valid_soma_format",
+        label="Soma format is simple",
+        passed=passed,
+        severity="warning",
+        message=msg,
+        source="native",
+        failing_node_ids=bad_ids,
+        metrics={
+            "complex_soma_group_count": len(complex_groups),
+            "complex_soma_node_count": len(bad_ids),
+            "soma_count_before": int(meta.get("soma_count_before", 0)),
+            "soma_count_after": int(meta.get("soma_count_after", 0)),
+            "complex_groups": complex_groups,
+        },
+    )
+
+
+def _check_multiple_somas(ctx, params: dict[str, Any]) -> CheckResult:
+    _ = params
+    ids = np.asarray(ctx.ids, dtype=np.int64)
+    soma_mask = np.asarray(ctx.types, dtype=np.int64) == 1
+    soma_ids = ids[soma_mask].astype(np.int64).tolist()
+    passed = len(soma_ids) <= 1
+    if passed:
+        msg = "At most one connected soma remains after soma consolidation."
+    else:
+        msg = (
+            f"Found {len(soma_ids)} disconnected soma groups after soma consolidation. "
+            "This likely means multiple cells are present in the same SWC file."
+        )
+    return CheckResult.from_pass_fail(
+        key="multiple_somas",
+        label="Only one connected soma group remains",
+        passed=passed,
+        severity="error",
+        message=msg,
+        source="native",
+        failing_node_ids=[] if passed else soma_ids,
+        metrics={
+            "multiple_soma_count": len(soma_ids),
+            "can_split_trees": bool(not passed),
+            "soma_ids_after_consolidation": soma_ids,
+        },
+    )
+
+
 def _check_has_axon(ctx, params: dict[str, Any]) -> CheckResult:
     _ = params
     count = int(np.sum(ctx.types == 2)) if len(ctx.types) else 0
@@ -122,6 +189,80 @@ def _check_has_apical_dendrite(ctx, params: dict[str, Any]) -> CheckResult:
         message="Apical dendrite present." if passed else "No apical dendrite node found.",
         source="native",
         metrics={"apical_node_count": count},
+    )
+
+
+def _check_no_invalid_negative_types(ctx, params: dict[str, Any]) -> CheckResult:
+    _ = params
+    ids = np.asarray(ctx.ids, dtype=np.int64)
+    types = np.asarray(ctx.types, dtype=np.int64)
+    bad_mask = types < 0
+    bad_ids = ids[bad_mask].astype(np.int64).tolist()
+    bad_types = sorted({int(v) for v in types[bad_mask].astype(np.int64).tolist()})
+    passed = len(bad_ids) == 0
+    msg = (
+        "No invalid negative node types."
+        if passed
+        else f"Found {len(bad_ids)} node(s) with invalid type values below 0: {', '.join(str(v) for v in bad_types)}."
+    )
+    return CheckResult.from_pass_fail(
+        key="no_invalid_negative_types",
+        label="No invalid negative node types",
+        passed=passed,
+        severity="error",
+        message=msg,
+        source="native",
+        failing_node_ids=bad_ids,
+        metrics={
+            "invalid_negative_type_count": len(bad_ids),
+            "invalid_negative_types": bad_types,
+        },
+    )
+
+
+def _check_custom_types_defined(ctx, params: dict[str, Any]) -> CheckResult:
+    _ = params
+    ids = np.asarray(ctx.ids, dtype=np.int64)
+    types = np.asarray(ctx.types, dtype=np.int64)
+    custom_mask = types >= 5
+    custom_type_ids = sorted({int(v) for v in types[custom_mask].astype(np.int64).tolist()})
+    definitions = load_custom_type_definitions()
+    missing_defs: list[dict[str, Any]] = []
+    bad_ids: list[int] = []
+    for type_id in custom_type_ids:
+        definition = definitions.get(int(type_id)) or {}
+        name = str(definition.get("name", "")).strip()
+        color = str(definition.get("color", "")).strip()
+        if name and color:
+            continue
+        node_ids = ids[types == type_id].astype(np.int64).tolist()
+        bad_ids.extend(node_ids)
+        missing_defs.append(
+            {
+                "type_id": int(type_id),
+                "node_count": len(node_ids),
+                "node_ids_sample": node_ids[:25],
+            }
+        )
+    passed = len(missing_defs) == 0
+    msg = (
+        "All custom node types are defined."
+        if passed
+        else f"Found {len(missing_defs)} custom type ID(s) >= 5 without a defined name/color."
+    )
+    return CheckResult.from_pass_fail(
+        key="custom_types_defined",
+        label="Custom node types are defined",
+        passed=passed,
+        severity="warning",
+        message=msg,
+        source="native",
+        failing_node_ids=bad_ids,
+        metrics={
+            "custom_type_count": len(custom_type_ids),
+            "custom_type_ids": custom_type_ids,
+            "undefined_custom_types": missing_defs,
+        },
     )
 
 
@@ -191,10 +332,16 @@ def _check_all_section_lengths_nonzero(ctx, params: dict[str, Any]) -> CheckResu
 def _check_no_dangling_branches(ctx, params: dict[str, Any]) -> CheckResult:
     _ = params
     ids = np.asarray(ctx.ids, dtype=np.int64)
+    types = np.asarray(ctx.types, dtype=np.int64)
     parents = np.asarray(ctx.parents, dtype=np.int64)
-    root_ids = ids[parents < 0].astype(np.int64).tolist()
-    passed = len(root_ids) <= 1
-    msg = "No dangling branches." if passed else f"Detected {len(root_ids)} roots; expected one connected tree."
+    bad_mask = (types != 1) & (parents == -1)
+    bad_ids = ids[bad_mask].astype(np.int64).tolist()
+    passed = len(bad_ids) == 0
+    msg = (
+        "No dangling branches."
+        if passed
+        else f"Found {len(bad_ids)} non-soma nodes whose parent is -1."
+    )
     return CheckResult.from_pass_fail(
         key="no_dangling_branches",
         label="No dangling branches",
@@ -202,8 +349,209 @@ def _check_no_dangling_branches(ctx, params: dict[str, Any]) -> CheckResult:
         severity="error",
         message=msg,
         source="native",
-        failing_node_ids=[] if passed else root_ids,
-        metrics={"root_count": len(root_ids)},
+        failing_node_ids=bad_ids,
+        metrics={"dangling_branch_count": len(bad_ids)},
+    )
+
+
+def _check_no_self_loop(ctx, params: dict[str, Any]) -> CheckResult:
+    _ = params
+    ids = np.asarray(ctx.ids, dtype=np.int64)
+    parents = np.asarray(ctx.parents, dtype=np.int64)
+    bad_mask = parents == ids
+    bad_ids = ids[bad_mask].astype(np.int64).tolist()
+    passed = len(bad_ids) == 0
+    msg = "No self loops." if passed else f"Found {len(bad_ids)} node(s) whose parent ID equals their own ID."
+    return CheckResult.from_pass_fail(
+        key="no_self_loop",
+        label="No self loops",
+        passed=passed,
+        severity="error",
+        message=msg,
+        source="native",
+        failing_node_ids=bad_ids,
+        metrics={"self_loop_count": len(bad_ids)},
+    )
+
+
+def _check_parent_id_less_than_child_id(ctx, params: dict[str, Any]) -> CheckResult:
+    _ = params
+    ids = np.asarray(ctx.ids, dtype=np.int64)
+    parents = np.asarray(ctx.parents, dtype=np.int64)
+    valid_ids = {int(v) for v in ids.astype(np.int64).tolist()}
+    valid_parent_mask = (parents >= 0) & np.isin(parents, list(valid_ids), assume_unique=False)
+    bad_mask = valid_parent_mask & (parents >= ids)
+    bad_ids = ids[bad_mask].astype(np.int64).tolist()
+    passed = len(bad_ids) == 0
+    msg = (
+        "All parent IDs are less than their child IDs."
+        if passed
+        else f"Found {len(bad_ids)} node(s) where parent ID is not less than child ID."
+    )
+    return CheckResult.from_pass_fail(
+        key="parent_id_less_than_child_id",
+        label="Parent ID is less than child ID",
+        passed=passed,
+        severity="warning",
+        message=msg,
+        source="native",
+        failing_node_ids=bad_ids,
+        metrics={"id_order_violation_count": len(bad_ids)},
+    )
+
+
+def _check_no_extreme_spatial_jump(ctx, params: dict[str, Any]) -> CheckResult:
+    min_jump_um = float(params.get("min_jump_um", 200.0))
+    median_ratio = float(params.get("median_ratio", 10.0))
+    mad_scale = float(params.get("mad_scale", 12.0))
+    mad_floor_um = float(params.get("mad_floor_um", 1.0))
+
+    ids = np.asarray(ctx.ids, dtype=np.int64)
+    parents = np.asarray(ctx.parents, dtype=np.int64)
+    xyz = np.asarray(ctx.xyz, dtype=np.float64)
+    id_to_index = {int(ids[i]): int(i) for i in range(len(ids))}
+
+    child_mask = parents >= 0
+    child_idx = np.flatnonzero(child_mask)
+    if child_idx.size == 0:
+        return CheckResult.from_pass_fail(
+            key="no_extreme_spatial_jump",
+            label="No extreme spatial jumps",
+            passed=True,
+            severity="warning",
+            message="No extreme spatial jumps.",
+            source="native",
+            params_used={
+                "min_jump_um": min_jump_um,
+                "median_ratio": median_ratio,
+                "mad_scale": mad_scale,
+                "mad_floor_um": mad_floor_um,
+            },
+            thresholds_used={
+                "min_jump_um": min_jump_um,
+                "median_ratio": median_ratio,
+                "mad_scale": mad_scale,
+                "mad_floor_um": mad_floor_um,
+            },
+            metrics={"segment_count": 0, "extreme_jump_count": 0, "jump_threshold_um": float(min_jump_um)},
+        )
+
+    valid_pairs: list[tuple[int, int]] = []
+    for idx in child_idx.tolist():
+        pidx = id_to_index.get(int(parents[idx]))
+        if pidx is None:
+            continue
+        valid_pairs.append((int(idx), int(pidx)))
+
+    if not valid_pairs:
+        return CheckResult.from_pass_fail(
+            key="no_extreme_spatial_jump",
+            label="No extreme spatial jumps",
+            passed=True,
+            severity="warning",
+            message="No extreme spatial jumps.",
+            source="native",
+            params_used={
+                "min_jump_um": min_jump_um,
+                "median_ratio": median_ratio,
+                "mad_scale": mad_scale,
+                "mad_floor_um": mad_floor_um,
+            },
+            thresholds_used={
+                "min_jump_um": min_jump_um,
+                "median_ratio": median_ratio,
+                "mad_scale": mad_scale,
+                "mad_floor_um": mad_floor_um,
+            },
+            metrics={"segment_count": 0, "extreme_jump_count": 0, "jump_threshold_um": float(min_jump_um)},
+        )
+
+    child_indices = np.asarray([pair[0] for pair in valid_pairs], dtype=np.int64)
+    parent_indices = np.asarray([pair[1] for pair in valid_pairs], dtype=np.int64)
+    lengths = np.linalg.norm(xyz[child_indices] - xyz[parent_indices], axis=1)
+    finite_mask = np.isfinite(lengths)
+    if not bool(np.any(finite_mask)):
+        return CheckResult.from_pass_fail(
+            key="no_extreme_spatial_jump",
+            label="No extreme spatial jumps",
+            passed=True,
+            severity="warning",
+            message="No extreme spatial jumps.",
+            source="native",
+            params_used={
+                "min_jump_um": min_jump_um,
+                "median_ratio": median_ratio,
+                "mad_scale": mad_scale,
+                "mad_floor_um": mad_floor_um,
+            },
+            thresholds_used={
+                "min_jump_um": min_jump_um,
+                "median_ratio": median_ratio,
+                "mad_scale": mad_scale,
+                "mad_floor_um": mad_floor_um,
+            },
+            metrics={"segment_count": 0, "extreme_jump_count": 0, "jump_threshold_um": float(min_jump_um)},
+        )
+
+    child_indices = child_indices[finite_mask]
+    parent_indices = parent_indices[finite_mask]
+    lengths = lengths[finite_mask]
+
+    median_len = float(np.median(lengths)) if lengths.size else 0.0
+    mad = float(np.median(np.abs(lengths - median_len))) if lengths.size else 0.0
+    robust_threshold = median_len + mad_scale * max(mad, mad_floor_um)
+    ratio_threshold = median_len * median_ratio
+    jump_threshold = float(max(min_jump_um, ratio_threshold, robust_threshold))
+
+    bad_mask = lengths > jump_threshold
+    bad_child_indices = child_indices[bad_mask]
+    bad_ids = ids[bad_child_indices].astype(np.int64).tolist()
+    sample_segments: list[dict[str, Any]] = []
+    for child_idx_val, parent_idx_val, seg_len in zip(
+        child_indices[bad_mask][:20].tolist(),
+        parent_indices[bad_mask][:20].tolist(),
+        lengths[bad_mask][:20].tolist(),
+    ):
+        sample_segments.append(
+            {
+                "child_id": int(ids[int(child_idx_val)]),
+                "parent_id": int(ids[int(parent_idx_val)]),
+                "segment_length_um": float(seg_len),
+            }
+        )
+
+    passed = len(bad_ids) == 0
+    msg = (
+        "No extreme spatial jumps."
+        if passed
+        else f"Found {len(bad_ids)} parent-child segment(s) with extreme spatial jump > {jump_threshold:.5g} um."
+    )
+    params_used = {
+        "min_jump_um": min_jump_um,
+        "median_ratio": median_ratio,
+        "mad_scale": mad_scale,
+        "mad_floor_um": mad_floor_um,
+    }
+    return CheckResult.from_pass_fail(
+        key="no_extreme_spatial_jump",
+        label="No extreme spatial jumps",
+        passed=passed,
+        severity="warning",
+        message=msg,
+        source="native",
+        params_used=params_used,
+        thresholds_used={**params_used, "jump_threshold_um": jump_threshold},
+        failing_node_ids=bad_ids,
+        failing_section_ids=bad_ids,
+        metrics={
+            "segment_count": int(lengths.size),
+            "extreme_jump_count": len(bad_ids),
+            "median_segment_length_um": median_len,
+            "mad_segment_length_um": mad,
+            "jump_threshold_um": jump_threshold,
+            "max_segment_length_um": float(np.max(lengths)) if lengths.size else 0.0,
+            "sample_segments": sample_segments,
+        },
     )
 
 
@@ -215,6 +563,8 @@ def _check_no_duplicate_3d_points(ctx, params: dict[str, Any]) -> CheckResult:
     group_count = 0
     sample_groups: list[dict[str, Any]] = []
     if xyz.shape[0] > 0:
+        # Duplicate means the full 3D coordinate tuple matches exactly.
+        # Sharing only x/y, x/z, or y/z does not count as a duplicate point.
         row_view = xyz.view(np.dtype((np.void, xyz.dtype.itemsize * xyz.shape[1]))).ravel()
         _, inverse, counts = np.unique(row_view, return_inverse=True, return_counts=True)
         repeated_group_labels = np.flatnonzero(counts > 1)
@@ -286,6 +636,18 @@ def register_native_checks() -> None:
     if _REGISTERED:
         return
 
+    register_check(
+        key="valid_soma_format",
+        label="Soma format is simple",
+        source="native",
+        runner=_check_valid_soma_format,
+    )
+    register_check(
+        key="multiple_somas",
+        label="Only one connected soma group remains",
+        source="native",
+        runner=_check_multiple_somas,
+    )
     register_check(key="has_soma", label="Soma present", source="native", runner=_check_has_soma)
     register_check(key="has_axon", label="Axon present", source="native", runner=_check_has_axon)
     register_check(
@@ -299,6 +661,18 @@ def register_native_checks() -> None:
         label="Apical dendrite present",
         source="native",
         runner=_check_has_apical_dendrite,
+    )
+    register_check(
+        key="no_invalid_negative_types",
+        label="No invalid negative node types",
+        source="native",
+        runner=_check_no_invalid_negative_types,
+    )
+    register_check(
+        key="custom_types_defined",
+        label="Custom node types are defined",
+        source="native",
+        runner=_check_custom_types_defined,
     )
     register_check(
         key="all_neurite_radii_nonzero",
@@ -323,6 +697,24 @@ def register_native_checks() -> None:
         label="No dangling branches",
         source="native",
         runner=_check_no_dangling_branches,
+    )
+    register_check(
+        key="no_self_loop",
+        label="No self loops",
+        source="native",
+        runner=_check_no_self_loop,
+    )
+    register_check(
+        key="parent_id_less_than_child_id",
+        label="Parent ID is less than child ID",
+        source="native",
+        runner=_check_parent_id_less_than_child_id,
+    )
+    register_check(
+        key="no_extreme_spatial_jump",
+        label="No extreme spatial jumps",
+        source="native",
+        runner=_check_no_extreme_spatial_jump,
     )
     register_check(
         key="no_duplicate_3d_points",

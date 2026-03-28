@@ -102,7 +102,7 @@ class _AutoTypingConfigDialog(QDialog):
 
 
 class BatchTabWidget(QWidget):
-    """Owns three batch control pages used directly by Control Center tabs."""
+    """Owns batch control pages used by the right-side inspector tabs."""
 
     log_message = Signal(str)
     batch_validation_ready = Signal(dict)
@@ -120,7 +120,7 @@ class BatchTabWidget(QWidget):
         # This root widget is not shown directly; pages are used in main window tabs.
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
-        root.addWidget(QLabel("Batch controls are shown as tabs in Control Center."))
+        root.addWidget(QLabel("Batch controls are shown as tabs in the Inspector."))
 
     # --------------------------------------------------------- Public page access
     def split_tab_widget(self) -> QWidget:

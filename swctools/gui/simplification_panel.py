@@ -38,7 +38,6 @@ class SimplificationPanel(QWidget):
 
     process_requested = Signal(dict)
     apply_requested = Signal()
-    redo_requested = Signal()
     cancel_requested = Signal()
     log_message = Signal(str)
 
@@ -64,7 +63,7 @@ class SimplificationPanel(QWidget):
         desc = QLabel(
             "Process creates a temporary Simplified View tab.\n"
             "Apply saves a new SWC and replaces the current working buffer.\n"
-            "Redo recalculates simplification. Cancel discards temporary preview."
+            "Cancel discards temporary preview."
         )
         desc.setWordWrap(True)
         desc.setStyleSheet("font-size: 12px; color: #555;")
@@ -119,10 +118,6 @@ class SimplificationPanel(QWidget):
         self._btn_apply = QPushButton("Apply")
         self._btn_apply.clicked.connect(self.apply_requested.emit)
         action_bar.addWidget(self._btn_apply)
-
-        self._btn_redo = QPushButton("Redo")
-        self._btn_redo.clicked.connect(self.redo_requested.emit)
-        action_bar.addWidget(self._btn_redo)
 
         self._btn_cancel = QPushButton("Cancel")
         self._btn_cancel.clicked.connect(self.cancel_requested.emit)
@@ -193,7 +188,6 @@ class SimplificationPanel(QWidget):
         log_path: str | None,
     ):
         self._btn_apply.setEnabled(bool(has_preview))
-        self._btn_redo.setEnabled(bool(has_preview))
         self._btn_cancel.setEnabled(bool(has_preview))
 
         if not summary:

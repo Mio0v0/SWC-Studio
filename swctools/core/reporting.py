@@ -11,6 +11,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from swctools import __version__ as SWCTOOLS_VERSION
+from swctools.core.custom_types import load_custom_type_definitions
 from swctools.core.validation_catalog import group_rows_by_category, rule_for_key
 
 
@@ -29,6 +31,31 @@ def _now() -> str:
 
 def _timestamp_slug() -> str:
     return datetime.now().strftime("%Y%m%d_%H%M%S")
+
+
+def _label_type_legend_lines() -> list[str]:
+    lines = [
+        "Label types:",
+        "- 0: undefined",
+        "- 1: soma",
+        "- 2: axon",
+        "- 3: basal dendrite",
+        "- 4: apical dendrite",
+    ]
+    custom_defs = load_custom_type_definitions(force=True)
+    if custom_defs:
+        for type_id in sorted(custom_defs):
+            item = custom_defs.get(type_id) or {}
+            name = str(item.get("name", "")).strip() or f"custom type {type_id}"
+            color = str(item.get("color", "")).strip()
+            notes = str(item.get("notes", "")).strip()
+            detail = f"- {type_id}: {name}"
+            if color:
+                detail += f" [color={color}]"
+            if notes:
+                detail += f" [notes={notes}]"
+            lines.append(detail)
+    return lines
 
 
 def _unique_path(path: Path) -> Path:
@@ -70,6 +97,10 @@ def validation_log_path_for_file(path: str | Path) -> Path:
 
 def morphology_session_log_path(path: str | Path) -> Path:
     return report_path_for_file(path, "morphology_session_log")
+
+
+def correction_summary_log_path_for_file(path: str | Path) -> Path:
+    return report_path_for_file(path, "correction_summary")
 
 
 def simplification_log_path_for_file(path: str | Path) -> Path:
@@ -359,11 +390,14 @@ def format_morphology_session_log_text(
     lines: list[str] = []
     lines.append("SWC Session Report")
     lines.append("------------------")
+    lines.append(f"Tool Version: SWC-Studio {SWCTOOLS_VERSION}")
     lines.append(f"Source file: {source_file}")
     lines.append(f"Session started: {session_started}")
     lines.append(f"Session ended: {session_ended}")
     lines.append(f"Total morphology type changes: {len(changes)}")
     lines.append(f"Total processing events: {len(events)}")
+    lines.append("")
+    lines.extend(_label_type_legend_lines())
 
     if events:
         lines.append("")
@@ -381,12 +415,59 @@ def format_morphology_session_log_text(
     lines.append("Morphology Type Changes")
     lines.append("-----------------------")
     if changes:
-        lines.append("Seq\tTime\tNodeID\tOldType\tNewType")
+        lines.append(f"{'Seq':<6}{'Time':<12}{'NodeID':<10}{'OldType':<10}{'NewType':<10}")
         for row in changes:
             lines.append(
-                f"{row.get('seq', '')}\t{row.get('time', '')}\t{row.get('node_id', '')}\t"
-                f"{row.get('old_type', '')}\t{row.get('new_type', '')}"
+                f"{str(row.get('seq', '')):<6}"
+                f"{str(row.get('time', '')):<12}"
+                f"{str(row.get('node_id', '')):<10}"
+                f"{str(row.get('old_type', '')):<10}"
+                f"{str(row.get('new_type', '')):<10}"
             )
     else:
         lines.append("No direct node-type edits were recorded.")
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def format_correction_summary_report_text(payload: dict[str, Any]) -> str:
+    lines: list[str] = []
+    lines.append("SWC Correction Summary")
+    lines.append("----------------------")
+    lines.append(f"Generated: {_now()}")
+    lines.append(f"Input file: {payload.get('input_path', '')}")
+    lines.append(f"Output file: {payload.get('output_path', '')}")
+    lines.append(f"Remaining issues: {payload.get('remaining_issues', 0)}")
+    lines.append(f"Fixed issues: {payload.get('fixed_issues', 0)}")
+    lines.append(f"Skipped issues: {payload.get('skipped_issues', 0)}")
+
+    summary = dict(payload.get("diff_summary", {}))
+    if summary:
+        lines.append("")
+        lines.append("Before/After Diff")
+        lines.append("-----------------")
+        for key in (
+            "original_nodes",
+            "current_nodes",
+            "type_changes",
+            "radius_changes",
+            "parent_changes",
+            "geometry_changes",
+        ):
+            lines.append(f"{key}: {summary.get(key, 0)}")
+
+    remaining = list(payload.get("remaining_issue_titles", []))
+    if remaining:
+        lines.append("")
+        lines.append("Remaining Issues")
+        lines.append("----------------")
+        for row in remaining:
+            lines.append(f"- {row}")
+
+    provenance = list(payload.get("provenance_lines", []))
+    if provenance:
+        lines.append("")
+        lines.append("Applied Fixes / Events")
+        lines.append("----------------------")
+        lines.extend(str(line) for line in provenance)
+
     return "\n".join(lines).rstrip() + "\n"

@@ -6,48 +6,23 @@ import pyqtgraph as pg
 
 from PySide6.QtCore import Qt, Signal, QRectF, QPointF
 from PySide6.QtGui import (
-    QColor, QFont, QUndoStack, QUndoCommand,
+    QColor, QFont,
     QPainter, QPen, QBrush, QFontMetrics, QPainterPath, QPolygonF,
 )
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QRadioButton, QButtonGroup, QSpinBox, QCheckBox,
     QGroupBox, QSizePolicy, QScrollArea, QSplitter,
-    QGraphicsItem,
+    QGraphicsItem, QDialog,
 )
 
 from .graph_utils import (
     build_tree_cache, find_all_roots, cumlens_from_root_cache,
     layout_y_positions_cache, compute_levels, merge_dangling_trees,
 )
-from .constants import (
-    color_for_type, label_for_type, DEFAULT_COLORS, SWC_COLS,
-)
-
-
-# ------------------------------------------------------------------ Undo
-class TypeChangeCommand(QUndoCommand):
-    """Undoable command for changing node type(s)."""
-
-    def __init__(self, widget, indices: list, old_types: list, new_type: int, description=""):
-        super().__init__(description or f"Change {len(indices)} node(s) to type {new_type}")
-        self._widget = widget
-        self._indices = indices
-        self._old_types = old_types
-        self._new_type = new_type
-
-    def _apply_types(self, values: list[int]) -> None:
-        df = self._widget._df
-        for idx, value in zip(self._indices, values):
-            df.at[idx, "type"] = value
-        self._widget._rebuild_and_draw()
-        self._widget._emit_df_changed()
-
-    def redo(self):
-        self._apply_types([self._new_type] * len(self._indices))
-
-    def undo(self):
-        self._apply_types(self._old_types)
+from .custom_type_dialog import DefineCustomTypesDialog
+from .constants import color_for_type, label_for_type, SWC_COLS
+from swctools.core.custom_types import get_custom_type_definition, load_custom_type_definitions, save_custom_type_definitions
 
 
 # --------------------------------------------------------- Speech-bubble tooltip
@@ -131,10 +106,9 @@ class DendrogramWidget(QWidget):
 
     node_selected = Signal(int, int, int)   # swc_id, type, level
     df_changed = Signal(pd.DataFrame)       # emitted after edits
-
     TYPE_LABELS = {
         0: "undefined", 1: "soma", 2: "axon",
-        3: "basal dendrite", 4: "apical dendrite", 5: "custom",
+        3: "basal dendrite", 4: "apical dendrite",
     }
 
     def __init__(self, parent=None):
@@ -145,8 +119,6 @@ class DendrogramWidget(QWidget):
         self._compress = True
         self._selected_idx: int | None = None  # index into tree arrays
         self._level_val: int | None = None
-
-        self._undo_stack = QUndoStack(self)
 
         # Internal arrays (recomputed on rebuild)
         self._cum = None
@@ -198,6 +170,8 @@ class DendrogramWidget(QWidget):
         self._info_label = QLabel("Click an edge to select a node.")
         self._info_label.setWordWrap(True)
         self._info_label.setStyleSheet("font-size: 13px; color: #444;")
+        self._info_label.setAlignment(Qt.AlignTop | Qt.AlignLeft)
+        self._info_label.setFixedHeight(78)
         info_layout.addWidget(self._info_label)
         ctrl_layout.addWidget(info_group)
 
@@ -211,6 +185,19 @@ class DendrogramWidget(QWidget):
             rb.setStyleSheet(f"color: {color_for_type(t)}; font-weight: 600;")
             self._type_buttons.addButton(rb, t)
             type_layout.addWidget(rb)
+
+        self._custom_types_layout = QVBoxLayout()
+        self._custom_types_layout.setContentsMargins(0, 0, 0, 0)
+        self._custom_types_layout.setSpacing(6)
+        type_layout.addLayout(self._custom_types_layout)
+
+        custom_button_row = QHBoxLayout()
+        self._btn_manage_custom_types = QPushButton("Add/Edit Types")
+        self._btn_manage_custom_types.setMaximumWidth(150)
+        self._btn_manage_custom_types.clicked.connect(self._manage_custom_types)
+        custom_button_row.addWidget(self._btn_manage_custom_types)
+        custom_button_row.addStretch()
+        type_layout.addLayout(custom_button_row)
 
         # Scope
         scope_layout = QHBoxLayout()
@@ -231,11 +218,6 @@ class DendrogramWidget(QWidget):
         self._btn_apply.clicked.connect(self._on_apply)
         btn_row.addWidget(self._btn_apply)
 
-        self._btn_undo = QPushButton("Undo")
-        self._btn_undo.setEnabled(False)
-        self._btn_undo.clicked.connect(self._undo_stack.undo)
-        self._undo_stack.canUndoChanged.connect(self._btn_undo.setEnabled)
-        btn_row.addWidget(self._btn_undo)
         type_layout.addLayout(btn_row)
 
         self._apply_msg = QLabel("")
@@ -280,18 +262,11 @@ class DendrogramWidget(QWidget):
         ctrl_layout.addWidget(view_group)
         ctrl_layout.addStretch()
 
-        # --- Download ---
-        dl_group = QGroupBox("Export")
-        dl_layout = QVBoxLayout(dl_group)
-        self._btn_dl_swc = QPushButton("Download edited SWC")
-        self._btn_dl_swc.setEnabled(False)
-        self._btn_dl_swc.clicked.connect(self._on_download_swc)
-        dl_layout.addWidget(self._btn_dl_swc)
-        ctrl_layout.addWidget(dl_group)
-
         self._splitter.addWidget(self._controls_panel)
         self._splitter.setStretchFactor(0, 3)
         self._splitter.setStretchFactor(1, 1)
+        self._custom_type_buttons: dict[int, QRadioButton] = {}
+        self._refresh_custom_type_buttons()
 
     def take_controls_panel(self) -> QWidget:
         """Detach and return the right-side controls panel for external docking."""
@@ -307,11 +282,104 @@ class DendrogramWidget(QWidget):
     def load_swc(self, df: pd.DataFrame, filename: str = ""):
         """Load an SWC DataFrame and render the dendrogram."""
         self._df = df.copy()
-        self._undo_stack.clear()
         self._selected_idx = None
         self._level_val = None
-        self._btn_dl_swc.setEnabled(True)
+        self._refresh_custom_type_buttons()
         self._rebuild_and_draw()
+
+    def select_node_by_id(self, swc_id: int, *, emit_signal: bool = False):
+        """Externally select a node in the dendrogram by SWC ID."""
+        if self._tree is None or self._cum is None or self._levels is None:
+            return
+        matches = np.flatnonzero(self._tree.ids == int(swc_id))
+        if matches.size == 0:
+            return
+        self._selected_idx = int(matches[0])
+        node_type = int(self._tree.types[self._selected_idx])
+        level = int(self._levels[self._selected_idx]) if self._levels is not None else -1
+        self._info_label.setText(
+            f"<b>ID:</b> {int(swc_id)}<br>"
+            f"<b>Type:</b> {label_for_type(node_type)} ({node_type})<br>"
+            f"<b>Level:</b> {level}"
+        )
+        if node_type >= 5:
+            custom_btn = self._type_buttons.button(int(node_type))
+            if custom_btn:
+                custom_btn.setChecked(True)
+        else:
+            btn = self._type_buttons.button(node_type)
+            if btn:
+                btn.setChecked(True)
+        self._btn_apply.setEnabled(True)
+        self._draw()
+        if emit_signal:
+            self.node_selected.emit(int(swc_id), node_type, level)
+
+    def clear_selection(self):
+        self._selected_idx = None
+        self._level_val = None
+        self._info_label.setText("No node selected.")
+        for btn in self._type_buttons.buttons():
+            btn.setAutoExclusive(False)
+            btn.setChecked(False)
+            btn.setAutoExclusive(True)
+        self._btn_apply.setEnabled(False)
+        self._draw()
+
+    def set_history_state(self, can_undo: bool, can_redo: bool):
+        _ = (can_undo, can_redo)
+
+    def _refresh_custom_type_buttons(self, definitions_override: dict[int, dict[str, str]] | None = None):
+        current = self.selected_custom_type_id()
+        while self._custom_types_layout.count():
+            item = self._custom_types_layout.takeAt(0)
+            widget = item.widget()
+            if widget is not None:
+                self._type_buttons.removeButton(widget)
+                widget.deleteLater()
+        self._custom_type_buttons = {}
+        definitions = (
+            {int(k): dict(v) for k, v in dict(definitions_override).items()}
+            if definitions_override is not None
+            else load_custom_type_definitions(force=True)
+        )
+        for type_id in sorted(definitions.keys()):
+            definition = definitions.get(type_id) or {}
+            name = str(definition.get("name", "")).strip() or f"custom type {type_id}"
+            btn = QRadioButton(f"{type_id} — {name}")
+            btn.setStyleSheet(f"color: {str(definition.get('color', '')).strip() or color_for_type(5)}; font-weight: 600;")
+            self._type_buttons.addButton(btn, int(type_id))
+            self._custom_types_layout.addWidget(btn)
+            self._custom_type_buttons[int(type_id)] = btn
+        if current >= 5:
+            self._set_selected_custom_type(current)
+
+    def selected_custom_type_id(self) -> int:
+        checked = self._type_buttons.checkedId()
+        return int(checked) if int(checked) >= 5 else -1
+
+    def _set_selected_custom_type(self, type_id: int):
+        btn = self._type_buttons.button(int(type_id))
+        if btn is not None:
+            btn.setChecked(True)
+
+    def _on_custom_types_live_changed(self, definitions: dict[int, dict[str, str]]):
+        save_custom_type_definitions(definitions)
+        self._refresh_custom_type_buttons(definitions)
+
+    def _manage_custom_types(self):
+        dialog = DefineCustomTypesDialog([], self)
+        dialog.definitions_changed.connect(self._on_custom_types_live_changed)
+        if dialog.exec() != QDialog.Accepted:
+            self._refresh_custom_type_buttons()
+            return
+        self._refresh_custom_type_buttons()
+        if self._custom_type_buttons:
+            self._apply_msg.setText("✓ Custom types updated.")
+            self._apply_msg.setStyleSheet("font-size: 11px; color: #2ca02c;")
+        else:
+            self._apply_msg.setText("No custom types are defined yet.")
+            self._apply_msg.setStyleSheet("font-size: 11px; color: #555;")
 
     def _emit_df_changed(self):
         if self._df is not None:
@@ -425,7 +493,7 @@ class DendrogramWidget(QWidget):
         offsets = tree.child_offsets
         child_indices = tree.child_indices
         child_counts = np.diff(offsets)
-        labels_arr = np.array([label_for_type(int(t)) for t in tree.types.tolist()], dtype=object)
+        type_arr = np.asarray(tree.types, dtype=np.int64)
 
         parent_indices_all = np.repeat(np.arange(tree.size, dtype=np.int32), child_counts)
         edge_children_all = child_indices
@@ -440,9 +508,9 @@ class DendrogramWidget(QWidget):
 
         # Draw vertical connectors (per type)
         if edge_children.size > 0:
-            edge_labels = labels_arr[edge_children]
-            for label, hex_color in DEFAULT_COLORS.items():
-                mask = edge_labels == label
+            edge_types = type_arr[edge_children]
+            for type_id in sorted({int(v) for v in edge_types.tolist()}):
+                mask = edge_types == int(type_id)
                 if not np.any(mask):
                     continue
                 p_idx = parent_indices[mask]
@@ -454,14 +522,14 @@ class DendrogramWidget(QWidget):
                 vx[0::3] = cum[p_idx]; vx[1::3] = cum[p_idx]; vx[2::3] = np.nan
                 vy[0::3] = y[c_idx];   vy[1::3] = y[p_idx];   vy[2::3] = np.nan
 
-                pen = pg.mkPen(color=hex_color, width=1.5)
+                pen = pg.mkPen(color=color_for_type(int(type_id)), width=1.5)
                 self._plot.plot(vx, vy, pen=pen, connect="finite")
 
         # Draw horizontal edges (per type)
         if edge_children.size > 0:
-            edge_labels = labels_arr[edge_children]
-            for label, hex_color in DEFAULT_COLORS.items():
-                mask = edge_labels == label
+            edge_types = type_arr[edge_children]
+            for type_id in sorted({int(v) for v in edge_types.tolist()}):
+                mask = edge_types == int(type_id)
                 if not np.any(mask):
                     continue
                 p_idx = parent_indices[mask]
@@ -473,13 +541,13 @@ class DendrogramWidget(QWidget):
                 hx[0::3] = cum[p_idx]; hx[1::3] = cum[c_idx]; hx[2::3] = np.nan
                 hy[0::3] = y[c_idx];   hy[1::3] = y[c_idx];   hy[2::3] = np.nan
 
-                pen = pg.mkPen(color=hex_color, width=1.5)
+                pen = pg.mkPen(color=color_for_type(int(type_id)), width=1.5)
                 self._plot.plot(hx, hy, pen=pen, connect="finite")
 
         # Root dot
         if self._roots:
             root = self._roots[0]
-            root_color = DEFAULT_COLORS.get(label_for_type(int(tree.types[root])), "#666")
+            root_color = color_for_type(int(tree.types[root]))
             scatter = pg.ScatterPlotItem(
                 [float(cum[root])], [float(y[root])],
                 size=8, pen=pg.mkPen("#333", width=1),
@@ -518,6 +586,65 @@ class DendrogramWidget(QWidget):
         else:
             self._plot.setLabel("bottom", "Path length from soma (µm)")
 
+    def _pixel_point_to_segment_distance(self, point: np.ndarray, a: np.ndarray, b: np.ndarray) -> float:
+        ab = b - a
+        denom = float(np.dot(ab, ab))
+        if denom <= 1e-9:
+            return float(np.linalg.norm(point - a))
+        t = float(np.dot(point - a, ab) / denom)
+        t = max(0.0, min(1.0, t))
+        proj = a + t * ab
+        return float(np.linalg.norm(point - proj))
+
+    def _nearest_interactive_index(self, scene_pos, *, allow_segment: bool) -> int | None:
+        if self._tree is None or self._cum is None or self._tree_mask is None:
+            return None
+
+        vb = self._plot.plotItem.vb
+        candidates = np.flatnonzero(self._tree_mask)
+        if candidates.size == 0:
+            return None
+
+        node_scene = []
+        for idx in candidates:
+            pt = vb.mapViewToScene(pg.Point(float(self._cum[idx]), float(self._y[idx])))
+            node_scene.append((int(idx), np.array([float(pt.x()), float(pt.y())], dtype=np.float32)))
+        target = np.array([float(scene_pos.x()), float(scene_pos.y())], dtype=np.float32)
+        node_pick_threshold = 28.0 if candidates.size <= 4 else 18.0
+        segment_pick_threshold = 18.0 if candidates.size <= 4 else 12.0
+
+        best_idx = None
+        best_dist = float("inf")
+        for idx, pos in node_scene:
+            dist = float(np.linalg.norm(pos - target))
+            if dist < best_dist:
+                best_idx = idx
+                best_dist = dist
+        if best_idx is not None and best_dist <= node_pick_threshold:
+            return int(best_idx)
+
+        if not allow_segment or self._edge_children is None or self._edge_parents is None:
+            return None
+
+        node_pos_by_idx = {idx: pos for idx, pos in node_scene}
+        best_child = None
+        best_seg_dist = float("inf")
+        for parent_idx, child_idx in zip(self._edge_parents, self._edge_children):
+            if int(child_idx) not in node_pos_by_idx:
+                continue
+            child_pos = node_pos_by_idx[int(child_idx)]
+            parent_pos = node_pos_by_idx.get(int(parent_idx))
+            if parent_pos is None:
+                pt = vb.mapViewToScene(pg.Point(float(self._cum[parent_idx]), float(self._y[parent_idx])))
+                parent_pos = np.array([float(pt.x()), float(pt.y())], dtype=np.float32)
+            dist = self._pixel_point_to_segment_distance(target, parent_pos, child_pos)
+            if dist < best_seg_dist:
+                best_seg_dist = dist
+                best_child = int(child_idx)
+        if best_child is not None and best_seg_dist <= segment_pick_threshold:
+            return best_child
+        return None
+
     # ------------------------------------------------- Click handling
     def _on_click(self, event):
         """Handle click on the plot to select a node."""
@@ -525,35 +652,8 @@ class DendrogramWidget(QWidget):
             return
 
         pos = event.scenePos()
-        vb = self._plot.plotItem.vb
-        mouse_point = vb.mapSceneToView(pos)
-        mx, my = mouse_point.x(), mouse_point.y()
-
-        # Find nearest edge child node
-        cum = self._cum
-        y = self._y
-        tree_mask = self._tree_mask
-
-        candidates = np.flatnonzero(tree_mask)
-        if candidates.size == 0:
-            return
-
-        cx = cum[candidates]
-        cy = y[candidates]
-
-        # Normalize distances by axis ranges
-        x_range = max(1e-9, float(np.nanmax(cx) - np.nanmin(cx)))
-        y_range = max(1e-9, float(np.nanmax(cy) - np.nanmin(cy)))
-
-        dx = (cx - mx) / x_range
-        dy = (cy - my) / y_range
-        dists = dx**2 + dy**2
-
-        nearest_local = int(np.argmin(dists))
-        nearest_idx = int(candidates[nearest_local])
-
-        # Check if close enough (threshold in normalized coords)
-        if dists[nearest_local] > 0.001:
+        nearest_idx = self._nearest_interactive_index(pos, allow_segment=True)
+        if nearest_idx is None:
             return
 
         self._selected_idx = nearest_idx
@@ -569,9 +669,12 @@ class DendrogramWidget(QWidget):
         )
 
         # Pre-select the current type
-        btn = self._type_buttons.button(node_type)
-        if btn:
-            btn.setChecked(True)
+        if node_type >= 5:
+            self._set_selected_custom_type(int(node_type))
+        else:
+            btn = self._type_buttons.button(node_type)
+            if btn:
+                btn.setChecked(True)
         self._btn_apply.setEnabled(True)
 
         self.node_selected.emit(swc_id, node_type, level)
@@ -610,12 +713,23 @@ class DendrogramWidget(QWidget):
         if not df_indices:
             return
 
-        cmd = TypeChangeCommand(self, df_indices, old_types, new_type,
-                                f"Set {len(df_indices)} node(s) to {label_for_type(new_type)}")
-        self._undo_stack.push(cmd)
+        changed = 0
+        for df_idx, old_type in zip(df_indices, old_types):
+            if int(old_type) == int(new_type):
+                continue
+            self._df.at[df_idx, "type"] = int(new_type)
+            changed += 1
+
+        if changed <= 0:
+            self._apply_msg.setText("No type change was needed.")
+            self._apply_msg.setStyleSheet("font-size: 11px; color: #555;")
+            return
+
+        self._rebuild_and_draw()
+        self._emit_df_changed()
 
         self._apply_msg.setText(
-            f"✓ Changed {len(df_indices)} node(s) to {label_for_type(new_type)}"
+            f"✓ Changed {changed} node(s) to {label_for_type(new_type)}"
         )
         self._apply_msg.setStyleSheet("font-size: 11px; color: #2ca02c;")
 
@@ -705,46 +819,21 @@ class DendrogramWidget(QWidget):
         if not self._plot.sceneBoundingRect().contains(pos):
             self._hover_bubble.setVisible(False)
             return
-
-        vb = self._plot.plotItem.vb
-        mouse_point = vb.mapSceneToView(pos)
-        mx, my = mouse_point.x(), mouse_point.y()
-
-        cum = self._cum
-        y = self._y
-        tree_mask = self._tree_mask
-        candidates = np.flatnonzero(tree_mask)
-        if candidates.size == 0:
+        nearest_idx = self._nearest_interactive_index(pos, allow_segment=True)
+        if nearest_idx is None:
             self._hover_bubble.setVisible(False)
             return
-
-        cx = cum[candidates]
-        cy = y[candidates]
-
-        x_range = max(1e-9, float(np.nanmax(cx) - np.nanmin(cx)))
-        y_range = max(1e-9, float(np.nanmax(cy) - np.nanmin(cy)))
-
-        dx = (cx - mx) / x_range
-        dy = (cy - my) / y_range
-        dists = dx**2 + dy**2
-
-        nearest_local = int(np.argmin(dists))
-        if dists[nearest_local] > 0.0005:
-            self._hover_bubble.setVisible(False)
-            return
-
-        nearest_idx = int(candidates[nearest_local])
         tree = self._tree
         swc_id = int(tree.ids[nearest_idx])
         node_type = int(tree.types[nearest_idx])
         level = int(self._levels[nearest_idx]) if self._levels is not None else -1
         label = label_for_type(node_type)
 
-        node_x = float(cum[nearest_idx])
-        node_y = float(y[nearest_idx])
+        node_x = float(self._cum[nearest_idx])
+        node_y = float(self._y[nearest_idx])
 
         # Show speech-bubble tooltip above the node, colored by type
-        type_color = DEFAULT_COLORS.get(label, "#666")
+        type_color = color_for_type(node_type)
         self._hover_bubble.set_text(f"id={swc_id}, type={label} ({node_type}), level={level}")
         self._hover_bubble.set_color(type_color)
         self._hover_bubble.setPos(node_x, node_y)

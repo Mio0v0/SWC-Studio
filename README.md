@@ -1,5 +1,7 @@
 # SWC-Studio
 
+`SWC-Studio` is a desktop and command-line workbench for working with neuron morphology files in SWC format. At a high level, it is meant to help researchers inspect reconstructions, find structural or annotation problems, repair them, and run repeatable morphology-processing workflows from the same shared backend.
+
 `SWC-Studio` is a modular SWC morphology toolkit (Python package: `swctools`) with:
 
 - a shared Python backend (`swctools/core` + `swctools/tools`)
@@ -7,6 +9,8 @@
 - a desktop GUI (`swctools-gui`)
 
 CLI and GUI call the same feature backend functions.
+
+There are two main ways to use `SWC-Studio`. If you want the full Python workflow, you can create a virtual environment and install it with `pip`, which gives you the shared library, CLI, and GUI together. If you just want to use it as desktop software, you can download a packaged executable `.zip` release, extract it, and run the desktop application directly without setting up a Python environment.
 
 ## What This Project Does
 
@@ -35,6 +39,7 @@ Short docs (Markdown):
 - [CLI Reference](docs/CLI_REFERENCE.md): command reference and options
 - [API / Library Documentation](docs/API_DOCUMENTATION.md): Python API surface
 - [Plugin Demonstration](docs/PLUGIN_DEMONSTRATION.md): lab handoff plugin workflow
+- [Checks And Issues Reference](docs/CHECKS_AND_ISSUES_REFERENCE.md): validation checks, issue types, algorithms, and parameters
 
 Comprehensive docs site (Sphinx source):
 
