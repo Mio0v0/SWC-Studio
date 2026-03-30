@@ -177,7 +177,7 @@ def _tool_target_for_key(key: str) -> tuple[str, str, str]:
             "geometry_editing",
             "Open Geometry Editing to inspect the highlighted nodes, isolate local structure, and repair connectivity or coordinates manually.",
         )
-    if key == "parent_id_less_than_child_id":
+    if key in {"parent_id_less_than_child_id", "no_node_id_gaps"}:
         return (
             "index",
             "index_clean",

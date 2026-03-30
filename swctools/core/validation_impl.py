@@ -32,7 +32,7 @@ FRIENDLY_LABELS = {
     "has_no_dangling_branch":           "No dangling branches",
     "has_no_fat_ends":                  "No oversized terminal ends",
     "has_no_flat_neurites":             "No flattened neurites",
-    "has_no_jumps":                     "No section index gaps",
+    "has_no_jumps":                     "No large section z-axis jumps",
     "has_no_narrow_neurite_section":    "No extremely narrow sections",
     "has_no_narrow_start":              "No extremely narrow branch starts",
     "has_no_overlapping_point":         "No duplicate 3D points",

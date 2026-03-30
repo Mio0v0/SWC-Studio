@@ -9,7 +9,7 @@ from swctools.core.auto_typing_catalog import get_auto_typing_guide
 
 
 class AutoTypingGuideWidget(QWidget):
-    """Guide panel shown as a floating dock for Auto Labeling."""
+    """Guide panel shown as a floating dock for Auto Label Editing."""
 
     def __init__(self, parent=None):
         super().__init__(parent)

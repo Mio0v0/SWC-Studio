@@ -10,8 +10,6 @@ from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
     QDoubleSpinBox,
-    QFormLayout,
-    QGroupBox,
     QHBoxLayout,
     QLabel,
     QPlainTextEdit,
@@ -21,7 +19,7 @@ from PySide6.QtWidgets import (
 )
 
 from swctools.core.radii_cleaning import radii_stats_by_type
-from .constants import color_for_type, label_for_type
+from .constants import label_for_type
 
 
 class ManualRadiiPanel(QWidget):
@@ -51,21 +49,6 @@ class ManualRadiiPanel(QWidget):
         desc.setWordWrap(True)
         desc.setStyleSheet("font-size: 12px; color: #555;")
         root.addWidget(desc)
-
-        selected_group = QGroupBox("Selected Node")
-        selected_layout = QFormLayout(selected_group)
-        selected_layout.setContentsMargins(10, 10, 10, 10)
-        selected_layout.setHorizontalSpacing(12)
-        selected_layout.setVerticalSpacing(6)
-        self._node_id_value = QLabel("None")
-        self._node_type_value = QLabel("None")
-        self._node_radius_value = QLabel("None")
-        self._node_count_value = QLabel("None")
-        selected_layout.addRow("Node ID:", self._node_id_value)
-        selected_layout.addRow("Type:", self._node_type_value)
-        selected_layout.addRow("Current radius:", self._node_radius_value)
-        selected_layout.addRow("Same-type nodes:", self._node_count_value)
-        root.addWidget(selected_group)
 
         self._hist_plot = pg.PlotWidget(background="white")
         self._hist_plot.setMinimumHeight(160)
@@ -158,10 +141,6 @@ class ManualRadiiPanel(QWidget):
     def clear_selection(self):
         self._selected_node_id = None
         self._selected_type_id = None
-        self._node_id_value.setText("None")
-        self._node_type_value.setText("None")
-        self._node_radius_value.setText("None")
-        self._node_count_value.setText("None")
         self._radius_input.blockSignals(True)
         self._radius_input.setValue(0.0)
         self._radius_input.blockSignals(False)
@@ -190,11 +169,6 @@ class ManualRadiiPanel(QWidget):
 
         self._selected_node_id = int(swc_id)
         self._selected_type_id = int(type_id)
-        self._node_id_value.setText(str(int(swc_id)))
-        self._node_type_value.setText(f"{label_for_type(type_id)} ({type_id})")
-        self._node_type_value.setStyleSheet(f"color: {color_for_type(type_id)}; font-weight: 600;")
-        self._node_radius_value.setText(f"{radius:.6g}")
-        self._node_count_value.setText(str(int(len(type_rows))))
         self._radius_input.blockSignals(True)
         self._radius_input.setValue(radius)
         self._radius_input.blockSignals(False)

@@ -73,6 +73,7 @@
       }
     },
     "parent_id_less_than_child_id": {"enabled": true, "severity": "warning", "params": {}},
+    "no_node_id_gaps": {"enabled": true, "severity": "warning", "params": {}},
     "no_single_child_chains": {"enabled": true, "severity": "warning", "params": {}},
     "soma_radius_nonzero": {
       "enabled": true,

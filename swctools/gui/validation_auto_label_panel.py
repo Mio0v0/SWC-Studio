@@ -1,4 +1,4 @@
-"""Validation control panel: single-file auto labeling applied in-place."""
+"""Validation control panel: single-file auto label editing applied in-place."""
 
 from __future__ import annotations
 
@@ -109,7 +109,7 @@ class ValidationAutoLabelPanel(QWidget):
         root.setSpacing(8)
         root.setAlignment(Qt.AlignTop)
 
-        desc = QLabel("Auto labeling on current SWC file using the same rule engine as Batch Auto Label.")
+        desc = QLabel("Auto label editing on the current SWC file using the same rule engine as Batch Auto Label.")
         desc.setWordWrap(True)
         desc.setStyleSheet("font-size: 12px; color: #555;")
         root.addWidget(desc)
@@ -198,13 +198,13 @@ class ValidationAutoLabelPanel(QWidget):
         if not summary:
             self._summary.setPlainText(
                 "No auto-label preview yet.\n"
-                "Use Run to preview auto labeling on the current canvas."
+                "Use Run to preview auto label editing on the current canvas."
             )
             return
 
         out_counts = dict(summary.get("out_type_counts", {}))
         lines = [
-            "Auto Label Preview",
+            "Auto Label Editing Preview",
             "------------------",
             f"Nodes processed: {summary.get('nodes_total', 0)}",
             f"Type changes: {summary.get('type_changes', 0)}",

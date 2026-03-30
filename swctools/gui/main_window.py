@@ -187,7 +187,6 @@ class SWCMainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("SWC Studio")
-        self.resize(1480, 920)
         self.setAcceptDrops(False)
 
         self._df: pd.DataFrame | None = None
@@ -211,6 +210,21 @@ class SWCMainWindow(QMainWindow):
 
         self._build_ui()
         self._build_status_bar()
+        self._apply_initial_window_geometry()
+
+    def _apply_initial_window_geometry(self) -> None:
+        """Start within the available screen work area to avoid Qt geometry warnings."""
+        screen = self.screen() or QApplication.primaryScreen()
+        if screen is None:
+            self.resize(1480, 920)
+            return
+
+        available = screen.availableGeometry()
+        target_width = min(1480, max(1100, available.width() - 120))
+        target_height = min(920, max(760, available.height() - 120))
+        target_width = min(target_width, max(200, available.width()))
+        target_height = min(target_height, max(200, available.height()))
+        self.resize(target_width, target_height)
 
     # ------------------------------------------------------------------ UI
     def _build_ui(self):
@@ -805,11 +819,11 @@ class SWCMainWindow(QMainWindow):
     def _tool_feature_labels(self, tool_key: str | None = None) -> list[str]:
         key = str(tool_key if tool_key is not None else (self._active_tool or "")).strip().lower()
         mapping = {
-            "batch": ["Split", "Validation", "Auto Label", "Radii Cleaning", "Simplification", "Index Clean"],
-            "validation": ["Validation"],
+            "batch": ["Split", "Validation", "Auto Label Editing", "Radii Cleaning", "Simplification", "Index Clean"],
+            "validation": ["Validation", "Index Clean"],
             "visualization": ["View Controls"],
-            "morphology_editing": ["Label Editing", "Auto Label", "Manual Radii Editing", "Auto Radii Editing", "Simplification"],
-            "dendrogram": ["Label Editing", "Auto Label", "Manual Radii Editing", "Auto Radii Editing", "Simplification"],
+            "morphology_editing": ["Manual Label Editing", "Auto Label Editing", "Manual Radii Editing", "Auto Radii Editing", "Simplification"],
+            "dendrogram": ["Manual Label Editing", "Auto Label Editing", "Manual Radii Editing", "Auto Radii Editing", "Simplification"],
             "geometry_editing": ["Geometry Editing"],
             "atlas_registration": ["Registration"],
             "analysis": ["Summary"],
@@ -1678,7 +1692,7 @@ class SWCMainWindow(QMainWindow):
     def _on_validation_auto_label_process_requested(self, options: object):
         source_doc = self._active_source_document()
         if source_doc is None or source_doc.df is None or source_doc.df.empty:
-            self._append_log("Validation Auto Label: no active SWC document.", "WARN")
+            self._append_log("Validation Auto Label Editing: no active SWC document.", "WARN")
             self._validation_auto_label_panel.set_status_text("No active SWC loaded.")
             return
 
@@ -1694,8 +1708,8 @@ class SWCMainWindow(QMainWindow):
                 write_log=False,
             )
         except Exception as e:  # noqa: BLE001
-            self._append_log(f"Validation Auto Label failed: {e}", "ERROR")
-            self._validation_auto_label_panel.set_status_text(f"Auto Label failed:\n{e}")
+            self._append_log(f"Validation Auto Label Editing failed: {e}", "ERROR")
+            self._validation_auto_label_panel.set_status_text(f"Auto Label Editing failed:\n{e}")
             try:
                 tmp_path.unlink(missing_ok=True)
             except Exception:
@@ -1709,8 +1723,8 @@ class SWCMainWindow(QMainWindow):
 
         preview_df = self._auto_label_result_to_dataframe(result_obj)
         if preview_df.empty:
-            self._append_log("Validation Auto Label produced empty output.", "WARN")
-            self._validation_auto_label_panel.set_status_text("Auto Label output is empty.")
+            self._append_log("Validation Auto Label Editing produced empty output.", "WARN")
+            self._validation_auto_label_panel.set_status_text("Auto Label Editing output is empty.")
             return
 
         opts = options
@@ -1740,7 +1754,7 @@ class SWCMainWindow(QMainWindow):
         source_doc.editor.set_mode(self._editor_mode_for_feature())
         self._validation_auto_label_panel.set_preview_state(True, result_payload)
         self._append_log(
-            "Validation Auto Label preview updated on current canvas: "
+            "Validation Auto Label Editing preview updated on current canvas: "
             f"nodes={result_payload['nodes_total']}, "
             f"type_changes={result_payload['type_changes']}, "
             f"radius_changes={result_payload['radius_changes']}",
@@ -1792,7 +1806,7 @@ class SWCMainWindow(QMainWindow):
             or doc.auto_label_preview_df.empty
             or not isinstance(doc.last_auto_label_result, dict)
         ):
-            self._append_log("Validation Auto Label Apply: no preview available.", "WARN")
+            self._append_log("Validation Auto Label Editing Apply: no preview available.", "WARN")
             return
         result = dict(doc.last_auto_label_result)
         out_counts = dict(result.get("out_type_counts", {}))
@@ -1808,18 +1822,18 @@ class SWCMainWindow(QMainWindow):
         self._apply_document_dataframe(
             doc,
             applied_df,
-            event_title="Validation Auto Label Apply",
+            event_title="Validation Auto Label Editing Apply",
             event_summary=f"Applied auto-label preview to current SWC; type_changes={int(result.get('type_changes', 0))}",
             event_details=event_details,
         )
         self._validation_auto_label_panel.set_preview_state(False, result)
         self._rerun_active_validation()
-        self._append_log("Validation Auto Label preview applied to current SWC.", "INFO")
+        self._append_log("Validation Auto Label Editing preview applied to current SWC.", "INFO")
 
     def _on_validation_auto_label_cancel_requested(self):
         doc = self._active_source_document()
         if doc is None or not isinstance(doc.auto_label_preview_base_df, pd.DataFrame):
-            self._append_log("Validation Auto Label Cancel: no preview to discard.", "INFO")
+            self._append_log("Validation Auto Label Editing Cancel: no preview to discard.", "INFO")
             return
         base_df = doc.auto_label_preview_base_df.copy()
         doc.auto_label_preview_base_df = None
@@ -1828,7 +1842,7 @@ class SWCMainWindow(QMainWindow):
         doc.editor.set_mode(self._editor_mode_for_feature())
         self._validation_auto_label_panel.set_preview_state(False, doc.last_auto_label_result)
         self._refresh_canvas_surface()
-        self._append_log("Validation Auto Label preview discarded.", "INFO")
+        self._append_log("Validation Auto Label Editing preview discarded.", "INFO")
 
     def _on_manual_radii_apply_requested(self, node_id: int, new_radius: float):
         doc = self._active_source_document()
@@ -2143,6 +2157,7 @@ class SWCMainWindow(QMainWindow):
             previous_label = self._control_tabs.tabText(self._control_tabs.currentIndex()).strip().lower()
         while self._control_tabs.count() > 0:
             self._control_tabs.removeTab(0)
+        self._control_tabs.tabBar().setVisible(False)
 
         current_idx = -1
 
@@ -2153,7 +2168,7 @@ class SWCMainWindow(QMainWindow):
         if key == "batch":
             self._control_tabs.addTab(self._wrap_control_widget(self._batch_tab.split_tab_widget()), "Split")
             self._control_tabs.addTab(self._wrap_control_widget(self._batch_tab.validation_tab_widget()), "Validation")
-            self._control_tabs.addTab(self._wrap_control_widget(self._batch_tab.auto_tab_widget()), "Auto Label")
+            self._control_tabs.addTab(self._wrap_control_widget(self._batch_tab.auto_tab_widget()), "Auto Label Editing")
             self._control_tabs.addTab(self._wrap_control_widget(self._batch_tab.radii_tab_widget()), "Radii Cleaning")
             self._control_tabs.addTab(self._wrap_control_widget(self._batch_tab.simplify_tab_widget()), "Simplification")
             self._control_tabs.addTab(self._wrap_control_widget(self._batch_tab.index_clean_tab_widget()), "Index Clean")
@@ -2171,14 +2186,14 @@ class SWCMainWindow(QMainWindow):
                 self._refresh_top_feature_buttons()
                 self._on_control_tab_changed(-1)
                 return
-            self._control_tabs.addTab(self._wrap_control_widget(doc.controls), "Label Editing")
-            self._control_tabs.addTab(self._wrap_control_widget(self._validation_auto_label_panel), "Auto Label")
+            self._control_tabs.addTab(self._wrap_control_widget(doc.controls), "Manual Label Editing")
+            self._control_tabs.addTab(self._wrap_control_widget(self._validation_auto_label_panel), "Auto Label Editing")
             self._control_tabs.addTab(self._wrap_control_widget(self._manual_radii_panel), "Manual Radii Editing")
             self._control_tabs.addTab(self._wrap_control_widget(self._validation_radii_panel), "Auto Radii Editing")
             self._control_tabs.addTab(self._wrap_control_widget(self._simplification_panel), "Simplification")
             current_idx = {
-                "label editing": 0,
-                "auto label": 1,
+                "manual label editing": 0,
+                "auto label editing": 1,
                 "manual radii editing": 2,
                 "auto radii editing": 3,
                 "simplification": 4,
@@ -2195,10 +2210,12 @@ class SWCMainWindow(QMainWindow):
             current_idx = 0
 
         if self._control_tabs.count() > 0:
+            self._control_tabs.tabBar().setVisible(False)
             current_idx = max(0, min(current_idx, self._control_tabs.count() - 1))
             self._control_tabs.setCurrentIndex(current_idx)
             self._on_control_tab_changed(self._control_tabs.currentIndex())
         else:
+            self._control_tabs.tabBar().setVisible(False)
             self._on_control_tab_changed(-1)
 
         self._refresh_top_feature_buttons()
@@ -2921,6 +2938,9 @@ class SWCMainWindow(QMainWindow):
         )
 
     def _on_validation_result_activated(self, row: dict):
+        if str(row.get("key", "")).strip() in {"parent_id_less_than_child_id", "no_node_id_gaps"}:
+            self._activate_feature("validation")
+            self._select_control_tab_by_label("index clean")
         issues = issues_from_validation_report({"results": [row]})
         if not issues:
             return
@@ -3001,12 +3021,12 @@ class SWCMainWindow(QMainWindow):
         if tool_target in {"label_editing", "simplification", "auto_label", "radii_cleaning", "manual_radii"}:
             self._activate_feature("morphology_editing")
             target_tab = {
-                "label_editing": "label editing",
-                "auto_label": "auto label",
+                "label_editing": "manual label editing",
+                "auto_label": "auto label editing",
                 "manual_radii": "manual radii editing",
                 "radii_cleaning": "auto radii editing",
                 "simplification": "simplification",
-            }.get(tool_target, "label editing")
+            }.get(tool_target, "manual label editing")
             self._select_control_tab_by_label(target_tab)
             return
         if tool_target == "geometry_editing":
@@ -3054,8 +3074,8 @@ class SWCMainWindow(QMainWindow):
                 "index_clean": "Open Index Clean",
                 "radii_cleaning": "Open Auto Radii Editing",
                 "manual_radii": "Open Manual Radii Editing",
-                "auto_label": "Open Auto Labeling",
-                "label_editing": "Open Manual Labeling",
+                "auto_label": "Open Auto Label Editing",
+                "label_editing": "Open Manual Label Editing",
                 "simplification": "Open Simplification",
                 "geometry_editing": "Open Geometry Editing",
             }.get(str(issue.get("tool_target", "")).strip().lower(), "Open Related Tool"),
@@ -3178,12 +3198,12 @@ class SWCMainWindow(QMainWindow):
                 {
                     "problem_detail": str(issue.get("description", "")).strip() or f"No {missing_label} node found.",
                     "suggested_solution": (
-                        "Choose either manual labeling in Morphology Editing or Auto Labeling to assign the missing type. "
+                        "Choose either Manual Label Editing or Auto Label Editing in Morphology Editing to assign the missing type. "
                         "Dependent checks will rerun automatically after the change."
                     ),
-                    "custom_primary_label": "Open Manual Labeling",
+                    "custom_primary_label": "Open Manual Label Editing",
                     "custom_primary_action": "open_manual_label_popup",
-                    "custom_secondary_label": "Open Auto Labeling",
+                    "custom_secondary_label": "Open Auto Label Editing",
                     "custom_secondary_action": "open_auto_label_popup",
                     "hide_skip_button": True,
                     "hide_apply_button": True,
@@ -3244,8 +3264,8 @@ class SWCMainWindow(QMainWindow):
             ctx.update(
                 {
                     "problem_detail": str(issue.get("description", "")).strip() or "Custom SWC type IDs need display definitions.",
-                    "suggested_solution": "Open Manual Labeling and define each custom type with a type ID, name, color, and notes.",
-                    "custom_primary_label": "Open Manual Labeling",
+                    "suggested_solution": "Open Manual Label Editing and define each custom type with a type ID, name, color, and notes.",
+                    "custom_primary_label": "Open Manual Label Editing",
                     "custom_primary_action": "open_manual_label_popup",
                     "hide_skip_button": True,
                     "hide_apply_button": True,
@@ -3275,10 +3295,53 @@ class SWCMainWindow(QMainWindow):
                 {
                     "problem_detail": str(issue.get("description", "")).strip() or "One or more nodes use invalid negative SWC type values.",
                     "suggested_solution": "Relabel nodes with invalid negative type values to supported SWC types.",
-                    "custom_primary_label": "Open Manual Labeling",
+                    "custom_primary_label": "Open Manual Label Editing",
                     "custom_primary_action": "open_manual_label_popup",
                     "hide_skip_button": True,
                     "hide_apply_button": True,
+                    "detail_lines": detail_lines,
+                }
+            )
+            return ctx
+
+        if str(issue.get("source_key", "")).strip() in {"parent_id_less_than_child_id", "no_node_id_gaps"}:
+            source_key = str(issue.get("source_key", "")).strip()
+            metrics = dict(payload.get("metrics", {}) or {})
+            detail_lines = [
+                f"Total affected nodes: {len(node_ids)}",
+                f"Affected node IDs: {node_preview}",
+                *(["Additional nodes not shown here: " + str(remaining_nodes)] if remaining_nodes > 0 else []),
+            ]
+            if source_key == "parent_id_less_than_child_id":
+                detail_lines.extend(
+                    [
+                        "",
+                        f"ID order violations: {int(metrics.get('id_order_violation_count', len(node_ids)))}",
+                        "Meaning: one or more child nodes appear before their parent in ID order.",
+                    ]
+                )
+            else:
+                gap_samples = list(metrics.get("gap_samples", []) or [])
+                detail_lines.extend(
+                    [
+                        "",
+                        f"ID gaps found: {int(metrics.get('gap_count', 0))}",
+                        f"Missing ID values: {int(metrics.get('missing_id_count', 0))}",
+                        "Meaning: sorted node IDs skip one or more integers.",
+                    ]
+                )
+                if gap_samples:
+                    detail_lines.append("")
+                    detail_lines.append("Gap examples:")
+                    for sample in gap_samples[:10]:
+                        detail_lines.append(
+                            f"After {int(sample.get('after_id', -1))}, next ID is {int(sample.get('before_id', -1))} "
+                            f"(missing {int(sample.get('missing_count', 0))})"
+                        )
+            ctx.update(
+                {
+                    "problem_detail": str(issue.get("description", "")).strip() or "Index consistency issue detected.",
+                    "suggested_solution": "Open Validation -> Index Clean to reorder the SWC and rebuild a continuous parent-before-child ID sequence.",
                     "detail_lines": detail_lines,
                 }
             )
@@ -3688,12 +3751,12 @@ class SWCMainWindow(QMainWindow):
         if target in {"label_editing", "simplification", "auto_label", "radii_cleaning", "manual_radii"}:
             self._activate_feature("morphology_editing")
             target_tab = {
-                "label_editing": "label editing",
-                "auto_label": "auto label",
+                "label_editing": "manual label editing",
+                "auto_label": "auto label editing",
                 "manual_radii": "manual radii editing",
                 "radii_cleaning": "auto radii editing",
                 "simplification": "simplification",
-            }.get(target, "label editing")
+            }.get(target, "manual label editing")
             self._select_control_tab_by_label(target_tab)
             return
         if target == "geometry_editing":
@@ -3707,12 +3770,12 @@ class SWCMainWindow(QMainWindow):
         if action == "open_manual_label_popup":
             self._control_tabs.setVisible(True)
             self._activate_feature("morphology_editing")
-            self._select_control_tab_by_label("label editing")
+            self._select_control_tab_by_label("manual label editing")
             return
         if action == "open_auto_label_popup":
             self._control_tabs.setVisible(True)
             self._activate_feature("morphology_editing")
-            self._select_control_tab_by_label("auto label")
+            self._select_control_tab_by_label("auto label editing")
             return
         if action == "open_manual_radii_tool":
             self._control_tabs.setVisible(True)
@@ -3844,7 +3907,7 @@ class SWCMainWindow(QMainWindow):
             else:
                 self._auto_guide_dock.hide()
                 self._append_log(
-                    "Auto Typing Guide opens when an Auto Label control tab is active.",
+                    "Auto Typing Guide opens when an Auto Label Editing control tab is active.",
                     "INFO",
                 )
         else:
@@ -3884,7 +3947,7 @@ class SWCMainWindow(QMainWindow):
         if idx < 0:
             return False
         label = self._control_tabs.tabText(idx).strip().lower()
-        return label == "auto label"
+        return label == "auto label editing"
 
     def _is_batch_validation_control_active(self) -> bool:
         if self._active_tool != "batch":

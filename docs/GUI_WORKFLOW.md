@@ -1,6 +1,6 @@
 # GUI Workflow Guide
 
-This page explains how the GUI is structured and how panels interact.
+This page explains the current GUI structure and the intended issue-driven repair workflow.
 
 ## Layout model
 
@@ -22,6 +22,7 @@ Top-level tools:
 - Validation
 - Visualization
 - Morphology Editing
+- Geometry Editing
 - Atlas Registration
 - Analysis
 
@@ -30,11 +31,10 @@ The selected feature controls what appears in the lower Inspector area.
 
 ### Feature mapping in GUI
 
-- Batch Processing: Split, Validation, Auto Label, Radii Cleaning
-- Batch Processing: Split, Validation, Auto Label, Radii Cleaning, Simplification, Index Clean
+- Batch Processing: Split, Validation, Auto Label Editing, Radii Cleaning, Simplification, Index Clean
 - Validation: Validation, Index Clean
 - Visualization: View Controls
-- Morphology Editing: Label Editing, Auto Label, Manual Radii Editing, Auto Radii Editing, Simplification
+- Morphology Editing: Manual Label Editing, Auto Label Editing, Manual Radii Editing, Auto Radii Editing, Simplification
 - Geometry Editing: Geometry Editing
 - Atlas Registration: Registration (placeholder)
 - Analysis: Summary (placeholder)
@@ -47,11 +47,19 @@ The selected feature controls what appears in the lower Inspector area.
 
 ## Recommended GUI usage sequence
 
-1. **Open file** from menu.
-2. Inspect issues and structure in the left navigator.
-3. Switch to **Validation** and run checks.
-4. Use **Morphology Editing** / **Geometry Editing** as needed.
-5. Review status/log panel and save outputs.
+1. Open an SWC file from the File menu.
+2. Run **Validation** and review the Issue Navigator on the left.
+3. Click an issue to focus the affected nodes and jump to the matching repair feature.
+4. Fix the issue in the suggested feature, such as **Index Clean**, **Manual Label Editing**, **Auto Label Editing**, **Manual Radii Editing**, **Auto Radii Editing**, or **Geometry Editing**.
+5. Rerun validation and continue until the issue list is cleared or reduced to acceptable warnings.
+6. Save the cleaned SWC for downstream analysis, batch processing, or further editing.
+
+This is the intended desktop workflow:
+
+- validation surfaces structural and annotation problems
+- the Issue Navigator shows what needs attention
+- the app directs you to the corresponding fix tool
+- once the issues are resolved, the SWC is ready for downstream work
 
 ## Validation in GUI
 
@@ -59,6 +67,7 @@ Validation panel supports:
 
 - Rule Guide button (manual display; no forced popup)
 - Run Validation
+- Index Clean as a separate Validation feature
 - results table with status/label
 - report export controls
 
@@ -66,8 +75,8 @@ Validation uses the same backend as CLI (`swctools.tools.validation` + core engi
 
 ## Auto Typing in GUI
 
-- Batch mode: folder-level auto-labeling
-- Validation mode: single-file auto-labeling
+- Batch mode: folder-level auto label editing
+- Validation mode: single-file auto label editing
 - JSON editor for rule parameters
 - shared backend logic (same as CLI/API)
 

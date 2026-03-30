@@ -19,7 +19,7 @@ copyright = f"{datetime.now():%Y}, {author}"
 try:
     release = pkg_version("swctools")
 except PackageNotFoundError:
-    release = "0.1.0"
+    release = "0.1.1"
 
 # Sphinx expects both version (short) and release (full).
 version = release

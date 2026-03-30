@@ -245,7 +245,7 @@ def register_neuron_morphology_checks() -> None:
         "no_back_tracking": ("No geometric backtracking", "has_no_back_tracking"),
         "no_fat_terminal_ends": ("No oversized terminal ends", "has_no_fat_ends"),
         "no_flat_neurites": ("No flattened neurites", "has_no_flat_neurites"),
-        "no_section_index_jumps": ("No section index gaps", "has_no_jumps"),
+        "no_section_index_jumps": ("No large section z-axis jumps", "has_no_jumps"),
         "no_ultranarrow_sections": ("No extremely narrow sections", "has_no_narrow_neurite_section"),
         "no_ultranarrow_starts": ("No extremely narrow branch starts", "has_no_narrow_start"),
         "no_root_index_jumps": ("Neurite roots too far from soma", "has_no_root_node_jumps"),

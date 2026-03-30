@@ -14,7 +14,7 @@ from typing import Any
 import pandas as pd
 
 from swctools.core.config import load_feature_config, merge_config
-from swctools.core.radii_cleaning import clean_radii_dataframe
+from swctools.core.radii_cleaning import clean_radii_dataframe, radii_stats_by_type
 from swctools.core.reporting import (
     format_radii_cleaning_report_text,
     radii_cleaning_log_path_for_file,
@@ -81,6 +81,10 @@ def get_config() -> dict[str, Any]:
     return merge_config(DEFAULT_CONFIG, loaded)
 
 
+def _list_swc_files(folder: Path) -> list[Path]:
+    return sorted(p for p in folder.iterdir() if p.is_file() and p.suffix.lower() == ".swc")
+
+
 def _normalize_method_output(method_out: Any, input_df: pd.DataFrame) -> tuple[pd.DataFrame, int, list[dict[str, Any]]]:
     # Backward compatibility with older plugin signatures.
     if isinstance(method_out, tuple) and len(method_out) >= 2:
@@ -135,6 +139,47 @@ def clean_swc_text(swc_text: str, *, config_overrides: dict | None = None) -> di
         "dataframe": out_df,
         "stats_by_type": stats_by_type,
         "config_used": cfg,
+    }
+
+
+def preview_folder_radii(folder: str, *, bins: int = 12) -> dict[str, Any]:
+    in_dir = Path(folder)
+    if not in_dir.exists() or not in_dir.is_dir():
+        raise NotADirectoryError(folder)
+
+    swc_files = _list_swc_files(in_dir)
+    failures: list[str] = []
+    frames: list[pd.DataFrame] = []
+    files_loaded = 0
+
+    for fp in swc_files:
+        try:
+            text = fp.read_text(encoding="utf-8", errors="ignore")
+            df = parse_swc_text_preserve_tokens(text)
+            if not df.empty:
+                frame = df.loc[:, ["type", "radius"]].copy()
+                frame["source_file"] = fp.name
+                frames.append(frame)
+            files_loaded += 1
+        except Exception as e:  # noqa: BLE001
+            failures.append(f"{fp.name}: {e}")
+
+    if frames:
+        combined_df = pd.concat(frames, ignore_index=True)
+    else:
+        combined_df = pd.DataFrame(columns=["type", "radius", "source_file"])
+
+    stats = radii_stats_by_type(combined_df, bins=bins)
+    return {
+        "mode": "folder_preview",
+        "folder": str(in_dir),
+        "files_total": len(swc_files),
+        "files_loaded": int(files_loaded),
+        "files_failed": len(failures),
+        "failures": failures,
+        "combined_dataframe": combined_df,
+        "stats": stats,
+        "type_stats": dict(stats.get("type_stats", {})),
     }
 
 
@@ -209,7 +254,7 @@ def clean_folder(folder: str, *, config_overrides: dict | None = None) -> dict[s
     out_dir = in_dir / f"{in_dir.name}{folder_suffix}"
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    swc_files = sorted(p for p in in_dir.iterdir() if p.is_file() and p.suffix.lower() == ".swc")
+    swc_files = _list_swc_files(in_dir)
     failures: list[str] = []
     per_file: list[dict[str, Any]] = []
     total_changes = 0

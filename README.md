@@ -38,11 +38,30 @@ Core workflows currently include:
 - Simplification (graph-aware RDP)
 - Geometry editing operations for move/connect/disconnect/delete/insert
 
+## Recommended App Workflow
+
+`SWC-Studio` is built around an issue-driven repair workflow for one SWC at a time:
+
+1. Open an SWC file in the GUI.
+2. Run Validation and review the Issue Navigator on the left.
+3. Click an issue to focus the affected nodes and jump to the most relevant fix tool.
+4. Fix the issue in the suggested feature, such as Validation, Index Clean, Manual Label Editing, Auto Label Editing, Manual Radii Editing, Auto Radii Editing, or Geometry Editing.
+5. Rerun validation and continue until the important issues are resolved.
+6. Save the cleaned SWC for downstream analysis, batch processing, or further editing.
+
+The intended app flow is:
+
+- issues are surfaced in the navigator
+- each issue directs you to the corresponding repair tool
+- fixes are applied on the current SWC
+- once the issue list is resolved or reduced to acceptable warnings, the SWC is ready for downstream analysis and editing
+
 ## Documentation
 
 Short docs (Markdown):
 
 - [CLI Reference](docs/CLI_REFERENCE.md): command reference and options
+- [GUI Workflow Guide](docs/GUI_WORKFLOW.md): current GUI layout, tool/feature structure, and issue-driven usage flow
 - [API / Library Documentation](docs/API_DOCUMENTATION.md): Python API surface
 - [Plugin Demonstration](docs/PLUGIN_DEMONSTRATION.md): lab handoff plugin workflow
 - [Checks And Issues Reference](docs/CHECKS_AND_ISSUES_REFERENCE.md): validation checks, issue types, algorithms, and parameters
@@ -82,7 +101,9 @@ pip install -e ".[gui]"
 Windows PowerShell (GUI + CLI, stricter setup):
 
 ```powershell
-py -3.11 -m venv .venv
+Requires Python 3.10 or newer.
+
+py -3 -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install --upgrade pip setuptools wheel
 pip install --no-cache-dir -e ".[gui]"
@@ -91,7 +112,9 @@ pip install --no-cache-dir -e ".[gui]"
 Windows cmd (GUI + CLI, stricter setup):
 
 ```bat
-py -3.11 -m venv .venv
+Requires Python 3.10 or newer.
+
+py -3 -m venv .venv
 .venv\Scripts\activate.bat
 python -m pip install --upgrade pip setuptools wheel
 pip install --no-cache-dir -e ".[gui]"

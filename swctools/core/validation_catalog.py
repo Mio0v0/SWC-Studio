@@ -156,6 +156,11 @@ CHECK_CATALOG: list[tuple[str, list[tuple[str, str, str]]]] = [
                 "Parent ID is less than child ID",
                 "Warns when a valid parent ID is greater than or equal to its child ID, which violates the usual SWC topological ordering convention.",
             ),
+            (
+                "no_node_id_gaps",
+                "Node IDs are continuous",
+                "Warns when sorted node IDs skip missing integers, which usually means the file should be reindexed for a clean continuous sequence.",
+            ),
         ],
     ),
 ]
@@ -193,6 +198,7 @@ CHECK_FAILURE_LABEL: dict[str, str] = {
     "no_section_index_jumps": "Sections jump too far along Z",
     "no_root_index_jumps": "Neurite roots too far from soma",
     "parent_id_less_than_child_id": "Parent-child ID order violations found",
+    "no_node_id_gaps": "Node ID gaps found",
     "radius_upper_bound": "Oversized radii found",
 }
 for _idx, (_category, _items) in enumerate(CHECK_CATALOG):

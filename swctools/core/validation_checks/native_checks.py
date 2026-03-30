@@ -400,6 +400,62 @@ def _check_parent_id_less_than_child_id(ctx, params: dict[str, Any]) -> CheckRes
     )
 
 
+def _check_no_node_id_gaps(ctx, params: dict[str, Any]) -> CheckResult:
+    _ = params
+    ids = np.asarray(ctx.ids, dtype=np.int64)
+    if ids.size <= 1:
+        return CheckResult.from_pass_fail(
+            key="no_node_id_gaps",
+            label="Node IDs are continuous",
+            passed=True,
+            severity="warning",
+            message="Node IDs are continuous.",
+            source="native",
+            metrics={"gap_count": 0, "missing_id_count": 0},
+        )
+
+    sorted_ids = np.sort(np.unique(ids))
+    diffs = np.diff(sorted_ids)
+    gap_idx = np.flatnonzero(diffs > 1)
+    failing_node_ids = sorted_ids[gap_idx + 1].astype(np.int64).tolist() if gap_idx.size else []
+    missing_id_count = int(np.sum(diffs[gap_idx] - 1)) if gap_idx.size else 0
+    gap_samples: list[dict[str, Any]] = []
+    for idx in gap_idx[:10].tolist():
+        prev_id = int(sorted_ids[int(idx)])
+        next_id = int(sorted_ids[int(idx) + 1])
+        gap_samples.append(
+            {
+                "after_id": prev_id,
+                "before_id": next_id,
+                "missing_count": int(next_id - prev_id - 1),
+            }
+        )
+    passed = gap_idx.size == 0
+    msg = (
+        "Node IDs are continuous."
+        if passed
+        else f"Found {int(gap_idx.size)} node ID gap(s) with {missing_id_count} missing integer ID value(s)."
+    )
+    return CheckResult.from_pass_fail(
+        key="no_node_id_gaps",
+        label="Node IDs are continuous",
+        passed=passed,
+        severity="warning",
+        message=msg,
+        source="native",
+        failing_node_ids=failing_node_ids,
+        metrics={
+            "gap_count": int(gap_idx.size),
+            "missing_id_count": missing_id_count,
+            "min_id": int(sorted_ids[0]),
+            "max_id": int(sorted_ids[-1]),
+            "expected_continuous_count": int(sorted_ids[-1] - sorted_ids[0] + 1),
+            "observed_unique_count": int(sorted_ids.size),
+            "gap_samples": gap_samples,
+        },
+    )
+
+
 def _check_no_extreme_spatial_jump(ctx, params: dict[str, Any]) -> CheckResult:
     min_jump_um = float(params.get("min_jump_um", 200.0))
     median_ratio = float(params.get("median_ratio", 10.0))
@@ -709,6 +765,12 @@ def register_native_checks() -> None:
         label="Parent ID is less than child ID",
         source="native",
         runner=_check_parent_id_less_than_child_id,
+    )
+    register_check(
+        key="no_node_id_gaps",
+        label="Node IDs are continuous",
+        source="native",
+        runner=_check_no_node_id_gaps,
     )
     register_check(
         key="no_extreme_spatial_jump",

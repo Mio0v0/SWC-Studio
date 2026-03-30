@@ -26,7 +26,7 @@ from PySide6.QtWidgets import (
 
 from swctools.core.config import feature_config_path, load_feature_config, save_feature_config
 from swctools.core.radii_cleaning import radii_stats_by_type
-from swctools.tools.batch_processing.features.radii_cleaning import clean_path
+from swctools.tools.batch_processing.features.radii_cleaning import clean_path, preview_folder_radii
 
 _CFG_TOOL = "batch_processing"
 _CFG_FEATURE = "radii_cleaning"
@@ -118,9 +118,11 @@ class RadiiCleaningPanel(QWidget):
         self._cfg_dialog: _RadiiConfigDialog | None = None
         self._latest_stats: dict = {}
         self._latest_stats_path: str = ""
+        self._stats_df: pd.DataFrame | None = None
         self._loaded_df: pd.DataFrame | None = None
         self._loaded_name: str = ""
         self._loaded_path: str = ""
+        self._selected_folder: str = ""
         self._stats_dirty = False
         self._build_ui()
 
@@ -133,7 +135,11 @@ class RadiiCleaningPanel(QWidget):
             "Radii cleaning is JSON-config driven.\n"
             "Edit `radii_cleaning.json`, then run on the loaded SWC."
             if self._allow_loaded_swc_run
-            else "Radii cleaning is JSON-config driven.\nEdit `radii_cleaning.json`, then run on a folder."
+            else (
+                "Radii cleaning is JSON-config driven.\n"
+                "1. Select a folder to inspect combined per-type radius distributions across all SWC files.\n"
+                "2. Apply radii cleaning to write cleaned copies for that folder."
+            )
         )
         desc = QLabel(desc_text)
         desc.setWordWrap(True)
@@ -157,9 +163,14 @@ class RadiiCleaningPanel(QWidget):
             b_run_loaded.clicked.connect(self._on_run_loaded)
             row.addWidget(b_run_loaded)
         else:
-            b_folder = QPushButton("Run")
-            b_folder.clicked.connect(self._on_run_folder)
-            row.addWidget(b_folder)
+            self._btn_select_folder = QPushButton("Select Folder")
+            self._btn_select_folder.clicked.connect(self._on_select_folder)
+            row.addWidget(self._btn_select_folder)
+
+            self._btn_apply_folder = QPushButton("Apply Radii Cleaning")
+            self._btn_apply_folder.setEnabled(False)
+            self._btn_apply_folder.clicked.connect(self._on_run_folder)
+            row.addWidget(self._btn_apply_folder)
 
         b_cfg = QPushButton("Show JSON")
         b_cfg.clicked.connect(self._on_edit_cfg)
@@ -167,6 +178,15 @@ class RadiiCleaningPanel(QWidget):
 
         row.addStretch()
         root.addLayout(row)
+
+        if not self._allow_loaded_swc_run:
+            folder_row = QHBoxLayout()
+            folder_row.addWidget(QLabel("Selected folder:"))
+            self._folder_label = QLabel("No folder selected.")
+            self._folder_label.setWordWrap(True)
+            self._folder_label.setStyleSheet("font-size: 12px; color: #555;")
+            folder_row.addWidget(self._folder_label, stretch=1)
+            root.addLayout(folder_row)
 
         hist_row = QHBoxLayout()
         hist_row.addWidget(QLabel("Histogram Type:"))
@@ -205,7 +225,10 @@ class RadiiCleaningPanel(QWidget):
             "  font-family: Menlo, Consolas, monospace; font-size: 12px;"
             "}"
         )
-        self._stats.setPlainText("Load a file to inspect per-type radii distribution.")
+        if self._allow_loaded_swc_run:
+            self._stats.setPlainText("Load a file to inspect per-type radii distribution.")
+        else:
+            self._stats.setPlainText("Select a folder to inspect combined per-type radii distributions.")
         root.addWidget(self._stats, stretch=1)
 
         self._status = QPlainTextEdit()
@@ -217,7 +240,10 @@ class RadiiCleaningPanel(QWidget):
             "  font-family: Menlo, Consolas, monospace; font-size: 12px;"
             "}"
         )
-        self._status.setPlainText("Radii cleaning ready.")
+        if self._allow_loaded_swc_run:
+            self._status.setPlainText("Radii cleaning ready.")
+        else:
+            self._status.setPlainText("Select a folder to inspect combined per-type distributions before cleaning.")
         root.addWidget(self._status, stretch=1)
 
     def set_loaded_swc(self, df: pd.DataFrame | None, filename: str = "", file_path: str = ""):
@@ -225,6 +251,7 @@ class RadiiCleaningPanel(QWidget):
             self._loaded_df = None
             self._loaded_name = ""
             self._loaded_path = ""
+            self._stats_df = None
             self._latest_stats = {}
             self._latest_stats_path = ""
             self._stats_dirty = False
@@ -236,6 +263,7 @@ class RadiiCleaningPanel(QWidget):
         self._loaded_df = df
         self._loaded_name = str(filename or "loaded_swc")
         self._loaded_path = str(file_path or "")
+        self._stats_df = None
         self._latest_stats = {}
         self._latest_stats_path = ""
         self._stats_dirty = True
@@ -272,11 +300,18 @@ class RadiiCleaningPanel(QWidget):
         self._run_path(path)
 
     def _on_run_folder(self):
-        folder = QFileDialog.getExistingDirectory(self, "Select folder with SWC files for radii cleaning")
+        folder = str(self._selected_folder or "").strip()
         if not folder:
-            self._set_status("Radii cleaning cancelled.")
+            self._set_status("Select a folder first to preview combined per-type radii statistics.")
             return
         self._run_path(folder)
+
+    def _on_select_folder(self):
+        folder = QFileDialog.getExistingDirectory(self, "Select folder with SWC files for radii cleaning")
+        if not folder:
+            self._set_status("Folder selection cancelled.")
+            return
+        self._load_folder_preview(folder)
 
     def _run_path(self, path: str):
         cfg_overrides = self._build_run_config_overrides()
@@ -340,6 +375,7 @@ class RadiiCleaningPanel(QWidget):
     def _refresh_stats_from_loaded_swc(self):
         if self._loaded_df is None or self._loaded_df.empty:
             self._stats.setPlainText("No SWC loaded in app. Open an SWC first.")
+            self._stats_df = None
             self._latest_stats = {}
             self._latest_stats_path = ""
             self._stats_dirty = False
@@ -350,7 +386,8 @@ class RadiiCleaningPanel(QWidget):
         if not self._stats_dirty and self._latest_stats:
             return
         try:
-            stats = radii_stats_by_type(self._loaded_df, bins=12)
+            self._stats_df = self._loaded_df
+            stats = radii_stats_by_type(self._stats_df, bins=12)
             self._latest_stats = dict(stats)
             self._latest_stats_path = str(self._loaded_name or "loaded_swc")
             self._stats_dirty = False
@@ -363,6 +400,55 @@ class RadiiCleaningPanel(QWidget):
             self._stats_dirty = False
             self._hist_type.clear()
             self._hist_plot.clear()
+
+    def _load_folder_preview(self, folder: str):
+        try:
+            preview = preview_folder_radii(folder, bins=12)
+        except Exception as e:  # noqa: BLE001
+            self._stats_df = None
+            self._latest_stats = {}
+            self._latest_stats_path = ""
+            self._hist_type.clear()
+            self._hist_plot.clear()
+            self._hist_plot.setTitle("No histogram loaded")
+            self._stats.setPlainText(f"Could not compute folder radii stats:\n{e}")
+            self._set_status(f"Folder preview failed:\n{e}")
+            return
+
+        self._selected_folder = str(preview.get("folder", folder))
+        self._folder_label.setText(self._selected_folder)
+        self._btn_apply_folder.setEnabled(True)
+        combined_df = preview.get("combined_dataframe")
+        self._stats_df = combined_df if isinstance(combined_df, pd.DataFrame) else None
+        self._latest_stats = dict(preview.get("stats", {}))
+        self._latest_stats_path = self._selected_folder
+        self._reload_histogram_type_selector()
+        self._stats.setPlainText(
+            self._format_stats_text(
+                f"{self._selected_folder} (combined same SWC types across files)",
+                self._latest_stats,
+            )
+        )
+
+        files_total = int(preview.get("files_total", 0) or 0)
+        files_loaded = int(preview.get("files_loaded", 0) or 0)
+        files_failed = int(preview.get("files_failed", 0) or 0)
+        lines = [
+            "Folder radii preview loaded.",
+            f"Folder: {self._selected_folder}",
+            f"SWC files detected: {files_total}",
+            f"Loaded for statistics: {files_loaded}",
+            f"Failed to read: {files_failed}",
+            "Statistics combine all nodes with the same SWC type label across all loaded files.",
+        ]
+        failures = list(preview.get("failures", []))
+        if failures:
+            lines.append("")
+            lines.append("Read failures:")
+            lines.extend(failures[:10])
+            if len(failures) > 10:
+                lines.append(f"... ({len(failures) - 10} more)")
+        self._set_status("\n".join(lines))
 
     def ensure_stats_loaded(self):
         """Load cached radii stats on demand when this panel becomes active."""
@@ -444,11 +530,11 @@ class RadiiCleaningPanel(QWidget):
             row = dict(tstats.get(key, {}))
 
             t_int = int(key) if str(key).strip() else None
-            if t_int is None or self._loaded_df is None or self._loaded_df.empty:
+            if t_int is None or self._stats_df is None or self._stats_df.empty:
                 self._hist_plot.setTitle(f"Type {key or '?'}: no valid loaded data")
                 return
 
-            df = self._loaded_df
+            df = self._stats_df
             vals = np.array(
                 df.loc[df["type"].astype(int) == int(t_int), "radius"],
                 dtype=float,

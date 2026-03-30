@@ -21,8 +21,13 @@ from PySide6.QtWidgets import (
 
 from .constants import color_for_type
 from .dendrogram_widget import DendrogramWidget
+from .font_utils import bold_font
 from .neuron_3d_widget import Neuron3DWidget
 from swctools.core.validation_catalog import CHECK_ORDER
+
+
+def _tree_bold_font(widget: QWidget) -> QFont:
+    return bold_font(widget.font(), point_size=11)
 
 
 class _Projection2DWidget(QWidget):
@@ -256,6 +261,7 @@ class EditorTab(QWidget):
 
     def show_batch_validation_results(self, batch_report: dict):
         self._batch_tree.clear()
+        bold_item_font = _tree_bold_font(self)
         totals = dict(batch_report.get("summary_total", {}))
         self._batch_summary.setText(
             f"Folder: {batch_report.get('folder', '')}\n"
@@ -302,7 +308,7 @@ class EditorTab(QWidget):
                 child = QTreeWidgetItem([tag, label])
                 child.setTextAlignment(0, Qt.AlignLeft | Qt.AlignVCenter)
                 child.setTextAlignment(1, Qt.AlignLeft | Qt.AlignVCenter)
-                child.setFont(0, QFont("", 11, QFont.Bold))
+                child.setFont(0, bold_item_font)
                 child.setForeground(0, QBrush(QColor(color)))
                 if detail:
                     child.setToolTip(1, detail)
@@ -310,13 +316,13 @@ class EditorTab(QWidget):
 
         if batch_report.get("failures"):
             fail_top = QTreeWidgetItem(["FAIL", "File errors"])
-            fail_top.setFont(0, QFont("", 11, QFont.Bold))
+            fail_top.setFont(0, bold_item_font)
             fail_top.setForeground(0, QBrush(QColor("#d62728")))
             fail_top.setExpanded(False)
             self._batch_tree.addTopLevelItem(fail_top)
             for err in batch_report.get("failures", []):
                 child = QTreeWidgetItem(["FAIL", str(err)])
-                child.setFont(0, QFont("", 11, QFont.Bold))
+                child.setFont(0, bold_item_font)
                 child.setForeground(0, QBrush(QColor("#d62728")))
                 fail_top.addChild(child)
 

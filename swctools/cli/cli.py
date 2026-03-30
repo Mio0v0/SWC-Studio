@@ -662,9 +662,15 @@ def main(argv: list[str] | None = None) -> int:
                 )
                 out["report_path"] = report_path
                 print("\nReport file: " + report_path + "\n")
-            # Avoid dumping full bytes in terminal.
-            out = {k: v for k, v in out.items() if k not in {"sanitized_bytes", "report"}}
-            _print_json(out)
+            # Avoid dumping full sanitized SWC content in terminal.
+            out_print = {
+                "input_path": out.get("input_path"),
+                "output_path": out.get("output_path"),
+                "report_path": out.get("report_path"),
+                "result_count": len(list(out.get("rows", []) or [])),
+                "sanitized_text_length": len(str(out.get("sanitized_text", "") or "")),
+            }
+            _print_json(out_print)
             return 0
 
         if args.tool == "validation" and args.feature == "index-clean":

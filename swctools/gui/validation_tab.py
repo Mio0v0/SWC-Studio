@@ -25,6 +25,7 @@ from swctools.core.validation import _split_swc_by_soma_roots
 from swctools.core.validation_catalog import CHECK_CATALOG, CHECK_ORDER, display_label_for_result, group_rows_by_category
 from swctools.tools.validation.features.core import run_checks_text
 from swctools.gui.constants import SWC_COLS
+from swctools.gui.font_utils import bold_font
 
 _VALIDATION_CFG_PATH = feature_config_path("validation", "default")
 _VALIDATION_CFG = load_feature_config("validation", "default", default={"checks": {}})
@@ -61,6 +62,10 @@ _ISSUE_GUIDE_CATALOG: list[tuple[str, list[tuple[str, str]]]] = [
         ],
     ),
 ]
+
+
+def _tree_bold_font(widget: QWidget) -> QFont:
+    return bold_font(widget.font(), point_size=11)
 
 
 class _ValidationWorker(QObject):
@@ -113,11 +118,12 @@ class ValidationPrecheckWidget(QWidget):
 
     def populate_catalog(self):
         self._tree.clear()
+        bold_item_font = _tree_bold_font(self)
         for category, checks in CHECK_CATALOG:
             group = QTreeWidgetItem([category, ""])
             group.setFirstColumnSpanned(True)
             group.setExpanded(True)
-            group.setFont(0, QFont("", 11, QFont.Bold))
+            group.setFont(0, bold_item_font)
             self._tree.addTopLevelItem(group)
             for _key, label, rule in checks:
                 issue_label = display_label_for_result(_key, False, label)
@@ -129,7 +135,7 @@ class ValidationPrecheckWidget(QWidget):
             group = QTreeWidgetItem([category, ""])
             group.setFirstColumnSpanned(True)
             group.setExpanded(True)
-            group.setFont(0, QFont("", 11, QFont.Bold))
+            group.setFont(0, bold_item_font)
             self._tree.addTopLevelItem(group)
             for label, rule in checks:
                 item = QTreeWidgetItem([label, rule])
@@ -308,6 +314,7 @@ class ValidationTabWidget(QWidget):
         if not rows:
             self._status_label.setText("No validation results available.")
             return
+        bold_item_font = _tree_bold_font(self)
         fail_count = sum(1 for row in rows if str(row.get("status", "")).strip().lower() == "fail")
         warn_count = sum(1 for row in rows if str(row.get("status", "")).strip().lower() == "warning")
         error_count = sum(1 for row in rows if bool(row.get("error")))
@@ -318,7 +325,7 @@ class ValidationTabWidget(QWidget):
             group = QTreeWidgetItem([category, "", ""])
             group.setFirstColumnSpanned(True)
             group.setExpanded(True)
-            group.setFont(0, QFont("", 11, QFont.Bold))
+            group.setFont(0, bold_item_font)
             self._results_tree.addTopLevelItem(group)
             for row in items:
                 status = str(row.get("status", "")).strip().lower()
