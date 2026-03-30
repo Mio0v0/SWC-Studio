@@ -24,6 +24,8 @@ from .custom_type_dialog import DefineCustomTypesDialog
 from .constants import color_for_type, label_for_type, SWC_COLS
 from swctools.core.custom_types import get_custom_type_definition, load_custom_type_definitions, save_custom_type_definitions
 
+_GEOMETRY_HIGHLIGHT_HEX = "#ff006e"
+
 
 # --------------------------------------------------------- Speech-bubble tooltip
 class BubbleTooltip(QGraphicsItem):
@@ -124,6 +126,8 @@ class DendrogramWidget(QWidget):
         self._cum = None
         self._y = None
         self._levels = None
+        self._geometry_node_ids: set[int] = set()
+        self._geometry_visibility_mode: str = "show"
 
         self._build_ui()
 
@@ -326,6 +330,41 @@ class DendrogramWidget(QWidget):
         self._btn_apply.setEnabled(False)
         self._draw()
 
+    def set_geometry_selection(self, node_ids: list[int] | set[int], visibility_mode: str = "show"):
+        wanted_ids = {int(v) for v in list(node_ids or [])}
+        wanted_mode = str(visibility_mode or "show").strip().lower() or "show"
+        if wanted_ids == self._geometry_node_ids and wanted_mode == self._geometry_visibility_mode:
+            return
+        self._geometry_node_ids = wanted_ids
+        self._geometry_visibility_mode = wanted_mode
+        self._draw()
+
+    def clear_geometry_selection(self):
+        if not self._geometry_node_ids and self._geometry_visibility_mode == "show":
+            return
+        self._geometry_node_ids = set()
+        self._geometry_visibility_mode = "show"
+        self._draw()
+
+    def zoom_to_node_ids(self, node_ids: list[int] | set[int]):
+        if self._tree is None or self._cum is None or self._y is None:
+            return
+        wanted = {int(v) for v in list(node_ids or [])}
+        if not wanted:
+            return
+        mask = np.isin(self._tree.ids.astype(int), sorted(wanted))
+        if not np.any(mask):
+            return
+        xs = self._cum[mask].astype(float)
+        ys = self._y[mask].astype(float)
+        x_pad = max(0.2, float(xs.max() - xs.min()) * 0.1)
+        y_pad = max(0.5, float(ys.max() - ys.min()) * 0.15)
+        self._plot.plotItem.vb.setRange(
+            xRange=(float(xs.min()) - x_pad, float(xs.max()) + x_pad),
+            yRange=(float(ys.min()) - y_pad, float(ys.max()) + y_pad),
+            padding=0.0,
+        )
+
     def set_history_state(self, can_undo: bool, can_redo: bool):
         _ = (can_undo, can_redo)
 
@@ -494,6 +533,9 @@ class DendrogramWidget(QWidget):
         child_indices = tree.child_indices
         child_counts = np.diff(offsets)
         type_arr = np.asarray(tree.types, dtype=np.int64)
+        selected_ids = set(self._geometry_node_ids)
+        dim_mode = bool(selected_ids) and self._geometry_visibility_mode == "dim"
+        hide_mode = bool(selected_ids) and self._geometry_visibility_mode == "hide"
 
         parent_indices_all = np.repeat(np.arange(tree.size, dtype=np.int32), child_counts)
         edge_children_all = child_indices
@@ -515,14 +557,39 @@ class DendrogramWidget(QWidget):
                     continue
                 p_idx = parent_indices[mask]
                 c_idx = edge_children[mask]
-                m = int(mask.sum())
+                p_ids = tree.ids[p_idx].astype(int)
+                c_ids = tree.ids[c_idx].astype(int)
+                edge_selected_mask = np.isin(p_ids, list(selected_ids)) & np.isin(c_ids, list(selected_ids)) if selected_ids else np.zeros(len(c_idx), dtype=bool)
+                if hide_mode:
+                    mask2 = edge_selected_mask
+                elif dim_mode:
+                    mask2 = edge_selected_mask
+                    other_mask = ~edge_selected_mask
+                    if np.any(other_mask):
+                        op = p_idx[other_mask]
+                        oc = c_idx[other_mask]
+                        om = int(other_mask.sum())
+                        ovx = np.empty(om * 3, dtype=np.float32)
+                        ovy = np.empty(om * 3, dtype=np.float32)
+                        ovx[0::3] = cum[op]; ovx[1::3] = cum[op]; ovx[2::3] = np.nan
+                        ovy[0::3] = y[oc];   ovy[1::3] = y[op];   ovy[2::3] = np.nan
+                        self._plot.plot(ovx, ovy, pen=pg.mkPen("#c9ced6", width=1.0), connect="finite")
+                else:
+                    mask2 = np.ones(len(c_idx), dtype=bool)
+                if not np.any(mask2):
+                    continue
+                p_idx = p_idx[mask2]
+                c_idx = c_idx[mask2]
+                m = int(len(c_idx))
 
                 vx = np.empty(m * 3, dtype=np.float32)
                 vy = np.empty(m * 3, dtype=np.float32)
                 vx[0::3] = cum[p_idx]; vx[1::3] = cum[p_idx]; vx[2::3] = np.nan
                 vy[0::3] = y[c_idx];   vy[1::3] = y[p_idx];   vy[2::3] = np.nan
 
-                pen = pg.mkPen(color=color_for_type(int(type_id)), width=1.5)
+                pen_color = _GEOMETRY_HIGHLIGHT_HEX if selected_ids else color_for_type(int(type_id))
+                pen_width = 2.8 if selected_ids else 1.5
+                pen = pg.mkPen(color=pen_color, width=pen_width)
                 self._plot.plot(vx, vy, pen=pen, connect="finite")
 
         # Draw horizontal edges (per type)
@@ -534,14 +601,39 @@ class DendrogramWidget(QWidget):
                     continue
                 p_idx = parent_indices[mask]
                 c_idx = edge_children[mask]
-                m = int(mask.sum())
+                p_ids = tree.ids[p_idx].astype(int)
+                c_ids = tree.ids[c_idx].astype(int)
+                edge_selected_mask = np.isin(p_ids, list(selected_ids)) & np.isin(c_ids, list(selected_ids)) if selected_ids else np.zeros(len(c_idx), dtype=bool)
+                if hide_mode:
+                    mask2 = edge_selected_mask
+                elif dim_mode:
+                    mask2 = edge_selected_mask
+                    other_mask = ~edge_selected_mask
+                    if np.any(other_mask):
+                        op = p_idx[other_mask]
+                        oc = c_idx[other_mask]
+                        om = int(other_mask.sum())
+                        ohx = np.empty(om * 3, dtype=np.float32)
+                        ohy = np.empty(om * 3, dtype=np.float32)
+                        ohx[0::3] = cum[op]; ohx[1::3] = cum[oc]; ohx[2::3] = np.nan
+                        ohy[0::3] = y[oc];   ohy[1::3] = y[oc];   ohy[2::3] = np.nan
+                        self._plot.plot(ohx, ohy, pen=pg.mkPen("#c9ced6", width=1.0), connect="finite")
+                else:
+                    mask2 = np.ones(len(c_idx), dtype=bool)
+                if not np.any(mask2):
+                    continue
+                p_idx = p_idx[mask2]
+                c_idx = c_idx[mask2]
+                m = int(len(c_idx))
 
                 hx = np.empty(m * 3, dtype=np.float32)
                 hy = np.empty(m * 3, dtype=np.float32)
                 hx[0::3] = cum[p_idx]; hx[1::3] = cum[c_idx]; hx[2::3] = np.nan
                 hy[0::3] = y[c_idx];   hy[1::3] = y[c_idx];   hy[2::3] = np.nan
 
-                pen = pg.mkPen(color=color_for_type(int(type_id)), width=1.5)
+                pen_color = _GEOMETRY_HIGHLIGHT_HEX if selected_ids else color_for_type(int(type_id))
+                pen_width = 2.8 if selected_ids else 1.5
+                pen = pg.mkPen(color=pen_color, width=pen_width)
                 self._plot.plot(hx, hy, pen=pen, connect="finite")
 
         # Root dot
@@ -565,6 +657,19 @@ class DendrogramWidget(QWidget):
                 brush=pg.mkBrush("#e00"),
             )
             self._plot.addItem(sel_scatter)
+
+        if selected_ids:
+            mask = np.isin(tree.ids.astype(int), sorted(selected_ids))
+            if np.any(mask):
+                geom_scatter = pg.ScatterPlotItem(
+                    cum[mask],
+                    y[mask],
+                    size=7,
+                    symbol="o",
+                    pen=pg.mkPen("#ffffff", width=0.8),
+                    brush=pg.mkBrush(_GEOMETRY_HIGHLIGHT_HEX),
+                )
+                self._plot.addItem(geom_scatter)
 
         # Level overlay
         if self._level_val is not None:

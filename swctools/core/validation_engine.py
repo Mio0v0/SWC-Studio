@@ -273,19 +273,6 @@ def consolidate_complex_somas_array(arr: np.ndarray) -> dict[str, Any]:
 
     final_arr = np.array(out[keep_mask], copy=True)
     reindex_map: dict[int, int] = {}
-    if final_arr.size:
-        old_ids = np.asarray(final_arr["id"], dtype=np.int64)
-        new_ids = np.arange(1, len(final_arr) + 1, dtype=np.int64)
-        reindex_map = {int(old_id): int(new_id) for old_id, new_id in zip(old_ids.tolist(), new_ids.tolist())}
-        final_arr["id"] = new_ids
-        remapped_parents = np.asarray(final_arr["parent"], dtype=np.int64).copy()
-        for i in range(len(remapped_parents)):
-            parent_id = int(remapped_parents[i])
-            if parent_id == -1:
-                continue
-            if parent_id in reindex_map:
-                remapped_parents[i] = int(reindex_map[parent_id])
-        final_arr["parent"] = remapped_parents
     complex_groups = [group for group in group_infos if int(group.get("group_size", 0)) > 1]
     return {
         "array": final_arr,

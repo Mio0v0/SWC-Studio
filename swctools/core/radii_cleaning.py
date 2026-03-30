@@ -164,8 +164,8 @@ def radii_stats_by_type(df: pd.DataFrame, *, bins: int = 12) -> dict[str, Any]:
     if df.empty or "type" not in df.columns or "radius" not in df.columns:
         return {"type_stats": {}}
 
-    types = np.array(df["type"], dtype=int, copy=False)
-    radii = np.array(df["radius"], dtype=float, copy=False)
+    types = np.asarray(df["type"], dtype=int)
+    radii = np.asarray(df["radius"], dtype=float)
     type_stats: dict[str, Any] = {}
     for t in sorted({int(v) for v in types.tolist()}):
         mask_t = types == int(t)
@@ -324,9 +324,9 @@ def clean_radii_dataframe(df: pd.DataFrame, *, rules: dict[str, Any] | None = No
     if out.empty or "id" not in out.columns or "radius" not in out.columns or "parent" not in out.columns:
         return {"dataframe": out, "total_changes": 0, "change_details": [], "stats_by_type": {"type_stats": {}}}
 
-    ids = np.array(out["id"], dtype=int, copy=False)
-    types = np.array(out["type"], dtype=int, copy=False) if "type" in out.columns else np.zeros(len(out), dtype=int)
-    parents = np.array(out["parent"], dtype=int, copy=False)
+    ids = np.asarray(out["id"], dtype=int)
+    types = np.asarray(out["type"], dtype=int) if "type" in out.columns else np.zeros(len(out), dtype=int)
+    parents = np.asarray(out["parent"], dtype=int)
     radii = np.array(out["radius"], dtype=float, copy=True)
     original = np.array(radii, dtype=float, copy=True)
 

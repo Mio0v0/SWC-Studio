@@ -41,6 +41,7 @@ from .constants import SWC_COLS, label_for_type
 from .context_inspector import ContextInspectorWidget
 from .custom_type_dialog import DefineCustomTypesDialog
 from .editor_tab import EditorTab
+from .geometry_editing_panel import GeometryEditingPanel
 from .issue_panel import IssuePanelWidget
 from .manual_radii_panel import ManualRadiiPanel
 from .neuron_3d_widget import Neuron3DWidget
@@ -57,6 +58,16 @@ from swctools.core.issues import (
     validation_prerequisite_summary,
 )
 from swctools.core.custom_types import save_custom_type_definitions
+from swctools.core.geometry_editing import (
+    delete_node as geometry_delete_node,
+    delete_subtree as geometry_delete_subtree,
+    disconnect_branch,
+    insert_node_between,
+    move_selection_by_anchor_absolute,
+    path_between_nodes,
+    reconnect_branch,
+    subtree_node_ids,
+)
 from swctools.core.radii_cleaning import radii_stats_by_type
 from swctools.core.reporting import (
     auto_typing_log_path_for_file,
@@ -299,6 +310,16 @@ class SWCMainWindow(QMainWindow):
         self._validation_radii_panel.log_message.connect(lambda msg: self._append_log(msg, "RADII"))
         self._manual_radii_panel = ManualRadiiPanel(self)
         self._manual_radii_panel.apply_requested.connect(self._on_manual_radii_apply_requested)
+        self._geometry_panel = GeometryEditingPanel(self)
+        self._geometry_panel.log_message.connect(lambda msg: self._append_log(msg, "GEOM"))
+        self._geometry_panel.selection_preview_changed.connect(self._on_geometry_selection_preview_changed)
+        self._geometry_panel.focus_requested.connect(self._on_geometry_focus_requested)
+        self._geometry_panel.move_selection_requested.connect(self._on_geometry_move_selection_requested)
+        self._geometry_panel.reconnect_requested.connect(self._on_geometry_reconnect_requested)
+        self._geometry_panel.disconnect_requested.connect(self._on_geometry_disconnect_requested)
+        self._geometry_panel.delete_node_requested.connect(self._on_geometry_delete_node_requested)
+        self._geometry_panel.delete_subtree_requested.connect(self._on_geometry_delete_subtree_requested)
+        self._geometry_panel.insert_node_requested.connect(self._on_geometry_insert_node_requested)
         self._validation_precheck = ValidationPrecheckWidget()
         self._auto_typing_guide = AutoTypingGuideWidget()
         self._simplification_panel = SimplificationPanel(self)
@@ -479,6 +500,7 @@ class SWCMainWindow(QMainWindow):
             ("Validation", "validation"),
             ("Visualization", "visualization"),
             ("Morphology Editing", "morphology_editing"),
+            ("Geometry Editing", "geometry_editing"),
             ("Atlas Registration", "atlas_registration"),
             ("Analysis", "analysis"),
         ]
@@ -785,6 +807,7 @@ class SWCMainWindow(QMainWindow):
             "visualization": ["View Controls"],
             "morphology_editing": ["Label Editing", "Auto Label", "Manual Radii Editing", "Auto Radii Editing", "Simplification"],
             "dendrogram": ["Label Editing", "Auto Label", "Manual Radii Editing", "Auto Radii Editing", "Simplification"],
+            "geometry_editing": ["Geometry Editing"],
             "atlas_registration": ["Registration"],
             "analysis": ["Summary"],
         }
@@ -852,8 +875,8 @@ class SWCMainWindow(QMainWindow):
                 self._control_tabs.setVisible(self._control_tabs.count() > 0)
                 return
 
-        if self._active_tool in ("morphology_editing", "dendrogram") and self._active_document() is None:
-            self._append_log("Open an SWC file to use morphology feature controls.", "INFO")
+        if self._active_tool in ("morphology_editing", "dendrogram", "geometry_editing") and self._active_document() is None:
+            self._append_log("Open an SWC file to use editing feature controls.", "INFO")
 
     def _wrap_control_widget(self, inner: QWidget) -> QWidget:
         key = id(inner)
@@ -939,7 +962,7 @@ class SWCMainWindow(QMainWindow):
         key = (self._active_tool or "").strip().lower()
         if key == "visualization":
             return EditorTab.MODE_VIS
-        if key in ("morphology_editing", "dendrogram"):
+        if key in ("morphology_editing", "dendrogram", "geometry_editing"):
             return EditorTab.MODE_DENDRO
         return EditorTab.MODE_CANVAS
 
@@ -985,6 +1008,8 @@ class SWCMainWindow(QMainWindow):
             self._context_inspector.clear()
             self._validation_radii_panel.set_loaded_swc(None, "", "")
             self._manual_radii_panel.set_loaded_swc(None, "")
+            self._geometry_panel.set_loaded_swc(None)
+            self._geometry_panel.set_current_node(None)
             self._batch_tab.set_loaded_swc(None, "", "")
             self._refresh_canvas_surface()
             self._refresh_simplification_panel_state()
@@ -1003,6 +1028,8 @@ class SWCMainWindow(QMainWindow):
         self._refresh_morph_edit_tab(doc)
         self._validation_radii_panel.set_loaded_swc(doc.df, doc.filename, doc.file_path)
         self._manual_radii_panel.set_loaded_swc(doc.df, doc.filename)
+        self._geometry_panel.set_loaded_swc(doc.df)
+        self._geometry_panel.set_current_node(None)
         self._batch_tab.set_loaded_swc(doc.df, doc.filename, doc.file_path)
         should_auto_run_validation = bool(auto_run_validation and not doc.is_preview and doc.validation_report is None)
         self._validation_tab.load_swc(
@@ -1837,6 +1864,272 @@ class SWCMainWindow(QMainWindow):
         )
         self._rerun_active_validation()
 
+    def _on_geometry_selection_preview_changed(self, node_ids: object, visibility_mode: str, auto_zoom: bool):
+        doc = self._active_document()
+        if doc is None:
+            return
+        ids = [int(v) for v in list(node_ids or [])]
+        if ids:
+            doc.editor.set_geometry_selection(ids, visibility_mode)
+            if auto_zoom:
+                doc.editor.zoom_to_node_ids(ids)
+        else:
+            doc.editor.clear_geometry_selection()
+
+    def _on_geometry_focus_requested(self, swc_id: int):
+        doc = self._active_document()
+        if doc is None:
+            return
+        doc.editor.focus_node(int(swc_id))
+        self._geometry_panel.set_current_node(int(swc_id))
+
+    def _apply_geometry_dataframe(
+        self,
+        doc: _DocumentState,
+        new_df: pd.DataFrame,
+        *,
+        event_title: str,
+        event_summary: str,
+        event_details: list[str],
+        focus_node_id: int | None = None,
+    ):
+        self._apply_document_dataframe(
+            doc,
+            new_df,
+            event_title=event_title,
+            event_summary=event_summary,
+            event_details=event_details,
+            record_type_changes=False,
+        )
+        if focus_node_id is not None:
+            self._geometry_panel.set_current_node(int(focus_node_id))
+            doc.editor.focus_node(int(focus_node_id))
+        self._rerun_active_validation()
+
+    def _on_geometry_move_selection_requested(self, node_ids: object, anchor_id: int, x: float, y: float, z: float):
+        doc = self._active_source_document()
+        if doc is None or doc.df is None or doc.df.empty:
+            self._append_log("Geometry Editing: no active SWC document.", "WARN")
+            return
+        try:
+            selected_node_ids = [int(v) for v in list(node_ids or [])]
+            if not selected_node_ids:
+                raise ValueError("No selected nodes to move.")
+            row = doc.df.loc[doc.df["id"].astype(int) == int(anchor_id)].iloc[0]
+            old_xyz = (float(row["x"]), float(row["y"]), float(row["z"]))
+            new_df = move_selection_by_anchor_absolute(doc.df, selected_node_ids, int(anchor_id), float(x), float(y), float(z))
+        except Exception as exc:  # noqa: BLE001
+            self._append_log(f"Geometry Editing: {exc}", "WARN")
+            return
+        self._apply_geometry_dataframe(
+            doc,
+            new_df,
+            event_title="Move Selection",
+            event_summary=f"Moved {len(selected_node_ids)} selected node(s) using anchor {int(anchor_id)}.",
+            event_details=[
+                f"Anchor node ID: {int(anchor_id)}",
+                f"Moved selected node count: {len(selected_node_ids)}",
+                f"Old XYZ: ({old_xyz[0]:.5g}, {old_xyz[1]:.5g}, {old_xyz[2]:.5g})",
+                f"New XYZ: ({float(x):.5g}, {float(y):.5g}, {float(z):.5g})",
+            ],
+            focus_node_id=int(anchor_id),
+        )
+        self._append_log(f"Geometry Editing: moved {len(selected_node_ids)} selected node(s).", "INFO")
+
+    def _on_geometry_reconnect_requested(self, source_id: int, target_id: int):
+        doc = self._active_source_document()
+        if doc is None or doc.df is None or doc.df.empty:
+            self._append_log("Geometry Editing: no active SWC document.", "WARN")
+            return
+        try:
+            end_row = doc.df.loc[doc.df["id"].astype(int) == int(target_id)].iloc[0]
+            old_parent = int(end_row["parent"])
+            new_df = reconnect_branch(doc.df, int(source_id), int(target_id))
+        except Exception as exc:  # noqa: BLE001
+            self._append_log(f"Geometry Editing: {exc}", "WARN")
+            return
+        self._geometry_panel.clear_all_selections()
+        self._geometry_panel.set_current_node(None)
+        self._apply_geometry_dataframe(
+            doc,
+            new_df,
+            event_title="Reconnect Branch",
+            event_summary=f"Connected end node {int(target_id)} to start node {int(source_id)}.",
+            event_details=[
+                f"Start node ID: {int(source_id)}",
+                f"End node ID: {int(target_id)}",
+                f"End node old parent ID: {old_parent}",
+                f"End node new parent ID: {int(source_id)}",
+                "Node IDs preserved; no automatic renumbering.",
+            ],
+            focus_node_id=None,
+        )
+        self._append_log(
+            f"Geometry Editing: connected end node {int(target_id)} to start node {int(source_id)}.",
+            "INFO",
+        )
+
+    def _on_geometry_disconnect_requested(self, source_id: int, target_id: int):
+        doc = self._active_source_document()
+        if doc is None or doc.df is None or doc.df.empty:
+            self._append_log("Geometry Editing: no active SWC document.", "WARN")
+            return
+        try:
+            parent_by_id = {
+                int(row["id"]): int(row["parent"])
+                for _, row in doc.df[["id", "parent"]].iterrows()
+            }
+            path = path_between_nodes(doc.df, int(source_id), int(target_id))
+            if len(path) < 2:
+                raise ValueError("Start and end nodes are not connected.")
+            disconnected_children: list[int] = []
+            old_edges: list[str] = []
+            for left, right in zip(path[:-1], path[1:]):
+                left = int(left)
+                right = int(right)
+                if int(parent_by_id.get(left, -1)) == right:
+                    disconnected_children.append(left)
+                    old_edges.append(f"{right} -> {left}")
+                elif int(parent_by_id.get(right, -1)) == left:
+                    disconnected_children.append(right)
+                    old_edges.append(f"{left} -> {right}")
+                else:
+                    raise ValueError("Encountered a non-parent-child step while disconnecting the selected path.")
+            new_df = disconnect_branch(doc.df, int(source_id), int(target_id))
+        except Exception as exc:  # noqa: BLE001
+            self._append_log(f"Geometry Editing: {exc}", "WARN")
+            return
+        self._geometry_panel.clear_all_selections()
+        self._geometry_panel.set_current_node(None)
+        self._apply_geometry_dataframe(
+            doc,
+            new_df,
+            event_title="Disconnect Branch",
+            event_summary=f"Disconnected the path between {int(source_id)} and {int(target_id)}.",
+            event_details=[
+                f"Start node ID: {int(source_id)}",
+                f"End node ID: {int(target_id)}",
+                f"Path nodes: {', '.join(str(v) for v in path)}",
+                f"Disconnected child node IDs: {', '.join(str(v) for v in disconnected_children)}",
+                f"Disconnected edges: {', '.join(old_edges)}",
+                "New parent IDs on disconnected child nodes: -1",
+                "Node IDs preserved; no automatic renumbering.",
+            ],
+            focus_node_id=None,
+        )
+        self._append_log(
+            f"Geometry Editing: disconnected the path between {int(source_id)} and {int(target_id)}.",
+            "INFO",
+        )
+
+    def _on_geometry_delete_node_requested(self, node_id: int, reconnect_children: bool):
+        doc = self._active_source_document()
+        if doc is None or doc.df is None or doc.df.empty:
+            self._append_log("Geometry Editing: no active SWC document.", "WARN")
+            return
+        try:
+            row = doc.df.loc[doc.df["id"].astype(int) == int(node_id)].iloc[0]
+            child_count = int((doc.df["parent"].astype(int) == int(node_id)).sum())
+            new_df = geometry_delete_node(doc.df, int(node_id), reconnect_children=bool(reconnect_children))
+        except Exception as exc:  # noqa: BLE001
+            self._append_log(f"Geometry Editing: {exc}", "WARN")
+            return
+        self._geometry_panel.clear_all_selections()
+        self._geometry_panel.set_current_node(None)
+        event_title = "Delete Node" if not reconnect_children else "Delete Node + Reconnect Children"
+        self._apply_geometry_dataframe(
+            doc,
+            new_df,
+            event_title=event_title,
+            event_summary=f"Deleted node {int(node_id)}.",
+            event_details=[
+                f"Node ID: {int(node_id)}",
+                f"Type: {label_for_type(int(row['type']))} ({int(row['type'])})",
+                f"Child count: {child_count}",
+                f"Reconnect children: {'yes' if reconnect_children else 'no'}",
+                "Remaining node IDs preserved; no automatic renumbering.",
+            ],
+            focus_node_id=None,
+        )
+        self._append_log(f"Geometry Editing: deleted node {int(node_id)}.", "INFO")
+
+    def _on_geometry_delete_subtree_requested(self, root_id: int):
+        doc = self._active_source_document()
+        if doc is None or doc.df is None or doc.df.empty:
+            self._append_log("Geometry Editing: no active SWC document.", "WARN")
+            return
+        try:
+            subtree_size = int(len(subtree_node_ids(doc.df, int(root_id))))
+            parent_row = doc.df.loc[doc.df["id"].astype(int) == int(root_id)].iloc[0]
+            parent_id = int(parent_row["parent"])
+            new_df = geometry_delete_subtree(doc.df, int(root_id))
+        except Exception as exc:  # noqa: BLE001
+            self._append_log(f"Geometry Editing: {exc}", "WARN")
+            return
+        self._geometry_panel.clear_all_selections()
+        self._geometry_panel.set_current_node(None)
+        self._apply_geometry_dataframe(
+            doc,
+            new_df,
+            event_title="Delete Subtree",
+            event_summary=f"Deleted subtree rooted at node {int(root_id)}.",
+            event_details=[
+                f"Subtree root ID: {int(root_id)}",
+                f"Removed node count: {subtree_size}",
+                "Remaining node IDs preserved; no automatic renumbering.",
+            ],
+            focus_node_id=None,
+        )
+        self._append_log(f"Geometry Editing: deleted subtree rooted at node {int(root_id)}.", "INFO")
+
+    def _on_geometry_insert_node_requested(self, start_id: int, end_id: int, x: float, y: float, z: float):
+        doc = self._active_source_document()
+        if doc is None or doc.df is None or doc.df.empty:
+            self._append_log("Geometry Editing: no active SWC document.", "WARN")
+            return
+        try:
+            end_row = None
+            if int(end_id) >= 0:
+                end_row = doc.df.loc[doc.df["id"].astype(int) == int(end_id)].iloc[0]
+            inserted_node_id = int(doc.df["id"].astype(int).max()) + 1
+            new_df = insert_node_between(doc.df, int(start_id), int(end_id), x=float(x), y=float(y), z=float(z))
+        except Exception as exc:  # noqa: BLE001
+            self._append_log(f"Geometry Editing: {exc}", "WARN")
+            return
+        self._geometry_panel.clear_all_selections()
+        self._geometry_panel.set_current_node(None)
+        self._apply_geometry_dataframe(
+            doc,
+            new_df,
+            event_title="Insert Node",
+            event_summary=(
+                f"Inserted a node between {int(start_id)} and {int(end_id)}."
+                if int(end_id) >= 0
+                else f"Inserted a child node under {int(start_id)}."
+            ),
+            event_details=[
+                f"Start node ID: {int(start_id)}",
+                f"End node ID: {int(end_id)}" if int(end_id) >= 0 else "End node ID: None",
+                f"Inserted node ID: {inserted_node_id}",
+                (
+                    f"End node type: {label_for_type(int(end_row['type']))} ({int(end_row['type'])})"
+                    if end_row is not None
+                    else "Inserted node has no child; end node was not provided."
+                ),
+                f"Inserted XYZ: ({float(x):.5g}, {float(y):.5g}, {float(z):.5g})",
+                "Existing node IDs preserved; inserted node uses max(existing ID)+1.",
+            ],
+            focus_node_id=None,
+        )
+        self._append_log(
+            (
+                f"Geometry Editing: inserted a node between {int(start_id)} and {int(end_id)}."
+                if int(end_id) >= 0
+                else f"Geometry Editing: inserted a child node under {int(start_id)}."
+            ),
+            "INFO",
+        )
+
     def _set_control_tabs_for_feature(self, feature: str):
         """Show only control tabs relevant to the active feature."""
         key = (feature or "").strip().lower()
@@ -1880,6 +2173,9 @@ class SWCMainWindow(QMainWindow):
                 "simplification": 4,
             }.get(previous_label, 0)
             self._refresh_simplification_panel_state()
+        elif key == "geometry_editing":
+            self._control_tabs.addTab(self._wrap_control_widget(self._geometry_panel), "Geometry Editing")
+            current_idx = 0
         elif key in ("atlas_registration", "analysis"):
             current_idx = -1
         else:
@@ -1959,6 +2255,20 @@ class SWCMainWindow(QMainWindow):
             self._clear_active_editor_selection_if_unfocused()
             self._feature_label.setText("Active feature: Morphology Editing")
             self._append_log("Feature switched: Morphology Editing", "INFO")
+            return
+        if key == "geometry_editing":
+            self._active_tool = "geometry_editing"
+            self._sync_tool_tab_selection()
+            self._set_control_tabs_for_feature("geometry_editing")
+            self._control_tabs.setVisible(self._control_tabs.count() > 0)
+            self._control_dock.show()
+            self._precheck_dock.hide()
+            self._auto_guide_dock.hide()
+            self._apply_editor_modes()
+            self._refresh_canvas_surface()
+            self._clear_active_editor_selection_if_unfocused()
+            self._feature_label.setText("Active feature: Geometry Editing")
+            self._append_log("Feature switched: Geometry Editing", "INFO")
             return
         if key == "atlas_registration":
             self._active_tool = "atlas_registration"
@@ -2064,6 +2374,8 @@ class SWCMainWindow(QMainWindow):
             self._sync_from_active_document(auto_run_validation=True)
             if self._active_tool in ("morphology_editing", "dendrogram"):
                 self._set_control_tabs_for_feature("morphology_editing")
+            elif self._active_tool == "geometry_editing":
+                self._set_control_tabs_for_feature("geometry_editing")
 
             n_roots = int((df["parent"] == -1).sum())
             n_soma = int((df["type"] == 1).sum())
@@ -2271,14 +2583,7 @@ class SWCMainWindow(QMainWindow):
         if doc is None or doc is not self._active_document():
             return
         self._manual_radii_panel.set_selected_node(int(swc_id))
-        if doc.selected_issue_id:
-            return
-        for issue in doc.issues:
-            if int(swc_id) in [int(v) for v in issue.get("node_ids", [])]:
-                issue_id = str(issue.get("issue_id", "")).strip()
-                if issue_id:
-                    self._issue_panel.select_issue(issue_id)
-                return
+        self._geometry_panel.set_current_node(int(swc_id))
 
     def _on_editor_undo_requested(self, editor: EditorTab):
         doc = self._documents.get(editor)
@@ -2300,6 +2605,8 @@ class SWCMainWindow(QMainWindow):
         if self._active_tool in ("morphology_editing", "dendrogram"):
             self._set_control_tabs_for_feature("morphology_editing")
             self._refresh_simplification_panel_state()
+        elif self._active_tool == "geometry_editing":
+            self._set_control_tabs_for_feature("geometry_editing")
         self._apply_editor_modes()
 
     def _on_document_tab_close_requested(self, index: int):
@@ -2327,6 +2634,8 @@ class SWCMainWindow(QMainWindow):
         self._refresh_canvas_surface()
         if self._active_tool in ("morphology_editing", "dendrogram"):
             self._set_control_tabs_for_feature("morphology_editing")
+        elif self._active_tool == "geometry_editing":
+            self._set_control_tabs_for_feature("geometry_editing")
 
     def _on_detached_editor_closing(self, editor_widget: QWidget):
         if self._closing_app:
@@ -2357,6 +2666,8 @@ class SWCMainWindow(QMainWindow):
             if self._active_tool in ("morphology_editing", "dendrogram"):
                 self._set_control_tabs_for_feature("morphology_editing")
                 self._refresh_simplification_panel_state()
+            elif self._active_tool == "geometry_editing":
+                self._set_control_tabs_for_feature("geometry_editing")
             return
         if self._is_validation_auto_label_preview(doc):
             self._remove_validation_auto_label_preview(editor, switch_to_source=False)
@@ -2387,6 +2698,8 @@ class SWCMainWindow(QMainWindow):
         if self._active_tool in ("morphology_editing", "dendrogram"):
             self._set_control_tabs_for_feature("morphology_editing")
             self._refresh_simplification_panel_state()
+        elif self._active_tool == "geometry_editing":
+            self._set_control_tabs_for_feature("geometry_editing")
     # --------------------------------------------------- Helpers
     def _append_log(self, text: str, level: str = "INFO"):
         stamp = datetime.now().strftime("%H:%M:%S")
@@ -2656,6 +2969,10 @@ class SWCMainWindow(QMainWindow):
             }.get(tool_target, "label editing")
             self._select_control_tab_by_label(target_tab)
             return
+        if tool_target == "geometry_editing":
+            self._activate_feature("geometry_editing")
+            self._select_control_tab_by_label("geometry editing")
+            return
         self._activate_feature("validation")
         self._select_control_tab_by_label("validation")
 
@@ -2664,6 +2981,7 @@ class SWCMainWindow(QMainWindow):
         if doc is not None:
             doc.selected_issue_id = str(issue.get("issue_id", "")).strip()
             doc.editor.clear_selection()
+            doc.editor.clear_geometry_selection()
             self._manual_radii_panel.clear_selection()
             doc.editor.set_issue_markers([issue])
         self._data_tabs.setCurrentIndex(0)
@@ -2694,6 +3012,7 @@ class SWCMainWindow(QMainWindow):
                 "auto_label": "Open Auto Labeling",
                 "label_editing": "Open Manual Labeling",
                 "simplification": "Open Simplification",
+                "geometry_editing": "Open Geometry Editing",
             }.get(str(issue.get("tool_target", "")).strip().lower(), "Open Related Tool"),
             "auto_fix_available": False,
             "auto_fix_label": "",
@@ -3331,6 +3650,10 @@ class SWCMainWindow(QMainWindow):
                 "simplification": "simplification",
             }.get(target, "label editing")
             self._select_control_tab_by_label(target_tab)
+            return
+        if target == "geometry_editing":
+            self._activate_feature("geometry_editing")
+            self._select_control_tab_by_label("geometry editing")
             return
         self._route_issue_to_tool({"tool_target": target})
 

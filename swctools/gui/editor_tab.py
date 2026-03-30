@@ -374,6 +374,24 @@ class EditorTab(QWidget):
         self._view3d_dendro.set_issue_markers(issues)
         self._view3d_visual.set_issue_markers(issues)
 
+    def set_geometry_selection(self, node_ids: list[int] | set[int], visibility_mode: str = "show"):
+        self._view3d_canvas.set_geometry_selection(node_ids, visibility_mode)
+        self._view3d_dendro.set_geometry_selection(node_ids, visibility_mode)
+        self._view3d_visual.set_geometry_selection(node_ids, visibility_mode)
+        self._dendro.set_geometry_selection(node_ids, visibility_mode)
+
+    def clear_geometry_selection(self):
+        self._view3d_canvas.clear_geometry_selection()
+        self._view3d_dendro.clear_geometry_selection()
+        self._view3d_visual.clear_geometry_selection()
+        self._dendro.clear_geometry_selection()
+
+    def zoom_to_node_ids(self, node_ids: list[int] | set[int]):
+        self._view3d_canvas.zoom_to_node_ids(node_ids)
+        self._view3d_dendro.zoom_to_node_ids(node_ids)
+        self._view3d_visual.zoom_to_node_ids(node_ids)
+        self._dendro.zoom_to_node_ids(node_ids)
+
     def clear_selection(self):
         self._view3d_canvas.clear_selection()
         self._view3d_dendro.clear_selection()

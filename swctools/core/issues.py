@@ -153,14 +153,14 @@ def _tool_target_for_key(key: str) -> tuple[str, str, str]:
     simplification_keys = {
         "all_section_lengths_nonzero",
         "all_segment_lengths_nonzero",
-        "no_duplicate_3d_points",
         "no_single_child_chains",
     }
-    manual_edit_keys = {
+    geometry_edit_keys = {
+        "no_duplicate_3d_points",
         "no_back_tracking",
-        "no_flat_neurites",
         "no_dangling_branches",
         "no_self_loop",
+        "no_flat_neurites",
         "has_unifurcation",
         "has_multifurcation",
         "no_section_index_jumps",
@@ -179,11 +179,11 @@ def _tool_target_for_key(key: str) -> tuple[str, str, str]:
             "simplification",
             "Open Simplification to collapse redundant points or inspect short/duplicate geometry.",
         )
-    if key in manual_edit_keys:
+    if key in geometry_edit_keys:
         return (
-            "structure",
-            "label_editing",
-            "Open Morphology Editing to inspect the highlighted branch and repair topology manually.",
+            "geometry",
+            "geometry_editing",
+            "Open Geometry Editing to inspect the highlighted nodes, isolate local structure, and repair connectivity or coordinates manually.",
         )
     if key == "valid_soma_format":
         return (

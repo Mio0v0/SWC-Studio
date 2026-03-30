@@ -369,7 +369,7 @@ def _split_swc_by_trees(swc_text: str):
         if not sub_rows:
             continue
 
-        sub_arr = _reindex_swc_array(np.array(sub_rows, dtype=_SWCTYPE))
+        sub_arr = np.array(sub_rows, dtype=_SWCTYPE)
         tmp_path = _write_array_to_tmp_swc(sub_arr)
         try:
             with open(tmp_path, "r") as f:
@@ -461,7 +461,7 @@ def _split_swc_by_soma_roots(swc_text: str):
         if not sub_rows:
             continue
 
-        sub_arr = _reindex_swc_array(np.array(sub_rows, dtype=_SWCTYPE))
+        sub_arr = np.array(sub_rows, dtype=_SWCTYPE)
         tmp_path = _write_array_to_tmp_swc(sub_arr)
         try:
             with open(tmp_path, "r") as f:

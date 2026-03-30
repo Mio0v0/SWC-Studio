@@ -22,6 +22,7 @@ _THETA = np.linspace(0, 2 * np.pi, _N_FACETS, endpoint=False, dtype=np.float32)
 _COS = np.cos(_THETA)
 _SIN = np.sin(_THETA)
 _ISSUE_HIGHLIGHT_HEX = "#18e0cf"
+_GEOMETRY_HIGHLIGHT_HEX = "#ff006e"
 
 
 def _hex_to_rgba(hex_color: str) -> np.ndarray:
@@ -90,6 +91,8 @@ class Neuron3DWidget(QWidget):
         self._issue_marker_signature: tuple[tuple[int, ...], ...] = ()
         self._selectable_node_ids: set[int] | None = None
         self._node_position_by_id: dict[int, np.ndarray] = {}
+        self._geometry_node_ids: set[int] = set()
+        self._geometry_visibility_mode: str = "show"
         self._highlight_marker = None
         self._issue_markers = None
 
@@ -246,6 +249,39 @@ class Neuron3DWidget(QWidget):
         self._node_overlay.setVisible(False)
         self._draw_highlight()
 
+    def set_geometry_selection(self, node_ids: list[int] | set[int], visibility_mode: str = "show"):
+        wanted_ids = {int(v) for v in list(node_ids or [])}
+        wanted_mode = str(visibility_mode or "show").strip().lower() or "show"
+        if wanted_ids == self._geometry_node_ids and wanted_mode == self._geometry_visibility_mode:
+            return
+        self._geometry_node_ids = wanted_ids
+        self._geometry_visibility_mode = wanted_mode
+        self._draw()
+
+    def clear_geometry_selection(self):
+        if not self._geometry_node_ids and self._geometry_visibility_mode == "show":
+            return
+        self._geometry_node_ids = set()
+        self._geometry_visibility_mode = "show"
+        self._draw()
+
+    def zoom_to_node_ids(self, node_ids: list[int] | set[int]):
+        if self._df is None or self._df.empty:
+            return
+        wanted = {int(v) for v in list(node_ids or [])}
+        if not wanted:
+            return
+        rows = self._df.loc[self._df["id"].astype(int).isin(sorted(wanted)), ["x", "y", "z"]]
+        if rows.empty:
+            return
+        xyz = rows.to_numpy(dtype=np.float32)
+        center = xyz.mean(axis=0)
+        extent = xyz.max(axis=0) - xyz.min(axis=0)
+        dist = float(np.linalg.norm(extent)) * 1.2
+        self._view.camera.center = tuple(float(v) for v in center)
+        self._view.camera.distance = max(dist, 25.0)
+        self._canvas.update()
+
     # ------------------------------------------------- Toggle
     def _on_mode_change(self, btn_id, checked):
         if checked:
@@ -376,6 +412,8 @@ class Neuron3DWidget(QWidget):
                 node_id = int(node_id)
                 if node_id in seen_ids:
                     continue
+                if node_id in self._geometry_node_ids:
+                    continue
                 pos = self._node_position_by_id.get(node_id)
                 if pos is None:
                     continue
@@ -497,17 +535,54 @@ class Neuron3DWidget(QWidget):
     # ------------------------------------------------- Line mode
     def _draw_lines(self, ids, types, parents, radii, xyz, id2idx):
         type_edges: dict[int, list] = {}
+        selected_edges: list[tuple[np.ndarray, np.ndarray]] = []
         soma_positions, soma_radii = [], []
+        selected_ids = set(self._geometry_node_ids)
+        dim_mode = bool(selected_ids) and self._geometry_visibility_mode == "dim"
+        hide_mode = bool(selected_ids) and self._geometry_visibility_mode == "hide"
+        dim_edges: list[tuple[np.ndarray, np.ndarray]] = []
+        highlight_positions: list[np.ndarray] = []
 
         for i in range(len(ids)):
             t = int(types[i])
             pid = int(parents[i])
             if t == 1:
-                soma_positions.append(xyz[i])
-                soma_radii.append(max(float(radii[i]), 1.0))
+                if not hide_mode or int(ids[i]) in selected_ids:
+                    soma_positions.append(xyz[i])
+                    soma_radii.append(max(float(radii[i]), 1.0))
+            if int(ids[i]) in selected_ids:
+                highlight_positions.append(xyz[i])
             if pid >= 0 and pid in id2idx:
                 p_idx = id2idx[pid]
+                child_id = int(ids[i])
+                parent_id = int(ids[p_idx])
+                edge_selected = child_id in selected_ids and parent_id in selected_ids
+                if hide_mode and not edge_selected:
+                    continue
+                if edge_selected:
+                    selected_edges.append((xyz[p_idx], xyz[i]))
+                    continue
+                if dim_mode:
+                    dim_edges.append((xyz[p_idx], xyz[i]))
+                    continue
                 type_edges.setdefault(t, []).append((xyz[p_idx], xyz[i]))
+
+        if dim_edges:
+            n = len(dim_edges)
+            pos = np.empty((n * 2, 3), dtype=np.float32)
+            connect = np.empty((n, 2), dtype=np.uint32)
+            for j, (p, c) in enumerate(dim_edges):
+                pos[j * 2] = p
+                pos[j * 2 + 1] = c
+                connect[j] = [j * 2, j * 2 + 1]
+            visuals.Line(
+                pos=pos,
+                connect=connect,
+                color=Color("#c9ced6"),
+                width=0.9,
+                parent=self._view.scene,
+                antialias=True,
+            )
 
         for type_id, edges in type_edges.items():
             n = len(edges)
@@ -518,7 +593,24 @@ class Neuron3DWidget(QWidget):
                 connect[j] = [j * 2, j * 2 + 1]
             visuals.Line(pos=pos, connect=connect,
                          color=Color(color_for_type(int(type_id))),
-                         width=1.5, parent=self._view.scene, antialias=True)
+                         width=2.2 if selected_ids else 1.5, parent=self._view.scene, antialias=True)
+
+        if selected_edges:
+            n = len(selected_edges)
+            pos = np.empty((n * 2, 3), dtype=np.float32)
+            connect = np.empty((n, 2), dtype=np.uint32)
+            for j, (p, c) in enumerate(selected_edges):
+                pos[j * 2] = p
+                pos[j * 2 + 1] = c
+                connect[j] = [j * 2, j * 2 + 1]
+            visuals.Line(
+                pos=pos,
+                connect=connect,
+                color=Color(_GEOMETRY_HIGHLIGHT_HEX),
+                width=3.0,
+                parent=self._view.scene,
+                antialias=True,
+            )
 
         if soma_positions:
             markers = visuals.Markers(parent=self._view.scene)
@@ -527,39 +619,94 @@ class Neuron3DWidget(QWidget):
                 size=np.array(soma_radii, dtype=np.float32) * 2.5,
                 face_color=Color("#2ca02c"), edge_color=Color("#333"),
                 edge_width=1.0, symbol="o")
+        if highlight_positions:
+            markers = visuals.Markers(parent=self._view.scene)
+            markers.set_data(
+                np.array(highlight_positions, dtype=np.float32),
+                size=11,
+                face_color=Color(_GEOMETRY_HIGHLIGHT_HEX),
+                edge_color=Color("#ffffff"),
+                edge_width=1.5,
+                symbol="disc",
+            )
 
     # ------------------------------------------------- Sphere mode
     def _draw_spheres(self, ids, types, parents, radii, xyz, id2idx):
         type_groups: dict[int, tuple] = {}
         all_edges_pos, all_edges_connect = [], []
         idx_offset = 0
+        selected_edges_pos, selected_edges_connect = [], []
+        selected_idx_offset = 0
+        selected_positions: list[np.ndarray] = []
+        selected_ids = set(self._geometry_node_ids)
+        dim_mode = bool(selected_ids) and self._geometry_visibility_mode == "dim"
+        hide_mode = bool(selected_ids) and self._geometry_visibility_mode == "hide"
+        dim_edges_pos, dim_edges_connect = [], []
+        dim_idx_offset = 0
 
         for i in range(len(ids)):
+            node_id = int(ids[i])
             t = int(types[i])
             r = max(float(radii[i]), 0.3)
-            type_groups.setdefault(t, ([], []))[0].append(xyz[i])
-            type_groups[t][1].append(r)
+            if node_id in selected_ids:
+                selected_positions.append(xyz[i])
+            if not hide_mode or node_id in selected_ids:
+                type_groups.setdefault(t, ([], []))[0].append(xyz[i])
+                type_groups[t][1].append(6.0 if selected_ids else r * 2.0)
 
             pid = int(parents[i])
             if pid >= 0 and pid in id2idx:
-                all_edges_pos.extend([xyz[id2idx[pid]], xyz[i]])
-                all_edges_connect.append([idx_offset, idx_offset + 1])
-                idx_offset += 2
+                parent_id = int(ids[id2idx[pid]])
+                edge_selected = node_id in selected_ids and parent_id in selected_ids
+                if hide_mode and not edge_selected:
+                    continue
+                if edge_selected:
+                    selected_edges_pos.extend([xyz[id2idx[pid]], xyz[i]])
+                    selected_edges_connect.append([selected_idx_offset, selected_idx_offset + 1])
+                    selected_idx_offset += 2
+                elif dim_mode:
+                    dim_edges_pos.extend([xyz[id2idx[pid]], xyz[i]])
+                    dim_edges_connect.append([dim_idx_offset, dim_idx_offset + 1])
+                    dim_idx_offset += 2
+                else:
+                    all_edges_pos.extend([xyz[id2idx[pid]], xyz[i]])
+                    all_edges_connect.append([idx_offset, idx_offset + 1])
+                    idx_offset += 2
 
+        if dim_edges_pos:
+            visuals.Line(pos=np.array(dim_edges_pos, dtype=np.float32),
+                         connect=np.array(dim_edges_connect, dtype=np.uint32),
+                         color=Color("#c9ced6"), width=0.5,
+                         parent=self._view.scene, antialias=True)
         if all_edges_pos:
             visuals.Line(pos=np.array(all_edges_pos, dtype=np.float32),
                          connect=np.array(all_edges_connect, dtype=np.uint32),
                          color=Color("#cccccc"), width=0.5,
+                         parent=self._view.scene, antialias=True)
+        if selected_edges_pos:
+            visuals.Line(pos=np.array(selected_edges_pos, dtype=np.float32),
+                         connect=np.array(selected_edges_connect, dtype=np.uint32),
+                         color=Color(_GEOMETRY_HIGHLIGHT_HEX), width=2.3,
                          parent=self._view.scene, antialias=True)
 
         for type_id, (positions, rad_list) in type_groups.items():
             markers = visuals.Markers(parent=self._view.scene, scaling="scene")
             markers.set_data(
                 np.array(positions, dtype=np.float32),
-                size=np.array(rad_list, dtype=np.float32) * 2.0,
+                size=np.array(rad_list, dtype=np.float32),
                 face_color=Color(color_for_type(int(type_id))),
                 edge_color=Color(color_for_type(int(type_id))),
                 edge_width=0.0, symbol="disc")
+        if selected_positions:
+            markers = visuals.Markers(parent=self._view.scene, scaling="scene")
+            markers.set_data(
+                np.array(selected_positions, dtype=np.float32),
+                size=np.full((len(selected_positions),), 9.0, dtype=np.float32),
+                face_color=Color(_GEOMETRY_HIGHLIGHT_HEX),
+                edge_color=Color("#ffffff"),
+                edge_width=1.0,
+                symbol="disc",
+            )
 
     # ------------------------------------------------- Frustum mode
     def _draw_frustum(self, ids, types, parents, radii, xyz, id2idx):
@@ -568,15 +715,25 @@ class Neuron3DWidget(QWidget):
         all_faces = []
         all_colors = []
         vert_offset = 0
+        selected_ids = set(self._geometry_node_ids)
+        hide_mode = bool(selected_ids) and self._geometry_visibility_mode == "hide"
 
         for i in range(len(ids)):
             pid = int(parents[i])
             if pid < 0 or pid not in id2idx:
                 continue
+            if hide_mode:
+                child_id = int(ids[i])
+                parent_id = int(ids[id2idx[pid]])
+                if child_id not in selected_ids or parent_id not in selected_ids:
+                    continue
 
             p_idx = id2idx[pid]
             t = int(types[i])
-            color_rgba = _hex_to_rgba(color_for_type(t))
+            child_id = int(ids[i])
+            parent_id = int(ids[p_idx])
+            edge_selected = child_id in selected_ids and parent_id in selected_ids
+            color_rgba = _hex_to_rgba(_GEOMETRY_HIGHLIGHT_HEX if edge_selected else color_for_type(t))
 
             p0 = xyz[p_idx].astype(np.float64)
             p1 = xyz[i].astype(np.float64)
