@@ -8,8 +8,8 @@ The GUI uses a studio-style layout with shared backend logic:
 
 - top in-app bar: file/edit/view/window/help menus + tool and feature selectors
 - center canvas: active SWC visualization/editor tabs
-- left panel: Data Explorer (SWC tree, node info, segment info, edit log)
-- right panel: Control Center (tool-dependent controls)
+- left panel: Issue Navigator / SWC File / Segment Info
+- right panel: Inspector (issue detail on top, active tool controls below)
 - bottom panel: log output/events
 
 The center canvas is the dominant workspace and updates based on current tool/feature.
@@ -26,14 +26,16 @@ Top-level tools:
 - Analysis
 
 When a tool is active, feature buttons are shown for that tool.
-The selected feature controls what appears in Control Center.
+The selected feature controls what appears in the lower Inspector area.
 
 ### Feature mapping in GUI
 
 - Batch Processing: Split, Validation, Auto Label, Radii Cleaning
-- Validation: Validation, Auto Label, Radii Cleaning
+- Batch Processing: Split, Validation, Auto Label, Radii Cleaning, Simplification, Index Clean
+- Validation: Validation, Index Clean
 - Visualization: View Controls
-- Morphology Editing: Label Editing, Simplification
+- Morphology Editing: Label Editing, Auto Label, Manual Radii Editing, Auto Radii Editing, Simplification
+- Geometry Editing: Geometry Editing
 - Atlas Registration: Registration (placeholder)
 - Analysis: Summary (placeholder)
 
@@ -46,9 +48,9 @@ The selected feature controls what appears in Control Center.
 ## Recommended GUI usage sequence
 
 1. **Open file** from menu.
-2. Inspect structure in Data Explorer.
-3. Switch to **Validation** tool and run checks.
-4. Use **Morphology Editing** and **Radii Cleaning** as needed.
+2. Inspect issues and structure in the left navigator.
+3. Switch to **Validation** and run checks.
+4. Use **Morphology Editing** / **Geometry Editing** as needed.
 5. Review status/log panel and save outputs.
 
 ## Validation in GUI
@@ -69,10 +71,11 @@ Validation uses the same backend as CLI (`swctools.tools.validation` + core engi
 - JSON editor for rule parameters
 - shared backend logic (same as CLI/API)
 
-## Radii Cleaning in GUI
+## Radii Editing in GUI
 
 - shared backend for Batch + Validation + CLI
-- supports file/folder usage depending on panel context
+- `Manual Radii Editing` supports one-node edits with type-level statistics
+- `Auto Radii Editing` supports distribution-based cleanup
 - thresholds configurable via JSON
 - histogram/statistics visualization for currently loaded file
 

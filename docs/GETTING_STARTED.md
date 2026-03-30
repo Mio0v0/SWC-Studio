@@ -98,7 +98,8 @@ CLI examples (macOS/Linux path style):
 ```bash
 swctools batch split ./data
 swctools validation run ./data/single-soma.swc
-swctools morphology smart-decimation ./data/single-soma.swc --write
+swctools morphology simplify ./data/single-soma.swc --write
+swctools geometry connect ./data/single-soma.swc --start-id 10 --end-id 22 --write
 ```
 
 CLI examples (Windows path style):
@@ -106,7 +107,8 @@ CLI examples (Windows path style):
 ```powershell
 swctools batch split .\data
 swctools validation run .\data\single-soma.swc
-swctools morphology smart-decimation .\data\single-soma.swc --write
+swctools morphology simplify .\data\single-soma.swc --write
+swctools geometry connect .\data\single-soma.swc --start-id 10 --end-id 22 --write
 ```
 
 GUI:
@@ -128,7 +130,7 @@ py -m swctools.gui.main
 1. Open an SWC file.
 2. Run validation.
 3. Review warnings/failures.
-4. Apply editing operations (label edit, auto-labeling, radii clean, simplification).
+4. Apply editing operations (label edit, auto-labeling, radii edit, geometry edit, simplification).
 5. Save/export result and review generated report logs.
 
 ## 6. Where outputs and logs are written

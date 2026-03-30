@@ -14,6 +14,16 @@ from pathlib import Path
 from swctools.core.auto_typing import RuleBatchOptions
 from swctools.core.auto_typing_catalog import format_auto_typing_guide_text
 from swctools.core.config import merge_config
+from swctools.core.geometry_editing import (
+    delete_node as geometry_delete_node,
+    delete_subtree as geometry_delete_subtree,
+    disconnect_branch as geometry_disconnect_branch,
+    insert_node_between as geometry_insert_node_between,
+    move_node_absolute as geometry_move_node_absolute,
+    move_subtree_absolute as geometry_move_subtree_absolute,
+    reconnect_branch as geometry_reconnect_branch,
+)
+from swctools.core.swc_io import parse_swc_text_preserve_tokens, write_swc_to_bytes_preserve_tokens
 from swctools.plugins import (
     autoload_plugins_from_environment,
     list_all_feature_methods,
@@ -25,17 +35,21 @@ from swctools.tools.analysis.features.summary import analyze_file
 from swctools.tools.atlas_registration.features.registration import register_to_atlas
 from swctools.tools.batch_processing.features.auto_typing import run_folder as run_auto_typing
 from swctools.tools.batch_processing.features.batch_validation import validate_folder
+from swctools.tools.batch_processing.features.index_clean import run_folder as batch_index_clean_folder
 from swctools.tools.batch_processing.features.radii_cleaning import clean_path as batch_clean_radii_path
+from swctools.tools.batch_processing.features.simplification import run_folder as batch_simplify_folder
 from swctools.tools.batch_processing.features.swc_splitter import split_folder
 from swctools.tools.morphology_editing.features.dendrogram_editing import (
     reassign_subtree_types_in_file,
 )
+from swctools.tools.morphology_editing.features.manual_radii import set_node_radius_file
 from swctools.tools.morphology_editing.features.simplification import (
     get_config as get_simplification_config,
     simplify_file as simplify_morphology_file,
 )
 
 from swctools.tools.validation.features.auto_fix import auto_fix_file
+from swctools.tools.validation.features.index_clean import index_clean_file as validation_index_clean_file
 from swctools.tools.validation.features.radii_cleaning import clean_path as validation_clean_radii_path
 from swctools.tools.validation.features.run_checks import validate_file as run_validation_checks_file
 from swctools.tools.validation import build_precheck_summary, load_validation_config
@@ -249,6 +263,14 @@ def _print_batch_validation_results(batch_report: dict) -> None:
             print(f"- {err}")
 
 
+def _write_geometry_output(input_path: Path, df, *, out_path: str = "", write_output: bool = False, suffix: str) -> str | None:
+    output_path: Path | None = None
+    if write_output:
+        output_path = Path(out_path) if out_path else input_path.with_name(f"{input_path.stem}{suffix}{input_path.suffix}")
+        output_path.write_bytes(write_swc_to_bytes_preserve_tokens(df))
+    return str(output_path) if output_path else None
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="swctools")
     sub = p.add_subparsers(dest="tool")
@@ -307,6 +329,14 @@ def build_parser() -> argparse.ArgumentParser:
     batch_radii.add_argument("--abs-max", type=float, default=None, help="Global max absolute radius.")
     _feature_json_arg(batch_radii)
 
+    batch_simplify = batch_sub.add_parser("simplify", help="Run simplification on all SWC files in a folder")
+    batch_simplify.add_argument("folder", type=Path)
+    _feature_json_arg(batch_simplify)
+
+    batch_index = batch_sub.add_parser("index-clean", help="Reorder and reindex all SWC files in a folder")
+    batch_index.add_argument("folder", type=Path)
+    _feature_json_arg(batch_index)
+
     # ------------------------------ validation
     validation = sub.add_parser("validation", help="Validation features")
     val_sub = validation.add_subparsers(dest="feature")
@@ -351,6 +381,12 @@ def build_parser() -> argparse.ArgumentParser:
     val_radii.add_argument("--abs-max", type=float, default=None, help="Global max absolute radius.")
     _feature_json_arg(val_radii)
 
+    val_index = val_sub.add_parser("index-clean", help="Reorder and reindex one SWC file")
+    val_index.add_argument("file", type=Path)
+    val_index.add_argument("--write", action="store_true", default=False)
+    val_index.add_argument("--out", default="", help="Output file path (used with --write)")
+    _feature_json_arg(val_index)
+
     # ------------------------------ visualization
     visualization = sub.add_parser("visualization", help="Visualization backends")
     viz_sub = visualization.add_subparsers(dest="feature")
@@ -377,6 +413,81 @@ def build_parser() -> argparse.ArgumentParser:
     morph_s.add_argument("--write", action="store_true", default=False)
     morph_s.add_argument("--out", default="", help="Output file path (used with --write)")
     _feature_json_arg(morph_s)
+
+    morph_simplify = morph_sub.add_parser("simplify", help="RDP-based simplification (same backend as smart-decimation)")
+    morph_simplify.add_argument("file", type=Path)
+    morph_simplify.add_argument("--write", action="store_true", default=False)
+    morph_simplify.add_argument("--out", default="", help="Output file path (used with --write)")
+    _feature_json_arg(morph_simplify)
+
+    morph_radius = morph_sub.add_parser("set-radius", help="Set one node radius in a file")
+    morph_radius.add_argument("file", type=Path)
+    morph_radius.add_argument("--node-id", required=True, type=int)
+    morph_radius.add_argument("--radius", required=True, type=float)
+    morph_radius.add_argument("--write", action="store_true", default=False)
+    morph_radius.add_argument("--out", default="", help="Output file path (used with --write)")
+    _feature_json_arg(morph_radius)
+
+    # ------------------------------ geometry
+    geometry = sub.add_parser("geometry", help="Geometry editing operations without GUI")
+    geom_sub = geometry.add_subparsers(dest="feature")
+
+    geom_move_node = geom_sub.add_parser("move-node", help="Move one node to absolute XYZ")
+    geom_move_node.add_argument("file", type=Path)
+    geom_move_node.add_argument("--node-id", required=True, type=int)
+    geom_move_node.add_argument("--x", required=True, type=float)
+    geom_move_node.add_argument("--y", required=True, type=float)
+    geom_move_node.add_argument("--z", required=True, type=float)
+    geom_move_node.add_argument("--write", action="store_true", default=False)
+    geom_move_node.add_argument("--out", default="", help="Output file path (used with --write)")
+
+    geom_move_subtree = geom_sub.add_parser("move-subtree", help="Move a subtree by setting its root to absolute XYZ")
+    geom_move_subtree.add_argument("file", type=Path)
+    geom_move_subtree.add_argument("--root-id", required=True, type=int)
+    geom_move_subtree.add_argument("--x", required=True, type=float)
+    geom_move_subtree.add_argument("--y", required=True, type=float)
+    geom_move_subtree.add_argument("--z", required=True, type=float)
+    geom_move_subtree.add_argument("--write", action="store_true", default=False)
+    geom_move_subtree.add_argument("--out", default="", help="Output file path (used with --write)")
+
+    geom_connect = geom_sub.add_parser("connect", help="Set end-node parent to start-node")
+    geom_connect.add_argument("file", type=Path)
+    geom_connect.add_argument("--start-id", required=True, type=int)
+    geom_connect.add_argument("--end-id", required=True, type=int)
+    geom_connect.add_argument("--write", action="store_true", default=False)
+    geom_connect.add_argument("--out", default="", help="Output file path (used with --write)")
+
+    geom_disconnect = geom_sub.add_parser("disconnect", help="Disconnect all edges along the path between start and end")
+    geom_disconnect.add_argument("file", type=Path)
+    geom_disconnect.add_argument("--start-id", required=True, type=int)
+    geom_disconnect.add_argument("--end-id", required=True, type=int)
+    geom_disconnect.add_argument("--write", action="store_true", default=False)
+    geom_disconnect.add_argument("--out", default="", help="Output file path (used with --write)")
+
+    geom_delete = geom_sub.add_parser("delete-node", help="Delete one node")
+    geom_delete.add_argument("file", type=Path)
+    geom_delete.add_argument("--node-id", required=True, type=int)
+    geom_delete.add_argument("--reconnect-children", action="store_true", default=False)
+    geom_delete.add_argument("--write", action="store_true", default=False)
+    geom_delete.add_argument("--out", default="", help="Output file path (used with --write)")
+
+    geom_delete_sub = geom_sub.add_parser("delete-subtree", help="Delete one subtree")
+    geom_delete_sub.add_argument("file", type=Path)
+    geom_delete_sub.add_argument("--root-id", required=True, type=int)
+    geom_delete_sub.add_argument("--write", action="store_true", default=False)
+    geom_delete_sub.add_argument("--out", default="", help="Output file path (used with --write)")
+
+    geom_insert = geom_sub.add_parser("insert", help="Insert a node after start and optionally before end")
+    geom_insert.add_argument("file", type=Path)
+    geom_insert.add_argument("--start-id", required=True, type=int)
+    geom_insert.add_argument("--end-id", type=int, default=-1)
+    geom_insert.add_argument("--x", required=True, type=float)
+    geom_insert.add_argument("--y", required=True, type=float)
+    geom_insert.add_argument("--z", required=True, type=float)
+    geom_insert.add_argument("--radius", type=float, default=None)
+    geom_insert.add_argument("--type-id", type=int, default=None)
+    geom_insert.add_argument("--write", action="store_true", default=False)
+    geom_insert.add_argument("--out", default="", help="Output file path (used with --write)")
 
     # ------------------------------ atlas
     atlas = sub.add_parser("atlas", help="Atlas Registration (placeholder)")
@@ -484,6 +595,26 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"\nReport file: {out.get('log_path')}")
             return 0
 
+        if args.tool == "batch" and args.feature == "simplify":
+            out = batch_simplify_folder(
+                str(args.folder),
+                config_overrides=_parse_config_overrides(args.config_json),
+            )
+            _print_json(out)
+            if out.get("log_path"):
+                print(f"\nReport file: {out.get('log_path')}")
+            return 0
+
+        if args.tool == "batch" and args.feature == "index-clean":
+            out = batch_index_clean_folder(
+                str(args.folder),
+                config_overrides=_parse_config_overrides(args.config_json),
+            )
+            _print_json(out)
+            if out.get("log_path"):
+                print(f"\nReport file: {out.get('log_path')}")
+            return 0
+
         # -------- validation
         if args.tool == "validation" and args.feature == "rule-guide":
             cfg = load_validation_config(overrides=_parse_config_overrides(args.config_json))
@@ -536,6 +667,20 @@ def main(argv: list[str] | None = None) -> int:
             _print_json(out)
             return 0
 
+        if args.tool == "validation" and args.feature == "index-clean":
+            out = validation_index_clean_file(
+                str(args.file),
+                out_path=(args.out or None),
+                write_output=bool(args.write),
+                config_overrides=_parse_config_overrides(args.config_json),
+            )
+            out_print = {k: v for k, v in out.items() if k not in {"bytes", "dataframe", "id_map", "config_used"}}
+            out_print["id_map_size"] = len(dict(out.get("id_map", {})))
+            _print_json(out_print)
+            if out.get("log_path"):
+                print(f"\nReport file: {out.get('log_path')}")
+            return 0
+
         # -------- visualization
         if args.tool == "visualization" and args.feature == "mesh-editing":
             cfg = _parse_config_overrides(args.config_json) or {}
@@ -560,7 +705,7 @@ def main(argv: list[str] | None = None) -> int:
             _print_json(out)
             return 0
 
-        if args.tool == "morphology" and args.feature == "smart-decimation":
+        if args.tool == "morphology" and args.feature in {"smart-decimation", "simplify"}:
             cfg_overrides = _parse_config_overrides(args.config_json)
             cfg_effective = merge_config(get_simplification_config(), cfg_overrides or {})
             _print_simplification_rule_guide(cfg_effective)
@@ -581,6 +726,102 @@ def main(argv: list[str] | None = None) -> int:
             if out.get("log_path"):
                 print(f"\nReport file: {out.get('log_path')}")
             return 0
+
+        if args.tool == "morphology" and args.feature == "set-radius":
+            out = set_node_radius_file(
+                str(args.file),
+                node_id=int(args.node_id),
+                radius=float(args.radius),
+                out_path=(args.out or None),
+                write_output=bool(args.write),
+                config_overrides=_parse_config_overrides(args.config_json),
+            )
+            out_print = {k: v for k, v in out.items() if k not in {"bytes", "dataframe", "config_used"}}
+            _print_json(out_print)
+            return 0
+
+        # -------- geometry
+        if args.tool == "geometry" and args.feature:
+            file_path = Path(args.file)
+            if not file_path.exists():
+                raise FileNotFoundError(str(file_path))
+            text = file_path.read_text(encoding="utf-8", errors="ignore")
+            df = parse_swc_text_preserve_tokens(text)
+
+            if args.feature == "move-node":
+                out_df = geometry_move_node_absolute(df, int(args.node_id), float(args.x), float(args.y), float(args.z))
+                output_path = _write_geometry_output(file_path, out_df, out_path=args.out, write_output=bool(args.write), suffix="_moved")
+                _print_json({"operation": "move-node", "node_id": int(args.node_id), "output_path": output_path})
+                return 0
+
+            if args.feature == "move-subtree":
+                out_df = geometry_move_subtree_absolute(df, int(args.root_id), float(args.x), float(args.y), float(args.z))
+                output_path = _write_geometry_output(file_path, out_df, out_path=args.out, write_output=bool(args.write), suffix="_subtree_moved")
+                _print_json({"operation": "move-subtree", "root_id": int(args.root_id), "output_path": output_path})
+                return 0
+
+            if args.feature == "connect":
+                out_df = geometry_reconnect_branch(df, int(args.start_id), int(args.end_id))
+                output_path = _write_geometry_output(file_path, out_df, out_path=args.out, write_output=bool(args.write), suffix="_connected")
+                _print_json({
+                    "operation": "connect",
+                    "start_id": int(args.start_id),
+                    "end_id": int(args.end_id),
+                    "output_path": output_path,
+                })
+                return 0
+
+            if args.feature == "disconnect":
+                out_df = geometry_disconnect_branch(df, int(args.start_id), int(args.end_id))
+                output_path = _write_geometry_output(file_path, out_df, out_path=args.out, write_output=bool(args.write), suffix="_disconnected")
+                _print_json({
+                    "operation": "disconnect",
+                    "start_id": int(args.start_id),
+                    "end_id": int(args.end_id),
+                    "output_path": output_path,
+                })
+                return 0
+
+            if args.feature == "delete-node":
+                out_df = geometry_delete_node(df, int(args.node_id), reconnect_children=bool(args.reconnect_children))
+                output_path = _write_geometry_output(file_path, out_df, out_path=args.out, write_output=bool(args.write), suffix="_node_deleted")
+                _print_json({
+                    "operation": "delete-node",
+                    "node_id": int(args.node_id),
+                    "reconnect_children": bool(args.reconnect_children),
+                    "output_path": output_path,
+                })
+                return 0
+
+            if args.feature == "delete-subtree":
+                out_df = geometry_delete_subtree(df, int(args.root_id))
+                output_path = _write_geometry_output(file_path, out_df, out_path=args.out, write_output=bool(args.write), suffix="_subtree_deleted")
+                _print_json({
+                    "operation": "delete-subtree",
+                    "root_id": int(args.root_id),
+                    "output_path": output_path,
+                })
+                return 0
+
+            if args.feature == "insert":
+                out_df = geometry_insert_node_between(
+                    df,
+                    int(args.start_id),
+                    int(args.end_id),
+                    x=float(args.x),
+                    y=float(args.y),
+                    z=float(args.z),
+                    radius=args.radius,
+                    type_id=args.type_id,
+                )
+                output_path = _write_geometry_output(file_path, out_df, out_path=args.out, write_output=bool(args.write), suffix="_inserted")
+                _print_json({
+                    "operation": "insert",
+                    "start_id": int(args.start_id),
+                    "end_id": int(args.end_id),
+                    "output_path": output_path,
+                })
+                return 0
 
         # -------- atlas
         if args.tool == "atlas" and args.feature == "register":

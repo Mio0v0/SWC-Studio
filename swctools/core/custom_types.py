@@ -1,4 +1,4 @@
-"""Persistent custom SWC type metadata."""
+"""Persistent custom SWC type metadata and shared type labels."""
 
 from __future__ import annotations
 
@@ -10,6 +10,13 @@ from pathlib import Path
 
 _HEX_RE = re.compile(r"^#[0-9A-Fa-f]{6}$")
 _DEFAULT_CUSTOM_COLOR = "#ff7f0e"
+TYPE_LABELS = {
+    0: "undefined",
+    1: "soma",
+    2: "axon",
+    3: "basal dendrite",
+    4: "apical dendrite",
+}
 _DEFAULT_CUSTOM_TYPE_PALETTE = [
     "#e6194b", "#3cb44b", "#4363d8", "#f58231", "#911eb4",
     "#42d4f4", "#f032e6", "#bfef45", "#fabed4", "#469990",
@@ -22,6 +29,21 @@ def custom_type_registry_path() -> Path:
     if override:
         return Path(override).expanduser()
     return Path.home() / ".swc_studio" / "custom_types.json"
+
+
+def label_for_type(type_id: int) -> str:
+    try:
+        type_id = int(type_id)
+    except Exception:
+        return "unknown"
+    if type_id in TYPE_LABELS:
+        return TYPE_LABELS[type_id]
+    if type_id < 0:
+        return f"invalid type {type_id}"
+    definition = get_custom_type_definition(type_id)
+    if definition and str(definition.get("name", "")).strip():
+        return str(definition["name"]).strip()
+    return f"custom type {type_id}"
 
 
 def default_custom_color_for_type(type_id: int) -> str:

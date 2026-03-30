@@ -67,7 +67,7 @@ Current issue fields come from `swctools/core/issues.py`:
 - `status`
   - `open`
   - `fixing`
-  - `skipped`
+  - `muted`
   - `fixed`
 - `source_key`
 - `source_label`

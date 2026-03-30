@@ -12,6 +12,8 @@ OS note: replace `./data/...` with `.\data\...` on Windows. If `swctools` is not
 - SWC Splitter (`batch split`)
 - Auto Typing (`batch auto-typing`)
 - Radii Cleaning (`batch radii-clean`)
+- Simplification (`batch simplify`)
+- Index Clean (`batch index-clean`)
 
 ## 2) Validation
 
@@ -19,6 +21,7 @@ OS note: replace `./data/...` with `.\data\...` on Windows. If `swctools` is not
 - Run Checks (`validation run`)
 - Auto Fix (`validation auto-fix`)
 - Radii Cleaning (`validation radii-clean`)
+- Index Clean (`validation index-clean`)
 
 ## 3) Visualization
 
@@ -27,7 +30,17 @@ OS note: replace `./data/...` with `.\data\...` on Windows. If `swctools` is not
 ## 4) Morphology Editing
 
 - Dendrogram Edit (`morphology dendrogram-edit`)
-- Smart Decimation (`morphology smart-decimation`)
+- Manual Radii (`morphology set-radius`)
+- Simplification (`morphology simplify`)
+
+## 5) Geometry Editing
+
+- Move Node (`geometry move-node`)
+- Move Subtree (`geometry move-subtree`)
+- Connect (`geometry connect`)
+- Disconnect (`geometry disconnect`)
+- Delete Node / Subtree (`geometry delete-node`, `geometry delete-subtree`)
+- Insert Node (`geometry insert`)
 
 ## 5) Atlas Registration
 
@@ -96,6 +109,18 @@ or absolute mode:
 swctools batch radii-clean ./data --threshold-mode absolute --abs-min 0.05 --abs-max 30
 ```
 
+### E. Batch Simplification
+
+```bash
+swctools batch simplify ./data
+```
+
+### F. Batch Index Clean
+
+```bash
+swctools batch index-clean ./data
+```
+
 ---
 
 ## Validation Tutorials
@@ -130,6 +155,12 @@ swctools validation auto-fix ./data/single-soma.swc --write --out ./data/single-
 swctools validation radii-clean ./data/single-soma.swc --preserve-soma-radii
 ```
 
+### E. Validation Index Clean
+
+```bash
+swctools validation index-clean ./data/single-soma.swc --write
+```
+
 ---
 
 ## Visualization Tutorial
@@ -152,13 +183,41 @@ Used mainly as backend payload for GUI rendering workflows.
 swctools morphology dendrogram-edit ./data/single-soma.swc --node-id 42 --new-type 3 --write
 ```
 
-### B. Smart Decimation (RDP)
+### B. Manual Radius Edit
 
 ```bash
-swctools morphology smart-decimation ./data/single-soma.swc --write
+swctools morphology set-radius ./data/single-soma.swc --node-id 42 --radius 0.75 --write
+```
+
+### C. Simplification (RDP)
+
+```bash
+swctools morphology simplify ./data/single-soma.swc --write
 ```
 
 Prints rule guide before processing and writes simplification log.
+
+---
+
+## Geometry Editing Tutorials
+
+### A. Connect two nodes
+
+```bash
+swctools geometry connect ./data/single-soma.swc --start-id 10 --end-id 22 --write
+```
+
+### B. Disconnect a path
+
+```bash
+swctools geometry disconnect ./data/single-soma.swc --start-id 10 --end-id 22 --write
+```
+
+### C. Move a subtree
+
+```bash
+swctools geometry move-subtree ./data/single-soma.swc --root-id 40 --x 100 --y 120 --z 5 --write
+```
 
 ---
 

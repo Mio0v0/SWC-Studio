@@ -9,6 +9,17 @@ from pathlib import Path
 from typing import Any
 
 from swctools.core.auto_typing import RuleBatchOptions, get_auto_rules_config, run_rule_batch
+from swctools.core.custom_types import label_for_type
+from swctools.core.geometry_editing import (
+    disconnect_branch,
+    delete_node,
+    delete_subtree,
+    insert_node_between,
+    move_node_absolute,
+    move_subtree_absolute,
+    reconnect_branch,
+    reindex_dataframe_with_map,
+)
 from swctools.core.swc_io import (
     SWC_COLS,
     parse_swc_text_preserve_tokens,
@@ -54,6 +65,7 @@ def run_auto_typing_folder(folder: str, options: RuleBatchOptions | None = None)
 __all__ = [
     "SWC_COLS",
     "RuleBatchOptions",
+    "label_for_type",
     "parse_swc_text",
     "write_swc_bytes",
     "validate_text",
@@ -62,4 +74,12 @@ __all__ = [
     "split_by_soma_roots",
     "run_auto_typing_folder",
     "get_auto_rules_config",
+    "move_node_absolute",
+    "move_subtree_absolute",
+    "reconnect_branch",
+    "disconnect_branch",
+    "delete_node",
+    "delete_subtree",
+    "insert_node_between",
+    "reindex_dataframe_with_map",
 ]

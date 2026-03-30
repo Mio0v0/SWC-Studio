@@ -21,6 +21,7 @@ Top-level tools:
 - `validation`
 - `visualization`
 - `morphology`
+- `geometry`
 - `atlas`
 - `analysis`
 - `plugins`
@@ -131,6 +132,34 @@ Example:
 swctools batch radii-clean ./data/single-soma.swc --threshold-mode absolute --abs-min 0.05 --abs-max 20
 ```
 
+### `swctools batch simplify <folder>`
+
+- Purpose: run simplification on every SWC file in a folder
+
+Options:
+
+- `--config-json JSON`
+
+Example:
+
+```bash
+swctools batch simplify ./data
+```
+
+### `swctools batch index-clean <folder>`
+
+- Purpose: reorder and reindex every SWC file in a folder so parents come before children and IDs become continuous
+
+Options:
+
+- `--config-json JSON`
+
+Example:
+
+```bash
+swctools batch index-clean ./data
+```
+
 ## `validation`
 
 ### `swctools validation rule-guide`
@@ -190,6 +219,22 @@ Options:
 - `--abs-max FLOAT`
 - `--config-json JSON`
 
+### `swctools validation index-clean <file>`
+
+- Purpose: reorder and reindex one SWC file
+
+Options:
+
+- `--write`
+- `--out PATH`
+- `--config-json JSON`
+
+Example:
+
+```bash
+swctools validation index-clean ./data/single-soma.swc --write
+```
+
 ## `visualization`
 
 ### `swctools visualization mesh-editing <file>`
@@ -237,6 +282,79 @@ Example:
 ```bash
 swctools morphology smart-decimation ./data/single-soma.swc --write
 ```
+
+### `swctools morphology simplify <file>`
+
+- Purpose: same shared simplification backend as `smart-decimation`, with a shorter current name
+
+Options:
+
+- `--write`
+- `--out PATH`
+- `--config-json JSON`
+
+### `swctools morphology set-radius <file> --node-id N --radius R`
+
+- Purpose: set one node radius directly
+
+Options:
+
+- `--node-id INT` (required)
+- `--radius FLOAT` (required)
+- `--write`
+- `--out PATH`
+- `--config-json JSON`
+
+Example:
+
+```bash
+swctools morphology set-radius ./data/single-soma.swc --node-id 42 --radius 0.75 --write
+```
+
+## `geometry`
+
+These commands expose the same core geometry editing operations used by the app.
+
+### `swctools geometry move-node <file> --node-id N --x X --y Y --z Z`
+
+- Purpose: move one node to absolute coordinates
+
+### `swctools geometry move-subtree <file> --root-id N --x X --y Y --z Z`
+
+- Purpose: move a whole subtree by setting the subtree root to absolute coordinates
+
+### `swctools geometry connect <file> --start-id A --end-id B`
+
+- Purpose: connect nodes by setting `parent(end) = start`
+
+### `swctools geometry disconnect <file> --start-id A --end-id B`
+
+- Purpose: disconnect every parent-child edge along the path between start and end
+
+### `swctools geometry delete-node <file> --node-id N`
+
+- Purpose: delete one node
+
+Options:
+
+- `--reconnect-children`
+- `--write`
+- `--out PATH`
+
+### `swctools geometry delete-subtree <file> --root-id N`
+
+- Purpose: delete one subtree
+
+### `swctools geometry insert <file> --start-id A [--end-id B] --x X --y Y --z Z`
+
+- Purpose: insert a new node after start and optionally before end
+
+Options:
+
+- `--radius FLOAT`
+- `--type-id INT`
+- `--write`
+- `--out PATH`
 
 ## `atlas`
 
@@ -330,6 +448,7 @@ Typical reports include:
 
 - `*_validation_report.txt`
 - `*_batch_validation_report.txt`
+- `*_index_clean_report.txt`
 - `split_report.txt`
 - `*_radii_cleaning_report.txt`
 - `*_auto_typing_report.txt`

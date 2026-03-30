@@ -20,17 +20,23 @@ Top-level tool areas:
 2. Validation
 3. Visualization
 4. Morphology Editing
-5. Atlas Registration (placeholder)
-6. Analysis (placeholder)
+5. Geometry Editing
+6. Atlas Registration (placeholder)
+7. Analysis (placeholder)
 
 Core workflows currently include:
 
 - SWC split by soma-root trees
+- Batch simplification
+- Batch index clean
 - Rule-based auto typing
 - Single-file and batch validation
+- Validation index clean
 - Radius outlier cleaning
+- Manual single-node radius editing
 - Dendrogram subtree type reassignment
-- Smart Decimation (RDP-based simplification)
+- Simplification (graph-aware RDP)
+- Geometry editing operations for move/connect/disconnect/delete/insert
 
 ## Documentation
 
@@ -159,12 +165,17 @@ swctools batch split ./data
 swctools batch validate ./data
 swctools batch auto-typing ./data --soma --axon --basal
 swctools batch radii-clean ./data
+swctools batch simplify ./data
+swctools batch index-clean ./data
 
 swctools validation rule-guide
 swctools validation run ./data/single-soma.swc
 swctools validation auto-fix ./data/single-soma.swc --write
+swctools validation index-clean ./data/single-soma.swc --write
 
-swctools morphology smart-decimation ./data/single-soma.swc --write
+swctools morphology simplify ./data/single-soma.swc --write
+swctools morphology set-radius ./data/single-soma.swc --node-id 42 --radius 0.75 --write
+swctools geometry connect ./data/single-soma.swc --start-id 10 --end-id 22 --write
 
 swctools plugins load my_lab_plugins.brainglobe_adapter
 swctools plugins list-loaded
@@ -177,12 +188,17 @@ swctools batch split .\data
 swctools batch validate .\data
 swctools batch auto-typing .\data --soma --axon --basal
 swctools batch radii-clean .\data
+swctools batch simplify .\data
+swctools batch index-clean .\data
 
 swctools validation rule-guide
 swctools validation run .\data\single-soma.swc
 swctools validation auto-fix .\data\single-soma.swc --write
+swctools validation index-clean .\data\single-soma.swc --write
 
-swctools morphology smart-decimation .\data\single-soma.swc --write
+swctools morphology simplify .\data\single-soma.swc --write
+swctools morphology set-radius .\data\single-soma.swc --node-id 42 --radius 0.75 --write
+swctools geometry connect .\data\single-soma.swc --start-id 10 --end-id 22 --write
 
 swctools plugins load my_lab_plugins.brainglobe_adapter
 swctools plugins list-loaded

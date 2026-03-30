@@ -53,6 +53,14 @@ Runs rule-based auto typing over a folder.
 
 Runs radii cleaning on a folder.
 
+#### `batch_simplify_folder(folder, *, config_overrides=None) -> dict`
+
+Runs simplification on all SWC files in a folder.
+
+#### `batch_index_clean_folder(folder, *, config_overrides=None) -> dict`
+
+Runs index clean on all SWC files in a folder.
+
 #### `radii_clean_path(path, *, config_overrides=None) -> dict`
 
 Runs radii cleaning on either one file or one folder.
@@ -79,6 +87,14 @@ Runs sanitize + validation from file, optionally writes output.
 
 Runs the shared auto-typing logic on a single file.
 
+#### `validation_index_clean_text(swc_text, *, config_overrides=None) -> dict`
+
+Runs validation index clean in memory.
+
+#### `validation_index_clean_file(path, *, out_path=None, write_output=False, config_overrides=None) -> dict`
+
+Runs validation index clean on one file.
+
 ### Visualization
 
 #### `build_mesh_from_text(swc_text, *, config_overrides=None) -> dict`
@@ -99,6 +115,14 @@ Reassigns subtree node types in memory.
 
 File wrapper for subtree type reassignment.
 
+#### `morphology_set_node_radius_text(swc_text, *, node_id, radius, config_overrides=None) -> dict`
+
+Sets one node radius in memory.
+
+#### `morphology_set_node_radius_file(path, *, node_id, radius, out_path=None, write_output=False, config_overrides=None) -> dict`
+
+File wrapper for single-node radius editing.
+
 #### `morphology_smart_decimation_text(swc_text, *, config_overrides=None) -> dict`
 
 Runs graph-aware RDP simplification from text.
@@ -106,6 +130,19 @@ Runs graph-aware RDP simplification from text.
 #### `morphology_smart_decimation_file(path, *, out_path=None, write_output=False, config_overrides=None) -> dict`
 
 File wrapper for smart decimation. Produces simplification log file.
+
+### Geometry Editing
+
+These functions expose the shared geometry-editing core used by the app:
+
+- `geometry_move_node_absolute(df, node_id, x, y, z)`
+- `geometry_move_subtree_absolute(df, root_id, x, y, z)`
+- `geometry_reconnect_branch(df, source_id, target_id)`
+- `geometry_disconnect_branch(df, start_id, end_id)`
+- `geometry_delete_node(df, node_id, reconnect_children=False)`
+- `geometry_delete_subtree(df, root_id)`
+- `geometry_insert_node_between(df, start_id, end_id, x, y, z, radius=None, type_id=None)`
+- `geometry_reindex_dataframe_with_map(df)`
 
 ### Atlas Registration (placeholder)
 
@@ -191,6 +228,10 @@ These are callable if you want per-feature direct imports.
   - `clean_file(...)`
   - `clean_folder(...)`
   - `clean_path(...)`
+- `swctools.tools.batch_processing.features.simplification`
+  - `run_folder(...)`
+- `swctools.tools.batch_processing.features.index_clean`
+  - `run_folder(...)`
 
 ## Validation
 
@@ -206,6 +247,9 @@ These are callable if you want per-feature direct imports.
   - `clean_path(...)`
   - `clean_file(...)`
   - `clean_folder(...)`
+- `swctools.tools.validation.features.index_clean`
+  - `index_clean_text(...)`
+  - `index_clean_file(...)`
 
 ## Visualization
 
@@ -218,6 +262,13 @@ These are callable if you want per-feature direct imports.
 - `swctools.tools.morphology_editing.features.dendrogram_editing`
   - `reassign_subtree_types(...)`
   - `reassign_subtree_types_in_file(...)`
+- `swctools.tools.morphology_editing.features.manual_radii`
+  - `set_node_radius_text(...)`
+  - `set_node_radius_file(...)`
+- `swctools.tools.morphology_editing.features.simplification`
+  - `simplify_dataframe(...)`
+  - `simplify_swc_text(...)`
+  - `simplify_file(...)`
 - `swctools.tools.morphology_editing.features.simplification`
   - `simplify_dataframe(...)`
   - `simplify_swc_text(...)`

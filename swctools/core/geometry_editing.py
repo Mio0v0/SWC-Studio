@@ -7,7 +7,8 @@ from typing import Any
 
 import pandas as pd
 
-from swctools.gui.constants import SWC_COLS, label_for_type
+from swctools.core.custom_types import label_for_type
+from swctools.core.swc_io import SWC_COLS
 
 
 @dataclass
@@ -130,13 +131,22 @@ def reindex_dataframe_with_map(df: pd.DataFrame) -> tuple[pd.DataFrame, dict[int
     seen: set[int] = set()
 
     def _visit(node_id: int):
-        if int(node_id) in seen or int(node_id) not in row_by_id:
+        start_id = int(node_id)
+        if start_id in seen or start_id not in row_by_id:
             return
-        seen.add(int(node_id))
-        ordered_ids.append(int(node_id))
-        children = sorted(children_by_id.get(int(node_id), []), key=lambda nid: order_pos.get(int(nid), 10**9))
-        for child_id in children:
-            _visit(int(child_id))
+        stack: list[int] = [start_id]
+        while stack:
+            current = int(stack.pop())
+            if current in seen or current not in row_by_id:
+                continue
+            seen.add(current)
+            ordered_ids.append(current)
+            children = sorted(
+                children_by_id.get(current, []),
+                key=lambda nid: order_pos.get(int(nid), 10**9),
+                reverse=True,
+            )
+            stack.extend(int(child_id) for child_id in children)
 
     for root_id in roots:
         _visit(int(root_id))
