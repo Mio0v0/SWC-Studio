@@ -76,7 +76,7 @@ class ContextInspectorWidget(QWidget):
         self._root.addWidget(self._suggested_solution)
 
         action_row = QHBoxLayout()
-        self._btn_skip = QPushButton("Skip")
+        self._btn_skip = QPushButton("Mute")
         self._btn_skip.clicked.connect(self._on_skip_clicked)
         action_row.addWidget(self._btn_skip)
 
@@ -140,7 +140,7 @@ class ContextInspectorWidget(QWidget):
         self._suggested_solution.setText(suggested_solution)
         self._detail_text.setPlainText("")
         self._btn_skip.setEnabled(False)
-        self._btn_skip.setText("Skip")
+        self._btn_skip.setText("Mute")
         self._btn_skip.setVisible(False)
         self._btn_apply_fix.setEnabled(False)
         self._btn_apply_fix.setVisible(False)
@@ -177,7 +177,8 @@ class ContextInspectorWidget(QWidget):
         self._btn_expand_detail.setVisible(bool(detail_text.strip()))
 
         self._btn_skip.setEnabled(bool(self._current_issue_id))
-        self._btn_skip.setText("Restore" if str(issue.get("status", "")).strip().lower() == "skipped" else "Skip")
+        status_text = str(issue.get("status", "")).strip().lower()
+        self._btn_skip.setText("Unmute" if status_text in {"muted", "skipped"} else "Mute")
 
         tool_target = str(issue.get("tool_target", "validation")).strip() or "validation"
         self._btn_open_tool.setEnabled(True)
@@ -192,7 +193,6 @@ class ContextInspectorWidget(QWidget):
         custom_primary = str(ctx.get("custom_primary_label", "")).strip()
         custom_primary_action = str(ctx.get("custom_primary_action", "")).strip()
         if custom_primary and custom_primary_action:
-            self._btn_skip.setVisible(False)
             self._btn_apply_fix.setVisible(False)
             self._btn_open_tool.setVisible(True)
             self._btn_open_tool.setEnabled(True)
@@ -215,8 +215,6 @@ class ContextInspectorWidget(QWidget):
             self._btn_secondary.setText("")
             self._btn_secondary.setProperty("action_id", "")
 
-        if bool(ctx.get("hide_skip_button")):
-            self._btn_skip.setVisible(False)
         if bool(ctx.get("hide_apply_button")):
             self._btn_apply_fix.setVisible(False)
         hide_detail = bool(ctx.get("hide_detail_section"))
@@ -228,7 +226,7 @@ class ContextInspectorWidget(QWidget):
     def _on_skip_clicked(self):
         if not self._current_issue_id:
             return
-        skipping = self._btn_skip.text().strip().lower() == "skip"
+        skipping = self._btn_skip.text().strip().lower() == "mute"
         self.skip_issue_requested.emit(self._current_issue_id, skipping)
 
     def _on_apply_fix_clicked(self):

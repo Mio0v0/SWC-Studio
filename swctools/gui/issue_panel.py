@@ -27,6 +27,7 @@ _SEVERITY_META = {
     "critical": ("Critical", "#d14343"),
     "warning": ("Warning", "#d98a00"),
     "info": ("Info", "#4460d8"),
+    "muted": ("Muted", "#6b7280"),
 }
 _BLOCKING_ROLE = Qt.UserRole + 10
 
@@ -148,26 +149,29 @@ class IssuePanelWidget(QWidget):
         query = self._search.text().strip().lower()
         filtered = [item for item in self._issues if self._issue_matches(item, query)]
         counts = Counter(str(item.get("severity", "info")) for item in filtered)
-        skipped = sum(1 for item in filtered if str(item.get("status", "")) == "skipped")
+        muted = sum(1 for item in filtered if str(item.get("status", "")).strip().lower() in {"muted", "skipped"})
         total = len(filtered)
         self._summary.setText(
             f"{total} visible issue(s) · "
             f"{counts.get('critical', 0)} critical · "
             f"{counts.get('warning', 0)} warning · "
             f"{counts.get('info', 0)} info · "
-            f"{skipped} skipped"
+            f"{muted} muted"
         )
 
         self._tree.clear()
         groups: dict[str, QTreeWidgetItem] = {}
-        for key in ("critical", "warning", "info"):
+        for key in ("critical", "warning", "info", "muted"):
             label, color = _SEVERITY_META[key]
             top = QTreeWidgetItem([f"{label}", ""])
             top.setFirstColumnSpanned(True)
             top.setExpanded(True)
             top.setForeground(0, Qt.GlobalColor.black)
             top.setData(0, Qt.UserRole, None)
-            top.setText(0, f"{label} ({counts.get(key, 0)})")
+            if key == "muted":
+                top.setText(0, f"{label} ({muted})")
+            else:
+                top.setText(0, f"{label} ({counts.get(key, 0)})")
             top.setBackground(0, Qt.transparent)
             top.setForeground(0, self.palette().text())
             groups[key] = top
@@ -175,6 +179,7 @@ class IssuePanelWidget(QWidget):
 
         for issue in filtered:
             severity = str(issue.get("severity", "info"))
+            status = str(issue.get("status", "")).strip().lower()
             item = QTreeWidgetItem([str(issue.get("title", "Issue"))])
             item.setData(0, Qt.UserRole, dict(issue))
             item.setToolTip(0, str(issue.get("description", "")))
@@ -189,9 +194,11 @@ class IssuePanelWidget(QWidget):
                 item.setText(0, title)
                 item.setSizeHint(0, QSize(0, 36))
                 item.setData(0, _BLOCKING_ROLE, False)
-            if str(issue.get("status", "")) == "skipped":
+            if status in {"muted", "skipped"}:
                 item.setForeground(0, Qt.gray)
-            groups.get(severity, groups["info"]).addChild(item)
+                groups["muted"].addChild(item)
+            else:
+                groups.get(severity, groups["info"]).addChild(item)
 
         for key, top in groups.items():
             if top.childCount() == 0:

@@ -50,7 +50,7 @@ from .radii_cleaning_panel import RadiiCleaningPanel
 from .simplification_panel import SimplificationPanel
 from .swc_table_widget import SWCTableWidget
 from .validation_auto_label_panel import ValidationAutoLabelPanel
-from .validation_tab import ValidationPrecheckWidget, ValidationTabWidget
+from .validation_tab import ValidationIndexCleanWidget, ValidationPrecheckWidget, ValidationTabWidget
 from swctools.core.issues import (
     issues_from_radii_suspicion,
     issues_from_type_suspicion,
@@ -294,6 +294,9 @@ class SWCMainWindow(QMainWindow):
         self._validation_tab = ValidationTabWidget(as_panel=False)
         self._validation_tab.precheck_requested.connect(self._on_precheck_requested)
         self._validation_tab.report_ready.connect(self._on_validation_report_ready)
+        self._validation_tab.result_activated.connect(self._on_validation_result_activated)
+        self._validation_index_clean = ValidationIndexCleanWidget(self)
+        self._validation_index_clean.index_clean_requested.connect(self._on_validation_index_clean_requested)
         self._validation_auto_label_panel = ValidationAutoLabelPanel(self)
         self._validation_auto_label_panel.guide_requested.connect(self._show_auto_typing_guide_floating)
         self._validation_auto_label_panel.log_message.connect(lambda msg: self._append_log(msg, "AUTO"))
@@ -802,7 +805,7 @@ class SWCMainWindow(QMainWindow):
     def _tool_feature_labels(self, tool_key: str | None = None) -> list[str]:
         key = str(tool_key if tool_key is not None else (self._active_tool or "")).strip().lower()
         mapping = {
-            "batch": ["Split", "Validation", "Auto Label", "Radii Cleaning"],
+            "batch": ["Split", "Validation", "Auto Label", "Radii Cleaning", "Simplification", "Index Clean"],
             "validation": ["Validation"],
             "visualization": ["View Controls"],
             "morphology_editing": ["Label Editing", "Auto Label", "Manual Radii Editing", "Auto Radii Editing", "Simplification"],
@@ -1007,6 +1010,7 @@ class SWCMainWindow(QMainWindow):
             self._set_issue_status([])
             self._context_inspector.clear()
             self._validation_radii_panel.set_loaded_swc(None, "", "")
+            self._validation_index_clean.set_loaded_swc(None)
             self._manual_radii_panel.set_loaded_swc(None, "")
             self._geometry_panel.set_loaded_swc(None)
             self._geometry_panel.set_current_node(None)
@@ -1027,6 +1031,7 @@ class SWCMainWindow(QMainWindow):
         self._update_info_label(doc.df, n_roots, n_soma, filename=doc.filename)
         self._refresh_morph_edit_tab(doc)
         self._validation_radii_panel.set_loaded_swc(doc.df, doc.filename, doc.file_path)
+        self._validation_index_clean.set_loaded_swc(doc.df)
         self._manual_radii_panel.set_loaded_swc(doc.df, doc.filename)
         self._geometry_panel.set_loaded_swc(doc.df)
         self._geometry_panel.set_current_node(None)
@@ -2150,10 +2155,16 @@ class SWCMainWindow(QMainWindow):
             self._control_tabs.addTab(self._wrap_control_widget(self._batch_tab.validation_tab_widget()), "Validation")
             self._control_tabs.addTab(self._wrap_control_widget(self._batch_tab.auto_tab_widget()), "Auto Label")
             self._control_tabs.addTab(self._wrap_control_widget(self._batch_tab.radii_tab_widget()), "Radii Cleaning")
+            self._control_tabs.addTab(self._wrap_control_widget(self._batch_tab.simplify_tab_widget()), "Simplification")
+            self._control_tabs.addTab(self._wrap_control_widget(self._batch_tab.index_clean_tab_widget()), "Index Clean")
             current_idx = 0
         elif key == "validation":
             self._control_tabs.addTab(self._wrap_control_widget(self._validation_tab), "Validation")
-            current_idx = 0
+            self._control_tabs.addTab(self._wrap_control_widget(self._validation_index_clean), "Index Clean")
+            current_idx = {
+                "validation": 0,
+                "index clean": 1,
+            }.get(previous_label, 0)
         elif key in ("morphology_editing", "dendrogram"):
             doc = self._active_document()
             if doc is None:
@@ -2781,14 +2792,14 @@ class SWCMainWindow(QMainWindow):
         critical = sum(1 for item in issues if str(item.get("severity", "")) == "critical")
         warning = sum(1 for item in issues if str(item.get("severity", "")) == "warning")
         info = sum(1 for item in issues if str(item.get("severity", "")) == "info")
-        skipped = sum(1 for item in issues if str(item.get("status", "")) == "skipped")
+        skipped = sum(1 for item in issues if str(item.get("status", "")).strip().lower() in {"muted", "skipped"})
         fixed = 0
         doc = self._active_document()
         if doc is not None:
             fixed = int(doc.fixed_issue_count)
         self._issue_status_label.setText(
             f"Issues: {len(issues)} total · {critical} critical · {warning} warning · "
-            f"{info} info · {skipped} skipped · {fixed} fixed"
+            f"{info} info · {skipped} muted · {fixed} fixed"
         )
 
     def _build_all_issues_for_document(self, doc: _DocumentState, report: dict) -> list[dict]:
@@ -2858,7 +2869,7 @@ class SWCMainWindow(QMainWindow):
             return (
                 0 if source_key == "has_soma" else 1,
                 {"critical": 0, "warning": 1, "info": 2}.get(severity, 9),
-                {"open": 0, "skipped": 1, "fixed": 2}.get(status, 9),
+                {"open": 0, "muted": 1, "skipped": 1, "fixed": 2}.get(status, 9),
                 {"rule": 0, "suspicious": 1, "ai": 2}.get(certainty, 9),
                 str(item.get("title", "")).lower(),
             )
@@ -2879,7 +2890,9 @@ class SWCMainWindow(QMainWindow):
         issue_ids = {str(item.get("issue_id", "")) for item in issues}
         for item in issues:
             issue_id = str(item.get("issue_id", "")).strip()
-            status = str(doc.issue_status_overrides.get(issue_id, "open")).strip()
+            status = str(doc.issue_status_overrides.get(issue_id, "open")).strip().lower()
+            if status == "skipped":
+                status = "muted"
             if status:
                 item["status"] = status
         if doc.pending_resolved_issue_ids:
@@ -2890,7 +2903,7 @@ class SWCMainWindow(QMainWindow):
         doc.issue_status_overrides = {
             issue_id: status
             for issue_id, status in doc.issue_status_overrides.items()
-            if issue_id in issue_ids and status in {"skipped"}
+            if issue_id in issue_ids and status in {"muted", "skipped"}
         }
         doc.issues = issues
         self._apply_issue_state(doc)
@@ -2919,6 +2932,40 @@ class SWCMainWindow(QMainWindow):
         if not issues:
             return
         self._on_issue_selected(issues[0])
+
+    def _summarize_id_remap(self, id_map: dict[int, int], *, limit: int = 16) -> list[str]:
+        mapping = {int(k): int(v) for k, v in dict(id_map or {}).items()}
+        changed = [(old_id, new_id) for old_id, new_id in sorted(mapping.items()) if int(old_id) != int(new_id)]
+        if not changed:
+            return ["Node IDs were already in the desired order; no remap was needed."]
+        preview = [f"{old_id} -> {new_id}" for old_id, new_id in changed[:limit]]
+        if len(changed) > limit:
+            preview.append(f"... {len(changed) - limit} more")
+        return preview
+
+    def _on_validation_index_clean_requested(self, new_df: object, id_map: object):
+        doc = self._active_source_document()
+        if doc is None or doc.df is None or doc.df.empty:
+            self._append_log("Validation: no active SWC document for Index Clean.", "WARN")
+            return
+        if not isinstance(new_df, pd.DataFrame) or new_df.empty:
+            self._append_log("Validation: Index Clean did not produce a valid SWC.", "WARN")
+            return
+        details = [
+            "Validation Index Clean reordered the SWC so parents come before children.",
+            "Node IDs are now continuous with parent IDs remapped to match the new ordering.",
+            *self._summarize_id_remap(dict(id_map or {})),
+        ]
+        self._apply_document_dataframe(
+            doc,
+            new_df,
+            event_title="Validation Index Clean",
+            event_summary="Reordered and reindexed the SWC for clean parent-before-child indexing.",
+            event_details=details,
+            record_type_changes=False,
+        )
+        self._append_log("Validation: Index Clean applied.", "INFO")
+        self._rerun_active_validation()
 
     def _focus_issue(self, issue: dict):
         doc = self._active_document()
@@ -2973,6 +3020,10 @@ class SWCMainWindow(QMainWindow):
             self._activate_feature("geometry_editing")
             self._select_control_tab_by_label("geometry editing")
             return
+        if tool_target == "index_clean":
+            self._activate_feature("validation")
+            self._select_control_tab_by_label("index clean")
+            return
         self._activate_feature("validation")
         self._select_control_tab_by_label("validation")
 
@@ -3007,6 +3058,7 @@ class SWCMainWindow(QMainWindow):
             "suggested_solution": str(issue.get("suggested_fix", "")).strip() or "Inspect the affected morphology and fix the prerequisite issue first.",
             "tool_button_label": {
                 "validation": "Open Validation",
+                "index_clean": "Open Index Clean",
                 "radii_cleaning": "Open Auto Radii Editing",
                 "manual_radii": "Open Manual Radii Editing",
                 "auto_label": "Open Auto Labeling",
@@ -3628,12 +3680,12 @@ class SWCMainWindow(QMainWindow):
         if not key:
             return
         if skipping:
-            doc.issue_status_overrides[key] = "skipped"
+            doc.issue_status_overrides[key] = "muted"
         else:
             doc.issue_status_overrides.pop(key, None)
         for item in doc.issues:
             if str(item.get("issue_id", "")).strip() == key:
-                item["status"] = "skipped" if skipping else "open"
+                item["status"] = "muted" if skipping else "open"
         self._apply_issue_state(doc)
         if self._issue_panel.select_issue(key):
             self._on_issue_selected(next((item for item in doc.issues if str(item.get("issue_id", "")).strip() == key), None) or {})

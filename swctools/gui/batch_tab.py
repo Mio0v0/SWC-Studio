@@ -1,7 +1,10 @@
-"""Batch processing controls for split, auto-labeling, and radii cleaning."""
+"""Batch processing controls for split, validation, auto-labeling, radii cleaning, simplification, and index clean."""
 
 import os
 import json
+from pathlib import Path
+
+import pandas as pd
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
@@ -21,10 +24,15 @@ from swctools.core.auto_typing import (
     get_auto_rules_config,
     save_auto_rules_config,
 )
-from swctools.core.config import feature_config_path
+from swctools.core.config import feature_config_path, load_feature_config
+from swctools.core.geometry_editing import reindex_dataframe_with_map
+from swctools.core.reporting import write_text_report
+from swctools.core.swc_io import parse_swc_text_preserve_tokens, write_swc_to_bytes_preserve_tokens
 from swctools.tools.batch_processing.features.auto_typing import run_folder as run_auto_typing
 from swctools.tools.batch_processing.features.batch_validation import validate_folder as run_batch_validation
 from swctools.tools.batch_processing.features.swc_splitter import split_folder
+from swctools.tools.morphology_editing.features.simplification import DEFAULT_CONFIG as _SIMPLIFY_DEFAULT_CFG
+from swctools.tools.morphology_editing.features.simplification import simplify_dataframe
 from .report_popup import ReportPopupDialog
 from .constants import color_for_type
 from .radii_cleaning_panel import RadiiCleaningPanel
@@ -116,6 +124,8 @@ class BatchTabWidget(QWidget):
         self._auto_page = self._build_auto_page()
         self._validation_page = self._build_validation_page()
         self._radii_page = self._build_radii_page()
+        self._simplify_page = self._build_simplify_page()
+        self._index_clean_page = self._build_index_clean_page()
 
         # This root widget is not shown directly; pages are used in main window tabs.
         root = QVBoxLayout(self)
@@ -134,6 +144,12 @@ class BatchTabWidget(QWidget):
 
     def validation_tab_widget(self) -> QWidget:
         return self._validation_page
+
+    def simplify_tab_widget(self) -> QWidget:
+        return self._simplify_page
+
+    def index_clean_tab_widget(self) -> QWidget:
+        return self._index_clean_page
 
     def set_loaded_swc(self, df, filename: str, file_path: str = ""):
         page = self._radii_page
@@ -255,6 +271,52 @@ class BatchTabWidget(QWidget):
         root.addStretch(1)
         return page
 
+    def _build_simplify_page(self) -> QWidget:
+        page = QWidget()
+        root = QVBoxLayout(page)
+        root.setContentsMargins(8, 8, 8, 8)
+        root.setSpacing(8)
+        root.setAlignment(Qt.AlignTop)
+
+        desc = QLabel(
+            "Run the same Simplification workflow on all SWC files in a folder.\n"
+            "Output folder: <selected>/<selected>_simplified"
+        )
+        desc.setWordWrap(True)
+        desc.setStyleSheet("font-size: 12px; color: #555;")
+        root.addWidget(desc)
+
+        self._btn_batch_simplify = QPushButton("Run")
+        self._btn_batch_simplify.clicked.connect(self._on_run_batch_simplify)
+        root.addWidget(self._btn_batch_simplify)
+
+        self._batch_simplify_status = self._new_status_box()
+        root.addWidget(self._batch_simplify_status, stretch=1)
+        return page
+
+    def _build_index_clean_page(self) -> QWidget:
+        page = QWidget()
+        root = QVBoxLayout(page)
+        root.setContentsMargins(8, 8, 8, 8)
+        root.setSpacing(8)
+        root.setAlignment(Qt.AlignTop)
+
+        desc = QLabel(
+            "Reorder and reindex all SWC files in a folder so parents come before children and IDs become continuous.\n"
+            "Output folder: <selected>/<selected>_index_clean"
+        )
+        desc.setWordWrap(True)
+        desc.setStyleSheet("font-size: 12px; color: #555;")
+        root.addWidget(desc)
+
+        self._btn_batch_index_clean = QPushButton("Run")
+        self._btn_batch_index_clean.clicked.connect(self._on_run_batch_index_clean)
+        root.addWidget(self._btn_batch_index_clean)
+
+        self._batch_index_clean_status = self._new_status_box()
+        root.addWidget(self._batch_index_clean_status, stretch=1)
+        return page
+
     def _new_status_box(self) -> QPlainTextEdit:
         w = QPlainTextEdit()
         w.setReadOnly(True)
@@ -304,6 +366,21 @@ class BatchTabWidget(QWidget):
             if cb.isChecked():
                 flags.append(cb.text())
         return flags
+
+    def _folder_swc_files(self, folder_path: str) -> list[Path]:
+        base = Path(folder_path)
+        return sorted(
+            [
+                p for p in base.iterdir()
+                if p.is_file() and p.suffix.lower() == ".swc"
+            ],
+            key=lambda p: p.name.lower(),
+        )
+
+    def _write_batch_report(self, out_dir: Path, name: str, lines: list[str]) -> str:
+        out_dir.mkdir(parents=True, exist_ok=True)
+        report_path = out_dir / name
+        return write_text_report(report_path, "\n".join(lines).rstrip() + "\n")
 
     def _on_edit_auto_typing_json(self):
         if self._config_dialog is None:
@@ -434,3 +511,116 @@ class BatchTabWidget(QWidget):
         self._batch_validation_status.setText(msg)
         self.log_message.emit(msg)
         self.batch_validation_ready.emit(out)
+
+    def _on_run_batch_simplify(self):
+        folder_path = QFileDialog.getExistingDirectory(self, "Select folder with SWC files for batch simplification")
+        if not folder_path:
+            self._set_status("Batch simplification cancelled.", self._batch_simplify_status)
+            return
+        swc_files = self._folder_swc_files(folder_path)
+        if not swc_files:
+            self._set_status(f"No .swc files found in:\n{folder_path}", self._batch_simplify_status)
+            return
+
+        out_dir = Path(folder_path) / f"{Path(folder_path).name}_simplified"
+        out_dir.mkdir(parents=True, exist_ok=True)
+        cfg = load_feature_config("morphology_editing", "simplification", default=_SIMPLIFY_DEFAULT_CFG)
+        processed = 0
+        failures: list[str] = []
+        per_file: list[str] = []
+
+        for swc_path in swc_files:
+            try:
+                text = swc_path.read_text(encoding="utf-8", errors="ignore")
+                df = parse_swc_text_preserve_tokens(text)
+                result = simplify_dataframe(df, config_overrides=dict(cfg))
+                out_df = result.get("dataframe")
+                if not isinstance(out_df, pd.DataFrame) or out_df.empty:
+                    raise ValueError("simplification produced empty output")
+                out_path = out_dir / f"{swc_path.stem}_simplified{swc_path.suffix}"
+                out_path.write_bytes(write_swc_to_bytes_preserve_tokens(out_df))
+                processed += 1
+                per_file.append(
+                    f"{swc_path.name}: {int(result.get('original_node_count', 0))} -> "
+                    f"{int(result.get('new_node_count', 0))} nodes "
+                    f"({float(result.get('reduction_percent', 0.0)):.2f}%)"
+                )
+            except Exception as e:  # noqa: BLE001
+                failures.append(f"{swc_path.name}: {e}")
+
+        lines = [
+            "Batch Simplification Report",
+            "---------------------------",
+            f"Folder: {folder_path}",
+            f"Output folder: {out_dir}",
+            f"Detected SWC files: {len(swc_files)}",
+            f"Processed: {processed}",
+            f"Failed: {len(failures)}",
+            "",
+            "Per-file summary:",
+            *per_file[:100],
+        ]
+        if len(per_file) > 100:
+            lines.append(f"... ({len(per_file) - 100} more)")
+        if failures:
+            lines.extend(["", "Errors:", *failures[:50]])
+            if len(failures) > 50:
+                lines.append(f"... ({len(failures) - 50} more)")
+        report_path = self._write_batch_report(out_dir, "batch_simplification_report.txt", lines)
+        lines.extend(["", f"Report file: {report_path}"])
+        self._set_status("\n".join(lines), self._batch_simplify_status)
+        self._show_report_popup("Batch Simplification Report", report_path)
+
+    def _on_run_batch_index_clean(self):
+        folder_path = QFileDialog.getExistingDirectory(self, "Select folder with SWC files for batch index clean")
+        if not folder_path:
+            self._set_status("Batch index clean cancelled.", self._batch_index_clean_status)
+            return
+        swc_files = self._folder_swc_files(folder_path)
+        if not swc_files:
+            self._set_status(f"No .swc files found in:\n{folder_path}", self._batch_index_clean_status)
+            return
+
+        out_dir = Path(folder_path) / f"{Path(folder_path).name}_index_clean"
+        out_dir.mkdir(parents=True, exist_ok=True)
+        processed = 0
+        failures: list[str] = []
+        per_file: list[str] = []
+
+        for swc_path in swc_files:
+            try:
+                text = swc_path.read_text(encoding="utf-8", errors="ignore")
+                df = parse_swc_text_preserve_tokens(text)
+                clean_df, id_map = reindex_dataframe_with_map(df)
+                out_path = out_dir / f"{swc_path.stem}_index_clean{swc_path.suffix}"
+                out_path.write_bytes(write_swc_to_bytes_preserve_tokens(clean_df))
+                processed += 1
+                changed = sum(1 for old_id, new_id in dict(id_map).items() if int(old_id) != int(new_id))
+                per_file.append(
+                    f"{swc_path.name}: {len(df)} nodes -> {len(clean_df)} nodes, remapped IDs: {changed}"
+                )
+            except Exception as e:  # noqa: BLE001
+                failures.append(f"{swc_path.name}: {e}")
+
+        lines = [
+            "Batch Index Clean Report",
+            "------------------------",
+            f"Folder: {folder_path}",
+            f"Output folder: {out_dir}",
+            f"Detected SWC files: {len(swc_files)}",
+            f"Processed: {processed}",
+            f"Failed: {len(failures)}",
+            "",
+            "Per-file summary:",
+            *per_file[:100],
+        ]
+        if len(per_file) > 100:
+            lines.append(f"... ({len(per_file) - 100} more)")
+        if failures:
+            lines.extend(["", "Errors:", *failures[:50]])
+            if len(failures) > 50:
+                lines.append(f"... ({len(failures) - 50} more)")
+        report_path = self._write_batch_report(out_dir, "batch_index_clean_report.txt", lines)
+        lines.extend(["", f"Report file: {report_path}"])
+        self._set_status("\n".join(lines), self._batch_index_clean_status)
+        self._show_report_popup("Batch Index Clean Report", report_path)

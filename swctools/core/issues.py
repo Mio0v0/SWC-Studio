@@ -20,6 +20,7 @@ _SEVERITY_RANK = {
 _STATUS_RANK = {
     "open": 0,
     "fixing": 1,
+    "muted": 2,
     "skipped": 2,
     "fixed": 3,
 }
@@ -150,22 +151,19 @@ def _tool_target_for_key(key: str) -> tuple[str, str, str]:
         "has_basal_dendrite",
         "has_apical_dendrite",
     }
-    simplification_keys = {
+    geometry_edit_keys = {
         "all_section_lengths_nonzero",
         "all_segment_lengths_nonzero",
-        "no_single_child_chains",
-    }
-    geometry_edit_keys = {
         "no_duplicate_3d_points",
         "no_back_tracking",
         "no_dangling_branches",
         "no_self_loop",
         "no_flat_neurites",
+        "no_single_child_chains",
         "has_unifurcation",
         "has_multifurcation",
         "no_section_index_jumps",
         "no_root_index_jumps",
-        "parent_id_less_than_child_id",
         "no_extreme_spatial_jump",
     }
 
@@ -173,17 +171,17 @@ def _tool_target_for_key(key: str) -> tuple[str, str, str]:
         return ("radii", "manual_radii", "Use Manual Radii Editing to inspect and set individual node radii, or Auto Radii Editing for broader cleanup.")
     if key in label_keys:
         return ("label", "auto_label", "Use the Auto Label panel to assign missing neurite types, then rerun dependent checks automatically.")
-    if key in simplification_keys:
-        return (
-            "geometry",
-            "simplification",
-            "Open Simplification to collapse redundant points or inspect short/duplicate geometry.",
-        )
     if key in geometry_edit_keys:
         return (
             "geometry",
             "geometry_editing",
             "Open Geometry Editing to inspect the highlighted nodes, isolate local structure, and repair connectivity or coordinates manually.",
+        )
+    if key == "parent_id_less_than_child_id":
+        return (
+            "index",
+            "index_clean",
+            "Use Validation -> Index Clean to reorder the SWC so parents appear before children and IDs become continuous.",
         )
     if key == "valid_soma_format":
         return (

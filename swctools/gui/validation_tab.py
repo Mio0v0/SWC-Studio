@@ -11,18 +11,20 @@ import numpy as np
 import pandas as pd
 
 from PySide6.QtCore import QObject, QThread, Qt, QUrl, Signal, Slot
-from PySide6.QtGui import QDesktopServices, QFont
+from PySide6.QtGui import QBrush, QColor, QDesktopServices, QFont
 from PySide6.QtWidgets import QFileDialog, QHBoxLayout, QLabel, QPlainTextEdit, QPushButton, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget
 
 from swctools.core.config import feature_config_path, load_feature_config
+from swctools.core.geometry_editing import reindex_dataframe_with_map
 from swctools.core.reporting import (
     format_validation_report_text,
     validation_log_path_for_file,
     write_text_report,
 )
 from swctools.core.validation import _split_swc_by_soma_roots
-from swctools.core.validation_catalog import CHECK_CATALOG, CHECK_ORDER, display_label_for_result
+from swctools.core.validation_catalog import CHECK_CATALOG, CHECK_ORDER, display_label_for_result, group_rows_by_category
 from swctools.tools.validation.features.core import run_checks_text
+from swctools.gui.constants import SWC_COLS
 
 _VALIDATION_CFG_PATH = feature_config_path("validation", "default")
 _VALIDATION_CFG = load_feature_config("validation", "default", default={"checks": {}})
@@ -142,6 +144,7 @@ class ValidationTabWidget(QWidget):
 
     precheck_requested = Signal()
     report_ready = Signal(dict)
+    result_activated = Signal(dict)
     def __init__(self, parent=None, as_panel: bool = True):
         super().__init__(parent)
         self._as_panel = as_panel
@@ -180,7 +183,19 @@ class ValidationTabWidget(QWidget):
         header.addWidget(self._btn_download_report)
         header.addStretch()
         results_root.addLayout(header)
-        results_root.addStretch()
+
+        self._status_label = QLabel("No validation report yet.")
+        self._status_label.setWordWrap(True)
+        self._status_label.setStyleSheet("font-size: 12px; color: #555;")
+        results_root.addWidget(self._status_label)
+
+        self._results_tree = QTreeWidget()
+        self._results_tree.setHeaderLabels(["Issue", "Status", "Detail"])
+        self._results_tree.setColumnWidth(0, 260)
+        self._results_tree.setColumnWidth(1, 90)
+        self._results_tree.itemActivated.connect(self._on_results_tree_activated)
+        self._results_tree.itemDoubleClicked.connect(self._on_results_tree_activated)
+        results_root.addWidget(self._results_tree, stretch=1)
         layout.addLayout(results_root)
 
     # --------------------------------------------------------- Public API
@@ -203,6 +218,8 @@ class ValidationTabWidget(QWidget):
         self._btn_save_all.setVisible(self._show_save_all)
         self._btn_save_all.setEnabled(self._show_save_all)
         self._btn_download_report.setEnabled(False)
+        self._status_label.setText("No validation report yet.")
+        self._results_tree.clear()
         if auto_run:
             self.run_validation()
 
@@ -272,6 +289,7 @@ class ValidationTabWidget(QWidget):
         self._results_rows = rows
         self._sync_split_actions_from_report(rows)
         self._btn_download_report.setEnabled(True)
+        self._populate_results_tree(rows)
         self.report_ready.emit(dict(self._report))
 
     def _sync_split_actions_from_report(self, rows: list[dict]):
@@ -284,6 +302,60 @@ class ValidationTabWidget(QWidget):
         self._show_save_all = bool(can_split)
         self._btn_save_all.setVisible(self._show_save_all)
         self._btn_save_all.setEnabled(self._show_save_all)
+
+    def _populate_results_tree(self, rows: list[dict]):
+        self._results_tree.clear()
+        if not rows:
+            self._status_label.setText("No validation results available.")
+            return
+        fail_count = sum(1 for row in rows if str(row.get("status", "")).strip().lower() == "fail")
+        warn_count = sum(1 for row in rows if str(row.get("status", "")).strip().lower() == "warning")
+        error_count = sum(1 for row in rows if bool(row.get("error")))
+        self._status_label.setText(
+            f"{len(rows)} checks shown. {fail_count} fail, {warn_count} warning, {error_count} backend error."
+        )
+        for category, items in group_rows_by_category(rows):
+            group = QTreeWidgetItem([category, "", ""])
+            group.setFirstColumnSpanned(True)
+            group.setExpanded(True)
+            group.setFont(0, QFont("", 11, QFont.Bold))
+            self._results_tree.addTopLevelItem(group)
+            for row in items:
+                status = str(row.get("status", "")).strip().lower()
+                detail = str(row.get("message", "") or "").strip()
+                item = QTreeWidgetItem(
+                    [
+                        str(row.get("label", "")).strip(),
+                        status.capitalize() if status else "",
+                        detail,
+                    ]
+                )
+                item.setData(0, Qt.UserRole, dict(row))
+                bg, fg = self._status_brushes(status, bool(row.get("error")))
+                for col in range(3):
+                    item.setBackground(col, bg)
+                    item.setForeground(col, fg)
+                group.addChild(item)
+        self._results_tree.expandAll()
+
+    def _status_brushes(self, status: str, is_error: bool) -> tuple[QBrush, QBrush]:
+        if is_error:
+            return (QBrush(QColor("#eceff3")), QBrush(QColor("#334155")))
+        key = str(status or "").strip().lower()
+        if key == "fail":
+            return (QBrush(QColor("#fde2e2")), QBrush(QColor("#8b1e1e")))
+        if key == "warning":
+            return (QBrush(QColor("#fff4d6")), QBrush(QColor("#8a5a00")))
+        if key == "pass":
+            return (QBrush(QColor("#e3f6e8")), QBrush(QColor("#166534")))
+        return (QBrush(QColor("#e7f0ff")), QBrush(QColor("#1e3a8a")))
+
+    def _on_results_tree_activated(self, item: QTreeWidgetItem, _column: int = 0):
+        if item is None:
+            return
+        payload = item.data(0, Qt.UserRole)
+        if isinstance(payload, dict) and payload.get("key"):
+            self.result_activated.emit(dict(payload))
 
     @Slot(int, str)
     def _on_validation_failed(self, run_id: int, error_text: str):
@@ -391,3 +463,40 @@ class ValidationTabWidget(QWidget):
         if not path:
             return
         self._write_report_to_path(path)
+
+
+class ValidationIndexCleanWidget(QWidget):
+    index_clean_requested = Signal(object, object)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._df: pd.DataFrame | None = None
+        self._build_ui()
+
+    def _build_ui(self):
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(8, 8, 8, 8)
+        layout.setSpacing(8)
+
+        desc = QLabel(
+            "Reorder and reindex the current SWC so parent IDs come before children and all node IDs become continuous."
+        )
+        desc.setWordWrap(True)
+        desc.setStyleSheet("font-size: 12px; color: #555;")
+        layout.addWidget(desc)
+
+        self._btn_apply = QPushButton("Apply Index Clean")
+        self._btn_apply.setEnabled(False)
+        self._btn_apply.clicked.connect(self._on_apply)
+        layout.addWidget(self._btn_apply)
+        layout.addStretch()
+
+    def set_loaded_swc(self, df: pd.DataFrame | None):
+        self._df = df.loc[:, SWC_COLS].copy() if isinstance(df, pd.DataFrame) and not df.empty else None
+        self._btn_apply.setEnabled(self._df is not None and not self._df.empty)
+
+    def _on_apply(self):
+        if self._df is None or self._df.empty:
+            return
+        new_df, id_map = reindex_dataframe_with_map(self._df)
+        self.index_clean_requested.emit(new_df, dict(id_map))

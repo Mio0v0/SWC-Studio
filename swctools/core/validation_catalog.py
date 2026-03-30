@@ -143,8 +143,8 @@ CHECK_CATALOG: list[tuple[str, list[tuple[str, str, str]]]] = [
         [
             (
                 "no_section_index_jumps",
-                "No section index gaps",
-                "Section indexing should be continuous without invalid jumps.",
+                "No large section z-axis jumps",
+                "Checks whether consecutive section points jump too far along the z-axis.",
             ),
             (
                 "no_root_index_jumps",
@@ -190,7 +190,7 @@ CHECK_FAILURE_LABEL: dict[str, str] = {
     "no_single_child_chains": "Single-child chains found",
     "has_unifurcation": "Unifurcation found",
     "has_multifurcation": "Multifurcation found",
-    "no_section_index_jumps": "Section index gaps found",
+    "no_section_index_jumps": "Sections jump too far along Z",
     "no_root_index_jumps": "Neurite roots too far from soma",
     "parent_id_less_than_child_id": "Parent-child ID order violations found",
     "radius_upper_bound": "Oversized radii found",
