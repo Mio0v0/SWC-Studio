@@ -1020,7 +1020,7 @@ class SWCMainWindow(QMainWindow):
             self._refresh_validation_auto_label_panel_state()
             return
 
-        self._df = doc.df.copy()
+        self._df = doc.df
         self._filename = doc.filename
         self._file_path = doc.file_path
         self._set_current_file_label_text(doc.filename)
@@ -2381,12 +2381,6 @@ class SWCMainWindow(QMainWindow):
             self._canvas_tabs.setCurrentIndex(idx)
 
             self._update_recent_files(path)
-            self._apply_editor_modes()
-            self._sync_from_active_document(auto_run_validation=True)
-            if self._active_tool in ("morphology_editing", "dendrogram"):
-                self._set_control_tabs_for_feature("morphology_editing")
-            elif self._active_tool == "geometry_editing":
-                self._set_control_tabs_for_feature("geometry_editing")
 
             n_roots = int((df["parent"] == -1).sum())
             n_soma = int((df["type"] == 1).sum())
@@ -2398,7 +2392,6 @@ class SWCMainWindow(QMainWindow):
                 f"Loaded {filename}: nodes={len(df)}, roots={n_roots}, soma={n_soma}",
                 "INFO",
             )
-            self._refresh_canvas_surface()
             self.swc_loaded.emit(df, filename)
         except Exception as e:
             self._append_log(f"Error loading SWC: {e}", "ERROR")
@@ -3911,6 +3904,13 @@ class SWCMainWindow(QMainWindow):
             self._precheck_dock.hide()
         if self._active_tool in ("morphology_editing", "dendrogram"):
             self._refresh_simplification_panel_state()
+            idx = self._control_tabs.currentIndex()
+            if idx >= 0:
+                label = self._control_tabs.tabText(idx).strip().lower()
+                if label == "manual radii editing":
+                    self._manual_radii_panel.ensure_stats_loaded()
+                elif label == "auto radii editing":
+                    self._validation_radii_panel.ensure_stats_loaded()
         self._refresh_canvas_surface()
         self._sync_top_feature_button_selection()
 

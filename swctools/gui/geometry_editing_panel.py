@@ -378,7 +378,7 @@ class GeometryEditingPanel(QWidget):
         self._set_operation_mode(str(self._operation_combo.currentData() or "connect"))
 
     def set_loaded_swc(self, df: pd.DataFrame | None):
-        self._df = df.loc[:, SWC_COLS].copy() if isinstance(df, pd.DataFrame) and not df.empty else None
+        self._df = df.loc[:, SWC_COLS] if isinstance(df, pd.DataFrame) and not df.empty else None
         valid_ids = set(self._df["id"].astype(int).tolist()) if self._df is not None else set()
         if valid_ids:
             kept = []

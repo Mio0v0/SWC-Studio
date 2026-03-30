@@ -33,6 +33,7 @@ class ManualRadiiPanel(QWidget):
         super().__init__(parent)
         self._df: pd.DataFrame | None = None
         self._stats: dict[str, object] = {}
+        self._stats_dirty = False
         self._filename: str = ""
         self._selected_node_id: int | None = None
         self._selected_type_id: int | None = None
@@ -122,14 +123,37 @@ class ManualRadiiPanel(QWidget):
         if df is None or df.empty:
             self._df = None
             self._stats = {}
+            self._stats_dirty = False
             self.clear_selection()
             return
-        self._df = df.copy()
-        self._stats = dict(radii_stats_by_type(self._df, bins=20))
+        self._df = df
+        self._stats = {}
+        self._stats_dirty = True
+        if self.isVisible():
+            self._ensure_stats_loaded()
         if self._selected_node_id is not None and int(self._selected_node_id) in set(self._df["id"].astype(int).tolist()):
             self.set_selected_node(int(self._selected_node_id))
         else:
             self.clear_selection()
+
+    def _ensure_stats_loaded(self):
+        if self._df is None or self._df.empty:
+            self._stats = {}
+            self._stats_dirty = False
+            return
+        if not self._stats_dirty:
+            return
+        self._stats = dict(radii_stats_by_type(self._df, bins=20))
+        self._stats_dirty = False
+
+    def ensure_stats_loaded(self):
+        """Load cached radii stats on demand when this panel becomes active."""
+        self._ensure_stats_loaded()
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        if self._df is not None and self._stats_dirty:
+            self._ensure_stats_loaded()
 
     def clear_selection(self):
         self._selected_node_id = None
@@ -152,6 +176,7 @@ class ManualRadiiPanel(QWidget):
         if self._df is None or self._df.empty:
             self.clear_selection()
             return
+        self._ensure_stats_loaded()
         row = self._df.loc[self._df["id"].astype(int) == int(swc_id)]
         if row.empty:
             self.clear_selection()

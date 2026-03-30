@@ -147,9 +147,8 @@ class BatchTabWidget(QWidget):
         return self._index_clean_page
 
     def set_loaded_swc(self, df, filename: str, file_path: str = ""):
-        page = self._radii_page
-        if hasattr(page, "set_loaded_swc"):
-            page.set_loaded_swc(df, filename, file_path)
+        # Batch controls are folder-oriented; they should not do per-file work on document open.
+        _ = (df, filename, file_path)
 
     # --------------------------------------------------------- UI builders
     def _build_split_page(self) -> QWidget:

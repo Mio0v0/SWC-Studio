@@ -121,6 +121,7 @@ class RadiiCleaningPanel(QWidget):
         self._loaded_df: pd.DataFrame | None = None
         self._loaded_name: str = ""
         self._loaded_path: str = ""
+        self._stats_dirty = False
         self._build_ui()
 
     def _build_ui(self):
@@ -226,15 +227,29 @@ class RadiiCleaningPanel(QWidget):
             self._loaded_path = ""
             self._latest_stats = {}
             self._latest_stats_path = ""
+            self._stats_dirty = False
             self._hist_type.clear()
             self._hist_plot.clear()
             self._hist_plot.setTitle("No histogram loaded")
             self._stats.setPlainText("Load a file to inspect per-type radii distribution.")
             return
-        self._loaded_df = df.copy()
+        self._loaded_df = df
         self._loaded_name = str(filename or "loaded_swc")
         self._loaded_path = str(file_path or "")
-        self._refresh_stats_from_loaded_swc()
+        self._latest_stats = {}
+        self._latest_stats_path = ""
+        self._stats_dirty = True
+        self._hist_type.clear()
+        self._hist_plot.clear()
+        self._hist_plot.setTitle("Histogram will load when Auto Radii Editing is opened.")
+        self._stats.setPlainText("Open Auto Radii Editing to inspect per-type radii distribution.")
+        if self.isVisible():
+            self._refresh_stats_from_loaded_swc()
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        if self._loaded_df is not None and self._stats_dirty:
+            self._refresh_stats_from_loaded_swc()
 
     def _set_status(self, text: str):
         self._status.setPlainText(text)
@@ -327,22 +342,31 @@ class RadiiCleaningPanel(QWidget):
             self._stats.setPlainText("No SWC loaded in app. Open an SWC first.")
             self._latest_stats = {}
             self._latest_stats_path = ""
+            self._stats_dirty = False
             self._hist_type.clear()
             self._hist_plot.clear()
             self._hist_plot.setTitle("No histogram loaded")
+            return
+        if not self._stats_dirty and self._latest_stats:
             return
         try:
             stats = radii_stats_by_type(self._loaded_df, bins=12)
             self._latest_stats = dict(stats)
             self._latest_stats_path = str(self._loaded_name or "loaded_swc")
+            self._stats_dirty = False
             self._reload_histogram_type_selector()
             self._stats.setPlainText(self._format_stats_text(self._latest_stats_path, stats))
         except Exception as e:  # noqa: BLE001
             self._stats.setPlainText(f"Could not compute radii stats:\n{e}")
             self._latest_stats = {}
             self._latest_stats_path = ""
+            self._stats_dirty = False
             self._hist_type.clear()
             self._hist_plot.clear()
+
+    def ensure_stats_loaded(self):
+        """Load cached radii stats on demand when this panel becomes active."""
+        self._refresh_stats_from_loaded_swc()
 
     def _format_stats_text(self, path: str, stats: dict) -> str:
         lines = [f"Radii distribution: {path}", ""]
