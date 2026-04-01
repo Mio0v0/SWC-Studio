@@ -1,0 +1,144 @@
+:root {
+  --pst-color-primary: #db7a1c;
+  --pst-color-link: #0d5e8a;
+  --pst-color-link-hover: #094460;
+  --swc-border: #e4e0d9;
+  --swc-surface: #fffdf9;
+  --swc-surface-soft: #f7f4ee;
+}
+
+html[data-theme="light"] body {
+  background: linear-gradient(180deg, #fffefb 0%, #f9f6ef 100%);
+}
+
+.bd-header {
+  background: rgba(255, 252, 247, 0.95);
+  backdrop-filter: blur(10px);
+  border-bottom: 1px solid var(--swc-border);
+  box-shadow: 0 12px 28px rgba(45, 34, 18, 0.06);
+}
+
+.bd-header .navbar-nav > li > a,
+.bd-header .navbar-nav .nav-link {
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
+.bd-header .navbar-nav > .current > .nav-link,
+.bd-header .navbar-nav > li.current > a,
+.bd-header .navbar-nav > li > a:hover,
+.bd-header .navbar-nav .nav-link:hover {
+  color: var(--pst-color-primary);
+}
+
+.bd-header .navbar-nav > .current > .nav-link,
+.bd-header .navbar-nav > li.current > a {
+  border-bottom: 3px solid var(--pst-color-primary);
+}
+
+.bd-page-width {
+  max-width: 1700px;
+}
+
+.bd-main .bd-content .bd-article-container {
+  max-width: 920px;
+}
+
+.bd-sidebar-primary {
+  background: var(--swc-surface-soft);
+  border-right: 1px solid var(--swc-border);
+}
+
+.bd-sidebar-primary,
+.bd-sidebar-secondary {
+  top: 5rem;
+}
+
+.bd-links__title,
+.page-toc.tocsection.onthispage {
+  font-size: 1.55rem;
+  font-weight: 800;
+  color: #22252d;
+}
+
+.page-toc.tocsection.onthispage {
+  font-size: 1.15rem;
+}
+
+.bd-sidebar-primary .nav-link,
+.bd-toc-nav .nav-link {
+  border-left: 3px solid transparent;
+  color: #44516c;
+  font-weight: 500;
+}
+
+.bd-sidebar-primary .nav-link:hover,
+.bd-toc-nav .nav-link:hover {
+  color: var(--pst-color-primary);
+}
+
+.bd-sidebar-primary .current > .nav-link,
+.bd-sidebar-primary .active > .nav-link,
+.bd-sidebar-primary .nav-link.active,
+.bd-toc-nav .active > .nav-link,
+.bd-toc-nav .nav-link.active {
+  border-left-color: var(--pst-color-primary);
+  color: var(--pst-color-primary);
+  font-weight: 700;
+}
+
+.bd-sidebar-primary .toctree-checkbox ~ label i,
+.bd-sidebar-primary label i {
+  color: #4c5565;
+}
+
+.bd-article-container {
+  padding-top: 2rem;
+}
+
+.bd-article-container h1 {
+  font-size: clamp(2.7rem, 3.6vw, 4.1rem);
+  font-weight: 800;
+  letter-spacing: -0.04em;
+  margin-bottom: 1.4rem;
+}
+
+.bd-article-container h2 {
+  font-size: clamp(1.8rem, 2.2vw, 2.7rem);
+  font-weight: 760;
+  letter-spacing: -0.03em;
+  margin-top: 2.4rem;
+}
+
+.bd-article-container p,
+.bd-article-container li {
+  font-size: 1.05rem;
+  line-height: 1.72;
+}
+
+.bd-content .sd-card,
+.bd-content .admonition,
+.highlight {
+  border-radius: 16px;
+}
+
+.highlight,
+div.highlight {
+  background: #fbfaf7;
+  border: 1px solid var(--swc-border);
+}
+
+#ethical-ad-placement {
+  display: none !important;
+}
+
+@media (max-width: 991.98px) {
+  .bd-sidebar-primary {
+    border-right: 0;
+  }
+
+  .bd-sidebar-primary,
+  .bd-sidebar-secondary {
+    top: 0;
+  }
+}

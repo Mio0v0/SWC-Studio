@@ -1,50 +1,16 @@
 SWC-Studio Documentation
 ========================
 
-`SWC-Studio` is a modular SWC morphology toolkit with a shared backend used by both CLI and GUI (Python package: ``swcstudio``).
-
-.. note::
-   This documentation set is intended for three audiences:
-
-   - users running workflows (GUI/CLI)
-   - developers extending features
-   - labs integrating plugins
-
 .. toctree::
+   :hidden:
    :maxdepth: 2
-   :caption: User Guides
 
-   GETTING_STARTED
-   GUI_WORKFLOW
-   CHECKS_AND_ISSUES_REFERENCE
-   TOOL_TUTORIALS
-   MACOS_PACKAGING
-   VALIDATION_RULES
-   RADII_CLEANING_TUTORIAL
-   SMART_DECIMATION_TUTORIAL
-   LOGS_AND_REPORTS
+   About <about/index>
+   Documentation <documentation/index>
+   Tutorials <tutorials/index>
 
-.. toctree::
-   :maxdepth: 2
-   :caption: Integration and Extension
+.. raw:: html
 
-   PLUGIN_DEMONSTRATION
-   PLUGIN_DEVELOPMENT
-   ARCHITECTURE
+   <meta http-equiv="refresh" content="0; url=documentation/index.html" />
 
-.. toctree::
-   :maxdepth: 2
-   :caption: References
-
-   CLI_REFERENCE
-   API_DOCUMENTATION
-   PYTHON_API_REFERENCE
-   MODULE_REFERENCE
-   README
-
-Indices and tables
-==================
-
-* :ref:`genindex`
-* :ref:`modindex`
-* :ref:`search`
+If you are not redirected automatically, open :doc:`documentation/index`.

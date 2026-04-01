@@ -1,28 +1,41 @@
 # Docs Overview
 
-Use these pages first:
+The published documentation site is organized into three top-level sections:
 
-- [GETTING_STARTED.md](GETTING_STARTED.md)
-  - install, run, first steps
-- [GUI_WORKFLOW.md](GUI_WORKFLOW.md)
-  - current GUI layout and issue-driven repair flow
-- [CLI_REFERENCE.md](CLI_REFERENCE.md)
-  - current command surface
-- [CHECKS_AND_ISSUES_REFERENCE.md](CHECKS_AND_ISSUES_REFERENCE.md)
-  - canonical check, issue, parameter, and algorithm reference
-- [RADII_CLEANING_TUTORIAL.md](RADII_CLEANING_TUTORIAL.md)
-  - focused radii-cleaning guide
-- [LOGS_AND_REPORTS.md](LOGS_AND_REPORTS.md)
-  - output folders, report names, session logs
+- `About`
+- `Documentation`
+- `Tutorials`
 
-Supporting pages:
+The main project material is grouped under `Documentation`.
 
-- [VALIDATION_RULES.md](VALIDATION_RULES.md)
-- [API_DOCUMENTATION.md](API_DOCUMENTATION.md)
-- [ARCHITECTURE.md](ARCHITECTURE.md)
-- [LOGS_AND_REPORTS.md](LOGS_AND_REPORTS.md)
-- [MACOS_PACKAGING.md](MACOS_PACKAGING.md)
-- [TOOL_TUTORIALS.md](TOOL_TUTORIALS.md)
+## Recommended reading order
+
+Start with these pages:
+
+- [Getting Started](GETTING_STARTED.md)
+- [GUI Workflow Guide](GUI_WORKFLOW.md)
+- [CLI Reference](CLI_REFERENCE.md)
+- [Checks And Issues Reference](CHECKS_AND_ISSUES_REFERENCE.md)
+- [Logs And Reports](LOGS_AND_REPORTS.md)
+
+## Documentation structure
+
+- `Setup`
+  - install, run, first verification
+- `Workflows`
+  - GUI and CLI operation
+- `Validation and Repair`
+  - issue definitions, rules, repair context
+- `Reports and Outputs`
+  - logs, reports, packaging outputs
+- `Tutorials and Guides`
+  - focused walkthroughs
+- `Integration and Extension`
+  - plugins and architecture
+- `Reference`
+  - API and generated module documentation
+
+## Local build
 
 Sphinx HTML output is generated locally and is not tracked in git:
 

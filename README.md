@@ -14,20 +14,9 @@ There are two main ways to use `SWC-Studio`. If you want the full Python workflo
 
 ## Documentation
 
-Short docs (Markdown):
-
-- [Docs Overview](docs/README.md): reading order and page ownership
-- [Getting Started](docs/GETTING_STARTED.md): install, run, first steps
-- [GUI Workflow Guide](docs/GUI_WORKFLOW.md): current GUI layout and issue-driven flow
-- [CLI Reference](docs/CLI_REFERENCE.md): current command surface
-- [Checks And Issues Reference](docs/CHECKS_AND_ISSUES_REFERENCE.md): canonical checks, issues, and algorithms
-- [Logs And Reports](docs/LOGS_AND_REPORTS.md): report names, session logs, and output folders
-- [API / Library Documentation](docs/API_DOCUMENTATION.md): Python integration surface
-
-Comprehensive docs site (Sphinx source):
+Canonical project documentation lives on the docs website:
 
 - Live docs: `https://mio0v0.github.io/SWC-Studio/`
-- includes tutorials, architecture, logs/reporting, plugin development, and auto-generated API/module references
 
 ## What This Project Does
 
