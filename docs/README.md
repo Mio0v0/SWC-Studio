@@ -27,7 +27,7 @@ Start with these pages:
 - `Validation and Repair`
   - issue definitions, rules, repair context
 - `Reports and Outputs`
-  - logs, reports, packaging outputs
+  - logs, reports, and saved outputs
 - `Tutorials and Guides`
   - focused walkthroughs
 - `Integration and Extension`

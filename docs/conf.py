@@ -58,7 +58,7 @@ source_suffix = {
 
 master_doc = "index"
 language = "en"
-exclude_patterns = ["_build", "Thumbs.db", ".DS_Store", "README.md"]
+exclude_patterns = ["_build", "Thumbs.db", ".DS_Store", "README.md", "MACOS_PACKAGING.md"]
 
 # Keep docs folder tidy: only include optional paths when present.
 templates_path = ["_templates"] if os.path.isdir(os.path.join(DOCS_DIR, "_templates")) else []
