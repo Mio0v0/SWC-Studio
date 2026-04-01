@@ -43,7 +43,7 @@ This command prints the same combined issue list the GUI uses when a file is ope
 Run the full validation workflow on a single file:
 
 ```bash
-swcstudio validation run ./data/single-soma.swc
+swcstudio validate ./data/single-soma.swc
 ```
 
 Use this when you want a more explicit report of rule failures, warnings, and grouped results.
@@ -51,7 +51,7 @@ Use this when you want a more explicit report of rule failures, warnings, and gr
 If you only want the rule guide:
 
 ```bash
-swcstudio validation rule-guide
+swcstudio rule-guide
 ```
 
 ## Step 4: Apply a Targeted Cleanup Command
@@ -63,26 +63,28 @@ Examples:
 Reindex one file:
 
 ```bash
-swcstudio validation index-clean ./data/single-soma.swc --write
+swcstudio index-clean ./data/single-soma.swc --write
 ```
 
 Run automatic fix and write the result:
 
 ```bash
-swcstudio validation auto-fix ./data/single-soma.swc --write
+swcstudio auto-fix ./data/single-soma.swc --write
 ```
 
 Clean suspicious radii:
 
 ```bash
-swcstudio validation radii-clean ./data/single-soma.swc
+swcstudio radii-clean ./data/single-soma.swc
 ```
 
 Use manual geometry or morphology edits when you need a more specific operation:
 
 ```bash
-swcstudio morphology set-radius ./data/single-soma.swc --node-id 42 --radius 0.75 --write
-swcstudio geometry connect ./data/single-soma.swc --start-id 10 --end-id 22 --write
+swcstudio set-type ./data/single-soma.swc --node-id 14169 --new-type 3 --write
+swcstudio set-radius ./data/single-soma.swc --node-id 42 --radius 0.75 --write
+swcstudio auto-label ./data/single-soma.swc --write
+swcstudio connect ./data/single-soma.swc --start-id 10 --end-id 22 --write
 ```
 
 ![Placeholder for CLI repair command output](../_static/tutorial-cli-placeholder.svg)
@@ -98,31 +100,31 @@ Examples:
 Validate every SWC in a folder:
 
 ```bash
-swcstudio batch validate ./data
+swcstudio validate ./data
 ```
 
 Split all multi-tree files:
 
 ```bash
-swcstudio batch split ./data
+swcstudio split ./data
 ```
 
 Run folder-wide auto typing:
 
 ```bash
-swcstudio batch auto-typing ./data --soma --axon --basal
+swcstudio auto-typing ./data --soma --axon --basal
 ```
 
 Clean radii for a folder:
 
 ```bash
-swcstudio batch radii-clean ./data
+swcstudio radii-clean ./data
 ```
 
 Simplify all files:
 
 ```bash
-swcstudio batch simplify ./data
+swcstudio simplify ./data
 ```
 
 ```{note}
@@ -136,10 +138,10 @@ Many CLI workflows write reports or processed files into predictable output loca
 Typical outputs include:
 
 - validation reports
+- per-operation reports for file-editing commands
 - split folders and split reports
 - auto-typing output folders
-- radii-cleaning reports
-- simplification logs
+- cleaned or edited SWC files inside the output folder
 
 ![Placeholder for CLI output folder or report file](../_static/tutorial-cli-placeholder.svg)
 

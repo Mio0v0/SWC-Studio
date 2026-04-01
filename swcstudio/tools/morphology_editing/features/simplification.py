@@ -12,7 +12,11 @@ import pandas as pd
 from swcstudio.core.config import load_feature_config, merge_config
 from swcstudio.core.reporting import (
     format_simplification_report_text,
+    operation_output_path_for_file,
+    operation_report_path_for_file,
+    resolve_requested_output_path_for_file,
     simplification_log_path_for_file,
+    timestamp_slug,
     write_text_report,
 )
 from swcstudio.core.swc_io import parse_swc_text_preserve_tokens, write_swc_to_bytes_preserve_tokens
@@ -291,6 +295,7 @@ def simplify_file(
     *,
     out_path: str | None = None,
     write_output: bool = False,
+    write_report: bool = True,
     config_overrides: dict | None = None,
 ) -> dict[str, Any]:
     fp = Path(path)
@@ -300,12 +305,15 @@ def simplify_file(
     text = fp.read_text(encoding="utf-8", errors="ignore")
     out = simplify_swc_text(text, config_overrides=config_overrides)
 
-    cfg = dict(out.get("config_used", {}))
-    suffix = str(cfg.get("output", {}).get("suffix", "_simplified"))
+    run_timestamp = timestamp_slug()
 
     output_path: Path | None = None
     if write_output:
-        output_path = Path(out_path) if out_path else fp.with_name(f"{fp.stem}{suffix}{fp.suffix}")
+        output_path = (
+            resolve_requested_output_path_for_file(fp, out_path)
+            if out_path
+            else operation_output_path_for_file(fp, "geometry_simplify", timestamp=run_timestamp)
+        )
         output_path.write_bytes(out["bytes"])
 
     payload = {
@@ -320,8 +328,14 @@ def simplify_file(
         "removed_node_ids": list(out.get("removed_node_ids", [])),
     }
 
-    report_path = simplification_log_path_for_file(fp)
-    payload["log_path"] = write_text_report(report_path, format_simplification_report_text(payload))
+    payload["log_path"] = None
+    if write_report:
+        report_path = (
+            simplification_log_path_for_file(fp)
+            if out_path
+            else operation_report_path_for_file(fp, "geometry_simplify", timestamp=run_timestamp)
+        )
+        payload["log_path"] = write_text_report(report_path, format_simplification_report_text(payload))
     out["summary"] = payload
     out["input_path"] = str(fp)
     out["output_path"] = str(output_path) if output_path else None

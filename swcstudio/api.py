@@ -41,6 +41,10 @@ from swcstudio.tools.morphology_editing.features.dendrogram_editing import (
     reassign_subtree_types,
     reassign_subtree_types_in_file,
 )
+from swcstudio.tools.morphology_editing.features.manual_label import (
+    set_node_type_file as morphology_set_node_type_file,
+    set_node_type_text as morphology_set_node_type_text,
+)
 from swcstudio.tools.morphology_editing.features.manual_radii import (
     set_node_radius_file as morphology_set_node_radius_file,
     set_node_radius_text as morphology_set_node_radius_text,
@@ -55,6 +59,7 @@ from swcstudio.tools.validation.features.index_clean import (
     index_clean_text as validation_index_clean_text,
 )
 from swcstudio.tools.validation.features.auto_typing import (
+    auto_label_file as validation_auto_label_file,
     run_file as validation_auto_typing_file,
 )
 from swcstudio.tools.validation.features.run_checks import (
@@ -96,8 +101,11 @@ __all__ = [
     "build_mesh_from_file",
     "reassign_subtree_types",
     "reassign_subtree_types_in_file",
+    "morphology_set_node_type_text",
+    "morphology_set_node_type_file",
     "morphology_set_node_radius_text",
     "morphology_set_node_radius_file",
+    "validation_auto_label_file",
     "morphology_smart_decimation_text",
     "morphology_smart_decimation_file",
     "geometry_move_node_absolute",

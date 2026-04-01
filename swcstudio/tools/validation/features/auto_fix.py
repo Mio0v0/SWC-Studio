@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from swcstudio.core.config import load_feature_config, merge_config
+from swcstudio.core.reporting import operation_output_path_for_file, resolve_requested_output_path_for_file, timestamp_slug
 from swcstudio.core.validation import run_format_validation_from_text
 from swcstudio.plugins.registry import register_builtin_method, resolve_method
 from swcstudio.tools.validation.features.run_checks import validate_text as run_structured_validation
@@ -71,11 +72,16 @@ def auto_fix_file(
     out = auto_fix_text(text, config_overrides=config_overrides)
 
     output_path: Path | None = None
+    run_timestamp = timestamp_slug() if write_output and not out_path else None
     if write_output:
         if out_path:
-            output_path = Path(out_path)
+            output_path = resolve_requested_output_path_for_file(in_path, out_path)
         else:
-            output_path = in_path.with_name(f"{in_path.stem}_autofix{in_path.suffix}")
+            output_path = operation_output_path_for_file(
+                in_path,
+                "validation_auto_fix",
+                timestamp=run_timestamp,
+            )
         output_path.write_bytes(out["sanitized_bytes"])
 
     out["input_path"] = str(in_path)

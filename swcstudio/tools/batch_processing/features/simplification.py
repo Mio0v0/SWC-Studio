@@ -8,7 +8,13 @@ from typing import Any
 import pandas as pd
 
 from swcstudio.core.config import load_feature_config, merge_config
-from swcstudio.core.reporting import write_text_report
+from swcstudio.core.reporting import (
+    operation_output_dir_for_folder,
+    operation_output_path_for_file,
+    operation_report_path_for_folder,
+    timestamp_slug,
+    write_text_report,
+)
 from swcstudio.core.swc_io import parse_swc_text_preserve_tokens, write_swc_to_bytes_preserve_tokens
 from swcstudio.plugins.registry import register_builtin_method, resolve_method
 from swcstudio.tools.morphology_editing.features.simplification import (
@@ -46,11 +52,9 @@ def _builtin_run(folder: str, config: dict[str, Any]) -> dict[str, Any]:
     if not swc_files:
         raise FileNotFoundError(f"No .swc files found in: {folder}")
 
-    output_cfg = dict(config.get("output", {}))
-    out_dir = folder_path / f"{folder_path.name}{str(output_cfg.get('folder_suffix', '_simplified'))}"
-    out_dir.mkdir(parents=True, exist_ok=True)
+    run_timestamp = timestamp_slug()
+    out_dir = operation_output_dir_for_folder(folder_path, "batch_simplify", timestamp=run_timestamp)
     simplify_cfg = dict(config.get("simplification", {}))
-    suffix = str(output_cfg.get("suffix", "_simplified"))
 
     processed = 0
     failures: list[str] = []
@@ -64,7 +68,12 @@ def _builtin_run(folder: str, config: dict[str, Any]) -> dict[str, Any]:
             out_df = result.get("dataframe")
             if not isinstance(out_df, pd.DataFrame) or out_df.empty:
                 raise ValueError("simplification produced empty output")
-            out_path = out_dir / f"{swc_path.stem}{suffix}{swc_path.suffix}"
+            out_path = operation_output_path_for_file(
+                swc_path,
+                "batch_simplify",
+                output_dir=out_dir,
+                timestamp=run_timestamp,
+            )
             out_path.write_bytes(write_swc_to_bytes_preserve_tokens(out_df))
             processed += 1
             per_file.append(
@@ -94,7 +103,16 @@ def _builtin_run(folder: str, config: dict[str, Any]) -> dict[str, Any]:
         if len(failures) > 50:
             lines.append(f"... ({len(failures) - 50} more)")
 
-    report_path = _write_batch_report(out_dir, "batch_simplification_report.txt", lines)
+    report_path = _write_batch_report(
+        out_dir,
+        operation_report_path_for_folder(
+            folder_path,
+            "batch_simplify",
+            output_dir=out_dir,
+            timestamp=run_timestamp,
+        ).name,
+        lines,
+    )
     return {
         "folder": str(folder_path),
         "out_dir": str(out_dir),

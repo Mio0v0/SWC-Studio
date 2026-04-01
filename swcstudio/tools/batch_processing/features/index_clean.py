@@ -7,7 +7,13 @@ from typing import Any
 
 from swcstudio.core.config import load_feature_config, merge_config
 from swcstudio.core.geometry_editing import reindex_dataframe_with_map
-from swcstudio.core.reporting import write_text_report
+from swcstudio.core.reporting import (
+    operation_output_dir_for_folder,
+    operation_output_path_for_file,
+    operation_report_path_for_folder,
+    timestamp_slug,
+    write_text_report,
+)
 from swcstudio.core.swc_io import parse_swc_text_preserve_tokens, write_swc_to_bytes_preserve_tokens
 from swcstudio.plugins.registry import register_builtin_method, resolve_method
 
@@ -40,10 +46,8 @@ def _builtin_run(folder: str, config: dict[str, Any]) -> dict[str, Any]:
     if not swc_files:
         raise FileNotFoundError(f"No .swc files found in: {folder}")
 
-    output_cfg = dict(config.get("output", {}))
-    out_dir = folder_path / f"{folder_path.name}{str(output_cfg.get('folder_suffix', '_index_clean'))}"
-    out_dir.mkdir(parents=True, exist_ok=True)
-    suffix = str(output_cfg.get("suffix", "_index_clean"))
+    run_timestamp = timestamp_slug()
+    out_dir = operation_output_dir_for_folder(folder_path, "batch_index_clean", timestamp=run_timestamp)
 
     processed = 0
     failures: list[str] = []
@@ -54,7 +58,12 @@ def _builtin_run(folder: str, config: dict[str, Any]) -> dict[str, Any]:
             text = swc_path.read_text(encoding="utf-8", errors="ignore")
             df = parse_swc_text_preserve_tokens(text)
             clean_df, id_map = reindex_dataframe_with_map(df)
-            out_path = out_dir / f"{swc_path.stem}{suffix}{swc_path.suffix}"
+            out_path = operation_output_path_for_file(
+                swc_path,
+                "batch_index_clean",
+                output_dir=out_dir,
+                timestamp=run_timestamp,
+            )
             out_path.write_bytes(write_swc_to_bytes_preserve_tokens(clean_df))
             processed += 1
             changed = sum(1 for old_id, new_id in dict(id_map).items() if int(old_id) != int(new_id))
@@ -83,7 +92,16 @@ def _builtin_run(folder: str, config: dict[str, Any]) -> dict[str, Any]:
         if len(failures) > 50:
             lines.append(f"... ({len(failures) - 50} more)")
 
-    report_path = _write_batch_report(out_dir, "batch_index_clean_report.txt", lines)
+    report_path = _write_batch_report(
+        out_dir,
+        operation_report_path_for_folder(
+            folder_path,
+            "batch_index_clean",
+            output_dir=out_dir,
+            timestamp=run_timestamp,
+        ).name,
+        lines,
+    )
     return {
         "folder": str(folder_path),
         "out_dir": str(out_dir),

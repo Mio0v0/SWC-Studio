@@ -6,7 +6,14 @@ from pathlib import Path
 from typing import Any
 
 from swcstudio.core.config import load_feature_config, merge_config
-from swcstudio.core.reporting import format_split_report_text, write_text_report
+from swcstudio.core.reporting import (
+    format_split_report_text,
+    operation_output_dir_for_folder,
+    operation_output_path_for_file,
+    operation_report_path_for_folder,
+    timestamp_slug,
+    write_text_report,
+)
 from swcstudio.core.validation import _split_swc_by_soma_roots
 from swcstudio.plugins.registry import register_builtin_method, resolve_method
 
@@ -61,11 +68,8 @@ def split_folder(folder: str, *, config_overrides: dict | None = None) -> dict[s
 
     naming_cfg = dict(cfg.get("naming", {}))
     output_mode = str(naming_cfg.get("output_mode", "single_output_subdir")).lower()
-    output_dir_pattern = str(naming_cfg.get("output_dir_pattern", "{folder_name}_split"))
-    tree_pattern = str(naming_cfg.get("tree_pattern", "{stem}_tree{index}.swc"))
-
-    out_dir = in_dir / output_dir_pattern.format(folder_name=in_dir.name)
-    out_dir.mkdir(parents=True, exist_ok=True)
+    run_timestamp = timestamp_slug()
+    out_dir = operation_output_dir_for_folder(in_dir, "batch_split", timestamp=run_timestamp)
 
     for fp in swc_files:
         try:
@@ -83,14 +87,19 @@ def split_folder(folder: str, *, config_overrides: dict | None = None) -> dict[s
                 file_out_dir = out_dir
 
             for idx, (_root_id, sub_text, _node_count) in enumerate(trees, start=1):
-                out_name = tree_pattern.format(stem=fp.stem, index=idx)
-                out_path = file_out_dir / out_name
+                out_path = operation_output_path_for_file(
+                    fp,
+                    "batch_split",
+                    output_dir=file_out_dir,
+                    timestamp=run_timestamp,
+                    variant=f"tree_{idx}",
+                )
                 out_path.write_text(sub_text, encoding="utf-8")
                 trees_saved += 1
                 if output_mode == "per_file_subdir":
                     output_files.append(str(out_path.relative_to(out_dir)))
                 else:
-                    output_files.append(out_name)
+                    output_files.append(out_path.name)
         except Exception as e:  # noqa: BLE001
             failures.append(f"{fp.name}: {e}")
 
@@ -106,5 +115,8 @@ def split_folder(folder: str, *, config_overrides: dict | None = None) -> dict[s
     }
 
     log_text = format_split_report_text(result)
-    result["log_path"] = write_text_report(out_dir / "split_report.txt", log_text)
+    result["log_path"] = write_text_report(
+        operation_report_path_for_folder(in_dir, "batch_split", output_dir=out_dir, timestamp=run_timestamp),
+        log_text,
+    )
     return result

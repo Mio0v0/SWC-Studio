@@ -1,7 +1,0 @@
-Validation Index Clean Report
------------------------------
-Input file: data\single-soma.swc
-Output file: (not written)
-Original node count: 28075
-New node count: 28075
-Remapped ID count: 28062

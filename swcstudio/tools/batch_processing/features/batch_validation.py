@@ -6,7 +6,12 @@ from pathlib import Path
 from typing import Any
 
 from swcstudio.core.config import load_feature_config, merge_config
-from swcstudio.core.reporting import format_batch_validation_report_text, write_text_report
+from swcstudio.core.reporting import (
+    format_batch_validation_report_text,
+    operation_report_path_for_folder,
+    timestamp_slug,
+    write_text_report,
+)
 from swcstudio.core.validation_engine import run_validation_text
 from swcstudio.plugins.registry import register_builtin_method, resolve_method
 
@@ -85,6 +90,6 @@ def validate_folder(folder: str, *, config_overrides: dict | None = None) -> dic
         "failures": failures,
     }
 
-    log_path = in_dir / f"{in_dir.name}_batch_validation_report.txt"
+    log_path = operation_report_path_for_folder(in_dir, "batch_validation", timestamp=timestamp_slug())
     out["log_path"] = write_text_report(log_path, format_batch_validation_report_text(out))
     return out

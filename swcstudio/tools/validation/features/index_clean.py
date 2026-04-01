@@ -7,7 +7,13 @@ from typing import Any
 
 from swcstudio.core.config import load_feature_config, merge_config
 from swcstudio.core.geometry_editing import reindex_dataframe_with_map
-from swcstudio.core.reporting import write_text_report
+from swcstudio.core.reporting import (
+    operation_output_path_for_file,
+    operation_report_path_for_file,
+    resolve_requested_output_path_for_file,
+    timestamp_slug,
+    write_text_report,
+)
 from swcstudio.core.swc_io import parse_swc_text_preserve_tokens, write_swc_to_bytes_preserve_tokens
 from swcstudio.plugins.registry import register_builtin_method, resolve_method
 
@@ -60,6 +66,7 @@ def index_clean_file(
     *,
     out_path: str | None = None,
     write_output: bool = False,
+    write_report: bool = True,
     config_overrides: dict | None = None,
 ) -> dict[str, Any]:
     fp = Path(path)
@@ -67,25 +74,30 @@ def index_clean_file(
         raise FileNotFoundError(path)
     text = fp.read_text(encoding="utf-8", errors="ignore")
     out = index_clean_text(text, config_overrides=config_overrides)
-    cfg = dict(out.get("config_used", {}))
-    suffix = str(cfg.get("output", {}).get("suffix", "_index_clean"))
+    run_timestamp = timestamp_slug()
 
     output_path: Path | None = None
     if write_output:
-        output_path = Path(out_path) if out_path else fp.with_name(f"{fp.stem}{suffix}{fp.suffix}")
+        output_path = (
+            resolve_requested_output_path_for_file(fp, out_path)
+            if out_path
+            else operation_output_path_for_file(fp, "validation_index_clean", timestamp=run_timestamp)
+        )
         output_path.write_bytes(out["bytes"])
 
-    lines = [
-        "Validation Index Clean Report",
-        "-----------------------------",
-        f"Input file: {fp}",
-        f"Output file: {output_path if output_path else '(not written)'}",
-        f"Original node count: {int(out.get('original_node_count', 0))}",
-        f"New node count: {int(out.get('new_node_count', 0))}",
-        f"Remapped ID count: {int(out.get('remapped_id_count', 0))}",
-    ]
-    report_path = write_text_report(fp.with_name(f"{fp.stem}_index_clean_report.txt"), "\n".join(lines) + "\n")
     out["input_path"] = str(fp)
     out["output_path"] = str(output_path) if output_path else None
-    out["log_path"] = report_path
+    out["log_path"] = None
+    if write_report:
+        lines = [
+            "Validation Index Clean Report",
+            "-----------------------------",
+            f"Input file: {fp}",
+            f"Output file: {output_path if output_path else '(not written)'}",
+            f"Original node count: {int(out.get('original_node_count', 0))}",
+            f"New node count: {int(out.get('new_node_count', 0))}",
+            f"Remapped ID count: {int(out.get('remapped_id_count', 0))}",
+        ]
+        report_target = operation_report_path_for_file(fp, "validation_index_clean", timestamp=run_timestamp)
+        out["log_path"] = write_text_report(report_target, "\n".join(lines) + "\n")
     return out

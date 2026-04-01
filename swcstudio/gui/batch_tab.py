@@ -159,8 +159,8 @@ class BatchTabWidget(QWidget):
 
         desc = QLabel(
             "Select a folder and split each multi-cell SWC into separate trees.\n"
-            "Output folder: <selected>/<selected>_split\n"
-            "Output naming: <original_file_name>_tree1.swc, _tree2.swc, ..."
+            "Output folder: <selected>/<selected>_batch_split_<timestamp>\n"
+            "Output naming: <original_file_name>_batch_split_tree_<index>_<timestamp>.swc"
         )
         desc.setWordWrap(True)
         desc.setStyleSheet("font-size: 12px; color: #555;")
@@ -274,7 +274,7 @@ class BatchTabWidget(QWidget):
 
         desc = QLabel(
             "Run the same Simplification workflow on all SWC files in a folder.\n"
-            "Output folder: <selected>/<selected>_simplified"
+            "Output folder: <selected>/<selected>_batch_simplify_<timestamp>"
         )
         desc.setWordWrap(True)
         desc.setStyleSheet("font-size: 12px; color: #555;")
@@ -297,7 +297,7 @@ class BatchTabWidget(QWidget):
 
         desc = QLabel(
             "Reorder and reindex all SWC files in a folder so parents come before children and IDs become continuous.\n"
-            "Output folder: <selected>/<selected>_index_clean"
+            "Output folder: <selected>/<selected>_batch_index_clean_<timestamp>"
         )
         desc.setWordWrap(True)
         desc.setStyleSheet("font-size: 12px; color: #555;")

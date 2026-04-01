@@ -11,6 +11,7 @@ from typing import Any
 import pandas as pd
 
 from swcstudio.core.config import load_feature_config, merge_config
+from swcstudio.core.reporting import operation_output_path_for_file, resolve_requested_output_path_for_file, timestamp_slug
 from swcstudio.core.swc_io import parse_swc_text_preserve_tokens, write_swc_to_bytes_preserve_tokens
 from swcstudio.plugins.registry import register_builtin_method, resolve_method
 
@@ -140,8 +141,13 @@ def reassign_subtree_types_in_file(
     )
 
     output_path: Path | None = None
+    run_timestamp = timestamp_slug()
     if write_output:
-        output_path = Path(out_path) if out_path else fp.with_name(f"{fp.stem}_typed{fp.suffix}")
+        output_path = (
+            resolve_requested_output_path_for_file(fp, out_path)
+            if out_path
+            else operation_output_path_for_file(fp, "morphology_dendrogram_edit", timestamp=run_timestamp)
+        )
         output_path.write_bytes(out["bytes"])
 
     out["input_path"] = str(fp)

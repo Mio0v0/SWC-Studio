@@ -3,13 +3,17 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
+from pathlib import Path
+import tempfile
 from typing import Any
 
 import pandas as pd
 
 from swcstudio.core.config import load_feature_config, merge_config
 from swcstudio.core.radii_cleaning import clean_radii_dataframe
+from swcstudio.core.swc_io import write_swc_to_bytes_preserve_tokens
 from swcstudio.core.validation_catalog import CHECK_CATEGORY, CHECK_LABEL, CHECK_ORDER
+from swcstudio.tools.validation.features.auto_typing import run_file as run_validation_auto_typing_file
 
 
 _SEVERITY_RANK = {
@@ -439,6 +443,39 @@ def issues_from_simplification_suggestion(df: pd.DataFrame | None) -> list[dict[
     return [issue.to_dict()]
 
 
+def _type_suspicion_from_dataframe(
+    df: pd.DataFrame | None,
+    *,
+    limit: int = 0,
+) -> list[dict[str, Any]]:
+    if df is None or df.empty:
+        return []
+
+    tmp_path: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(prefix="swcstudio_issue_type_", suffix=".swc", delete=False) as tmp:
+            tmp.write(write_swc_to_bytes_preserve_tokens(df))
+            tmp_path = Path(tmp.name)
+        result_obj = run_validation_auto_typing_file(
+            str(tmp_path),
+            write_output=False,
+            write_log=False,
+        )
+        return issues_from_type_suspicion(
+            list(getattr(result_obj, "rows", []) or []),
+            list(getattr(result_obj, "types", []) or []),
+            limit=limit,
+        )
+    except Exception:
+        return []
+    finally:
+        if tmp_path is not None:
+            try:
+                tmp_path.unlink(missing_ok=True)
+            except Exception:
+                pass
+
+
 def build_issue_list(
     df: pd.DataFrame | None,
     validation_report: dict[str, Any] | None,
@@ -492,8 +529,12 @@ def build_issue_list(
     if not hard_blocked and not prereq.get("unsupported_section_types") and not prereq.get("missing_soma"):
         suspicious_radii = issues_from_radii_suspicion(df, ignore_node_ids=critical_radii_node_ids)
 
+    computed_type_suspicious: list[dict[str, Any]] = list(type_suspicious or [])
+    if type_suspicious is None and not hard_blocked and df is not None and not df.empty:
+        computed_type_suspicious = _type_suspicion_from_dataframe(df)
+
     simplification_suggestion = issues_from_simplification_suggestion(df)
-    all_issues = list(base_issues) + list(suspicious_radii) + list(type_suspicious or []) + list(simplification_suggestion)
+    all_issues = list(base_issues) + list(suspicious_radii) + list(computed_type_suspicious) + list(simplification_suggestion)
 
     def _issue_priority(item: dict[str, Any]) -> tuple[int, int, int, int, str]:
         source_key = str(item.get("source_key", "")).strip()
@@ -501,6 +542,7 @@ def build_issue_list(
         status = str(item.get("status", "")).strip()
         certainty = str(item.get("certainty", "")).strip()
         return (
+            0 if source_key == "has_soma" else 1,
             _SEVERITY_RANK.get(severity, 9),
             CHECK_ORDER.get(source_key, 10_000),
             {"open": 0, "muted": 1, "skipped": 1, "fixed": 2}.get(status, 9),

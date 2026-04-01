@@ -23,33 +23,29 @@ Main helper functions:
 - `format_radii_cleaning_report_text`
 - `format_simplification_report_text`
 - `format_morphology_session_log_text`
+- `format_operation_report_text`
 - `write_text_report`
 
 ## Default report naming
 
-### Validation
+CLI default naming uses one pattern:
 
-- single file: `<stem>_validation_report.txt`
-- batch folder: `<folder>_batch_validation_report.txt` (in target/output folder)
+- single-file output/report folder: `<input_folder>/<original_stem>_swc_studio_output/`
+- single-file output or report name: `<original_stem>_<full_operation_name>_<timestamp>.<ext>`
+- batch output folder: `<input_folder>/<input_folder>_<full_operation_name>_<timestamp>/`
+- batch report: `<input_folder>_<full_operation_name>_<timestamp>.txt`
 
-### Batch Split
+Examples:
 
-- output folder: `<folder>/<folder>_split/`
-- report file: `split_report.txt`
-
-### Auto Typing
-
-- output folder: `<folder>/<folder>_auto_typing/`
-- report file: `auto_typing_report.txt`
-
-### Radii Cleaning
-
-- file mode report: `<stem>_radii_cleaning_report.txt`
-- folder mode report: `<out_dir>/radii_cleaning_report.txt`
-
-### Simplification
-
-- report: `<stem>_simplification_log.txt`
+- validation report: `<input_folder>/<stem>_swc_studio_output/<stem>_validation_run_<timestamp>.txt`
+- validation index clean output: `<input_folder>/<stem>_swc_studio_output/<stem>_validation_index_clean_<timestamp>.swc`
+- geometry simplify output: `<input_folder>/<stem>_swc_studio_output/<stem>_geometry_simplify_<timestamp>.swc`
+- geometry simplify report: `<input_folder>/<stem>_swc_studio_output/<stem>_geometry_simplify_<timestamp>.txt`
+- manual label operation report: `<input_folder>/<stem>_swc_studio_output/<stem>_morphology_set_type_<timestamp>.txt`
+- auto label operation report: `<input_folder>/<stem>_swc_studio_output/<stem>_validation_auto_label_<timestamp>.txt`
+- batch split folder: `<folder>/<folder>_batch_split_<timestamp>/`
+- batch split files: `<stem>_batch_split_tree_<index>_<timestamp>.swc`
+- batch auto typing folder report: `<folder>_batch_auto_typing_<timestamp>.txt`
 
 ### GUI Edit Session
 
@@ -66,31 +62,25 @@ Validation reports:
 - grouped pass/warn/fail results
 - detailed findings (node IDs, section IDs, thresholds, metrics)
 
-Auto typing reports:
+Batch reports:
 
 - files processed/failed
-- total nodes and type changes
-- per-file output type counts
-- node-level change details
-
-Radii cleaning reports:
-
-- number of changed nodes
-- per-file change summary
-- node-level old/new values and reason tags
-
-Simplification logs:
-
-- original/new node counts
-- reduction percentage
-- parameters used
-- protected node stats
+- per-file outputs
+- run-level summary counts
 
 GUI session logs:
 
 - one header per open-to-close session
 - one operation block per applied change
 - operation-specific node-change tables with only the columns that changed
+
+CLI single-file operation reports:
+
+- one report per edit run
+- same summary/details + node-change table format used by GUI session logs
+- currently written for single-file edit commands such as auto-fix, auto-label, radii-clean, index-clean, simplify, set-type, set-radius, dendrogram-edit, and geometry edits
+
+Single-file CLI edit commands are intended to keep one operation report, not an extra legacy feature log.
 
 ## Programmatic use
 

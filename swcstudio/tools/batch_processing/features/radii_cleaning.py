@@ -17,7 +17,13 @@ from swcstudio.core.config import load_feature_config, merge_config
 from swcstudio.core.radii_cleaning import clean_radii_dataframe, radii_stats_by_type
 from swcstudio.core.reporting import (
     format_radii_cleaning_report_text,
+    operation_output_dir_for_folder,
+    operation_output_path_for_file,
+    operation_report_path_for_file,
+    operation_report_path_for_folder,
     radii_cleaning_log_path_for_file,
+    resolve_requested_output_path_for_file,
+    timestamp_slug,
     write_text_report,
 )
 from swcstudio.core.swc_io import parse_swc_text_preserve_tokens, write_swc_to_bytes_preserve_tokens
@@ -141,8 +147,10 @@ def clean_swc_text(swc_text: str, *, config_overrides: dict | None = None) -> di
     method_out = fn(df, cfg)
     out_df, changes, details = _normalize_method_output(method_out, df)
     stats_by_type = {}
+    passes = 0
     if isinstance(method_out, dict):
         stats_by_type = dict(method_out.get("stats_by_type", {}))
+        passes = int(method_out.get("passes", 0))
 
     out_bytes = write_swc_to_bytes_preserve_tokens(out_df)
     return {
@@ -151,6 +159,7 @@ def clean_swc_text(swc_text: str, *, config_overrides: dict | None = None) -> di
         "bytes": out_bytes,
         "dataframe": out_df,
         "stats_by_type": stats_by_type,
+        "passes": int(passes),
         "config_used": cfg,
     }
 
@@ -215,6 +224,7 @@ def clean_file(
     *,
     out_path: str | None = None,
     write_output: bool = True,
+    write_report: bool = True,
     config_overrides: dict | None = None,
 ) -> dict[str, Any]:
     cfg = merge_config(get_config(), config_overrides)
@@ -226,15 +236,13 @@ def clean_file(
     text = in_path.read_text(encoding="utf-8", errors="ignore")
     out = clean_swc_text(text, config_overrides=cfg)
 
-    output_cfg = dict(cfg.get("output", {}))
-    file_suffix = str(output_cfg.get("file_suffix", "_radii_cleaned"))
-
     output_path: Path | None = None
+    run_timestamp = timestamp_slug()
     if write_output:
         if out_path:
-            output_path = Path(out_path)
+            output_path = resolve_requested_output_path_for_file(in_path, out_path)
         else:
-            output_path = in_path.with_name(f"{in_path.stem}{file_suffix}{in_path.suffix}")
+            output_path = operation_output_path_for_file(in_path, "radii_cleaning", timestamp=run_timestamp)
         output_path.write_bytes(out["bytes"])
 
     report = {
@@ -242,14 +250,23 @@ def clean_file(
         "input_path": str(in_path),
         "output_path": str(output_path) if output_path else None,
         "radius_changes": int(out["changes"]),
+        "passes": int(out.get("passes", 0)),
         "change_count": int(len(out.get("change_details", []))),
         "change_details": list(out.get("change_details", [])),
         "change_lines": _format_change_lines(list(out.get("change_details", []))),
+        "dataframe": out.get("dataframe"),
+        "bytes": out.get("bytes"),
         "config_used": cfg,
     }
 
-    report_path = radii_cleaning_log_path_for_file(in_path)
-    report["log_path"] = write_text_report(report_path, format_radii_cleaning_report_text(report))
+    report["log_path"] = None
+    if write_report:
+        report_path = (
+            radii_cleaning_log_path_for_file(in_path)
+            if out_path
+            else operation_report_path_for_file(in_path, "radii_cleaning", timestamp=run_timestamp)
+        )
+        report["log_path"] = write_text_report(report_path, format_radii_cleaning_report_text(report))
     return report
 
 
@@ -260,12 +277,8 @@ def clean_folder(folder: str, *, config_overrides: dict | None = None) -> dict[s
     if not in_dir.exists() or not in_dir.is_dir():
         raise NotADirectoryError(folder)
 
-    output_cfg = dict(cfg.get("output", {}))
-    folder_suffix = str(output_cfg.get("folder_suffix", "_radii_cleaned"))
-    report_name = str(output_cfg.get("report_name", "radii_cleaning_report.txt"))
-
-    out_dir = in_dir / f"{in_dir.name}{folder_suffix}"
-    out_dir.mkdir(parents=True, exist_ok=True)
+    run_timestamp = timestamp_slug()
+    out_dir = operation_output_dir_for_folder(in_dir, "batch_radii_cleaning", timestamp=run_timestamp)
 
     swc_files = _list_swc_files(in_dir)
     failures: list[str] = []
@@ -276,7 +289,12 @@ def clean_folder(folder: str, *, config_overrides: dict | None = None) -> dict[s
         try:
             text = fp.read_text(encoding="utf-8", errors="ignore")
             out = clean_swc_text(text, config_overrides=cfg)
-            out_path = out_dir / fp.name
+            out_path = operation_output_path_for_file(
+                fp,
+                "batch_radii_cleaning",
+                output_dir=out_dir,
+                timestamp=run_timestamp,
+            )
             out_path.write_bytes(out["bytes"])
             c = int(out["changes"])
             details = list(out.get("change_details", []))
@@ -306,14 +324,27 @@ def clean_folder(folder: str, *, config_overrides: dict | None = None) -> dict[s
         "config_used": cfg,
     }
 
-    out_report["log_path"] = write_text_report(out_dir / report_name, format_radii_cleaning_report_text(out_report))
+    out_report["log_path"] = write_text_report(
+        operation_report_path_for_folder(
+            in_dir,
+            "batch_radii_cleaning",
+            output_dir=out_dir,
+            timestamp=run_timestamp,
+        ),
+        format_radii_cleaning_report_text(out_report),
+    )
     return out_report
 
 
-def clean_path(path: str, *, config_overrides: dict | None = None) -> dict[str, Any]:
+def clean_path(
+    path: str,
+    *,
+    write_file_report: bool = True,
+    config_overrides: dict | None = None,
+) -> dict[str, Any]:
     p = Path(path)
     if p.is_dir():
         return clean_folder(str(p), config_overrides=config_overrides)
     if p.is_file():
-        return clean_file(str(p), config_overrides=config_overrides)
+        return clean_file(str(p), write_report=write_file_report, config_overrides=config_overrides)
     raise FileNotFoundError(path)

@@ -52,11 +52,8 @@ from .swc_table_widget import SWCTableWidget
 from .validation_auto_label_panel import ValidationAutoLabelPanel
 from .validation_tab import ValidationIndexCleanWidget, ValidationPrecheckWidget, ValidationTabWidget
 from swcstudio.core.issues import (
-    issues_from_radii_suspicion,
-    issues_from_simplification_suggestion,
-    issues_from_type_suspicion,
+    build_issue_list,
     issues_from_validation_report,
-    validation_prerequisite_summary,
 )
 from swcstudio.core.custom_types import save_custom_type_definitions
 from swcstudio.core.geometry_editing import (
@@ -80,6 +77,7 @@ from swcstudio.core.reporting import (
     morphology_session_log_path,
     output_dir_for_file,
     simplification_log_path_for_file,
+    validation_index_clean_detail_lines,
     write_text_report,
 )
 from swcstudio.core.swc_io import parse_swc_text_preserve_tokens, write_swc_to_bytes_preserve_tokens
@@ -87,6 +85,8 @@ from swcstudio.core.validation_engine import consolidate_complex_somas_array
 from swcstudio.tools.morphology_editing.features.simplification import simplify_dataframe
 from swcstudio.tools.validation.features.auto_typing import (
     RuleBatchOptions,
+    merge_types_only as auto_label_merge_types_only,
+    result_to_dataframe as auto_label_result_to_dataframe,
     run_file as run_validation_auto_typing_file,
 )
 
@@ -1452,7 +1452,7 @@ class SWCMainWindow(QMainWindow):
 
         source = str(source_override or doc.file_path or "")
         if source:
-            log_path = morphology_session_log_path(source)
+            log_path = morphology_session_log_path(source, direct_parent=bool(source_override))
             source_name = os.path.basename(source)
         else:
             source_name = doc.filename or "swc"
@@ -1845,39 +1845,17 @@ class SWCMainWindow(QMainWindow):
                 self._canvas_tabs.setCurrentIndex(src_idx)
 
     def _auto_label_result_to_dataframe(self, result: object) -> pd.DataFrame:
-        rows = list(getattr(result, "rows", []))
-        types = list(getattr(result, "types", []))
-        radii = list(getattr(result, "radii", []))
-        if not rows:
+        df = auto_label_result_to_dataframe(result)
+        if df.empty:
             return pd.DataFrame(columns=SWC_COLS)
-        data = []
-        for i, row in enumerate(rows):
-            data.append(
-                {
-                    "id": int(row.get("id", 0)),
-                    "type": int(types[i] if i < len(types) else row.get("type", 0)),
-                    "x": float(row.get("x", 0.0)),
-                    "y": float(row.get("y", 0.0)),
-                    "z": float(row.get("z", 0.0)),
-                    "radius": float(radii[i] if i < len(radii) else row.get("radius", 0.0)),
-                    "parent": int(row.get("parent", -1)),
-                }
-            )
-        return pd.DataFrame(data, columns=SWC_COLS)
+        return df.loc[:, SWC_COLS].copy()
 
     def _merge_auto_label_types_only(self, base_df: pd.DataFrame, labeled_df: pd.DataFrame) -> pd.DataFrame:
         """Keep original geometry/radius columns and only replace type assignments."""
-        if not isinstance(base_df, pd.DataFrame) or base_df.empty:
+        out = auto_label_merge_types_only(base_df, labeled_df)
+        if out.empty:
             return pd.DataFrame(columns=SWC_COLS)
-        out = base_df.copy()
-        if not isinstance(labeled_df, pd.DataFrame) or labeled_df.empty:
-            return out
-        type_map = {
-            int(row["id"]): int(row["type"])
-            for _, row in labeled_df.loc[:, ["id", "type"]].iterrows()
-        }
-        out["type"] = out["id"].astype(int).map(type_map).fillna(out["type"]).astype(int)
-        return out
+        return out.loc[:, SWC_COLS].copy()
 
     def _refresh_validation_auto_label_panel_state(self):
         doc = self._active_source_document()
@@ -3008,92 +2986,7 @@ class SWCMainWindow(QMainWindow):
         )
 
     def _build_all_issues_for_document(self, doc: _DocumentState, report: dict) -> list[dict]:
-        base_issues = issues_from_validation_report(report)
-        if doc.df is not None and not doc.df.empty:
-            type_by_id = {
-                int(row_id): int(row_type)
-                for row_id, row_type in zip(doc.df["id"].tolist(), doc.df["type"].tolist())
-                if pd.notna(row_id) and pd.notna(row_type)
-            }
-            soma_node_ids = [
-                int(row_id)
-                for row_id, row_type in zip(doc.df["id"].tolist(), doc.df["type"].tolist())
-                if pd.notna(row_id) and pd.notna(row_type) and int(row_type) == 1
-            ]
-            filtered_base_issues: list[dict] = []
-            for item in base_issues:
-                issue = dict(item)
-                if str(issue.get("source_key", "")).strip() == "soma_radius_nonzero" and not list(issue.get("node_ids", []) or []):
-                    issue["node_ids"] = list(soma_node_ids)
-                    payload = dict(issue.get("source_payload", {}) or {})
-                    payload["failing_node_ids"] = list(soma_node_ids)
-                    issue["source_payload"] = payload
-                if str(issue.get("source_key", "")).strip() == "no_dangling_branches":
-                    original_node_ids = [int(v) for v in issue.get("node_ids", [])]
-                    kept_node_ids = [node_id for node_id in original_node_ids if type_by_id.get(int(node_id), -999) != 1]
-                    if not kept_node_ids:
-                        continue
-                    issue["node_ids"] = kept_node_ids
-                    payload = dict(issue.get("source_payload", {}) or {})
-                    payload["failing_node_ids"] = kept_node_ids
-                    issue["source_payload"] = payload
-                filtered_base_issues.append(issue)
-            base_issues = filtered_base_issues
-        prereq = validation_prerequisite_summary(report)
-        hard_blocked = bool(prereq.get("soma_gate_failed")) or bool(prereq.get("multiple_somas_failed"))
-        critical_radii_node_ids = {
-            int(node_id)
-            for item in base_issues
-            if str(item.get("domain", "")) == "radii" and str(item.get("severity", "")) == "critical"
-            for node_id in item.get("node_ids", [])
-        }
-        suspicious_radii: list[dict] = []
-        if not hard_blocked and not prereq.get("unsupported_section_types") and not prereq.get("missing_soma"):
-            suspicious_radii = issues_from_radii_suspicion(doc.df, ignore_node_ids=critical_radii_node_ids)
-
-        type_suspicious: list[dict] = []
-        if not hard_blocked and doc.df is not None and not doc.df.empty:
-            tmp_fd, tmp_in = tempfile.mkstemp(prefix="swctools_issue_type_", suffix=".swc")
-            os.close(tmp_fd)
-            tmp_path = Path(tmp_in)
-            try:
-                self._write_swc_file(str(tmp_path), doc.df)
-                result_obj = run_validation_auto_typing_file(
-                    str(tmp_path),
-                    write_output=False,
-                    write_log=False,
-                )
-                type_suspicious = issues_from_type_suspicion(
-                    list(getattr(result_obj, "rows", []) or []),
-                    list(getattr(result_obj, "types", []) or []),
-                )
-            except Exception:
-                type_suspicious = []
-            finally:
-                try:
-                    tmp_path.unlink(missing_ok=True)
-                except Exception:
-                    pass
-
-        simplification_suggestion = issues_from_simplification_suggestion(doc.df)
-        all_issues = list(base_issues) + list(suspicious_radii) + list(type_suspicious) + list(simplification_suggestion)
-        def _issue_priority(item: dict) -> tuple[int, int, int, int, str]:
-            source_key = str(item.get("source_key", "")).strip()
-            severity = str(item.get("severity", "")).strip()
-            status = str(item.get("status", "")).strip()
-            certainty = str(item.get("certainty", "")).strip()
-            return (
-                0 if source_key == "has_soma" else 1,
-                {"critical": 0, "warning": 1, "info": 2}.get(severity, 9),
-                {"open": 0, "muted": 1, "skipped": 1, "fixed": 2}.get(status, 9),
-                {"rule": 0, "suspicious": 1, "ai": 2}.get(certainty, 9),
-                str(item.get("title", "")).lower(),
-            )
-
-        all_issues.sort(
-            key=_issue_priority
-        )
-        return all_issues
+        return build_issue_list(doc.df, report)
 
     def _on_validation_report_ready(self, report: dict):
         doc = self._active_document()
@@ -3160,10 +3053,18 @@ class SWCMainWindow(QMainWindow):
         if not isinstance(new_df, pd.DataFrame) or new_df.empty:
             self._append_log("Validation: Index Clean did not produce a valid SWC.", "WARN")
             return
-        details = [
-            "Validation Index Clean reordered the SWC so parents come before children.",
-            "Node IDs were reassigned to a continuous parent-before-child order.",
-        ]
+        original_node_count = int(len(doc.df))
+        new_node_count = int(len(new_df))
+        remapped_id_count = sum(
+            1 for old_id, new_id in dict(id_map or {}).items() if int(old_id) != int(new_id)
+        )
+        details = validation_index_clean_detail_lines(
+            input_path=str(doc.file_path or doc.filename or ""),
+            output_path="",
+            original_node_count=original_node_count,
+            new_node_count=new_node_count,
+            remapped_id_count=remapped_id_count,
+        )
         self._apply_document_dataframe(
             doc,
             new_df,

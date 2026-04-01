@@ -100,25 +100,25 @@ Under `rules`:
 Clean one file with the current JSON-configured three-pass method:
 
 ```bash
-swcstudio batch radii-clean ./data/single-soma.swc
+swcstudio radii-clean ./data/single-soma.swc
 ```
 
 Clean one file while overriding rules for this run:
 
 ```bash
-swcstudio batch radii-clean ./data/single-soma.swc --config-json '{"rules":{"local_outlier":{"max_percent_deviation":0.4}}}'
+swcstudio radii-clean ./data/single-soma.swc --config-json '{"rules":{"local_outlier":{"max_percent_deviation":0.4}}}'
 ```
 
 Validation command path (same backend):
 
 ```bash
-swcstudio validation radii-clean ./data/single-soma.swc
+swcstudio radii-clean ./data/single-soma.swc
 ```
 
 ## Outputs and logs
 
-- file mode: writes `<stem>_radii_cleaned.swc` and `<stem>_radii_cleaning_report.txt`
-- folder mode: writes `<folder>/<folder>_radii_cleaned/` plus folder report
+- file mode: writes `<stem>_radii_cleaning_<timestamp>.swc` and `<stem>_radii_cleaning_<timestamp>.txt`
+- folder mode: writes `<folder>/<folder>_batch_radii_cleaning_<timestamp>/` plus a matching timestamped report
 
 Report includes:
 

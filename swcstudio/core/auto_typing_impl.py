@@ -16,6 +16,11 @@ from swcstudio.core.config import load_feature_config, merge_config, save_featur
 from swcstudio.core.reporting import (
     auto_typing_log_path_for_file,
     format_auto_typing_report_text,
+    operation_output_dir_for_folder,
+    operation_output_path_for_file,
+    operation_report_path_for_file,
+    operation_report_path_for_folder,
+    timestamp_slug,
     write_text_report,
 )
 
@@ -1353,11 +1358,12 @@ def run_rule_file(
     types, radii, type_changes, radius_changes = _apply_rules(rows, opts)
 
     out_path: Path | None = None
+    run_timestamp = timestamp_slug()
     if write_output:
         out_path = (
             Path(output_path)
             if output_path
-            else in_path.with_name(f"{in_path.stem}_auto_typed{in_path.suffix}")
+            else operation_output_path_for_file(in_path, "auto_typing", timestamp=run_timestamp)
         )
         _write_swc(out_path, headers, rows, types, radii)
 
@@ -1378,7 +1384,11 @@ def run_rule_file(
 
     log_path: str | None = None
     if write_log:
-        log_target = auto_typing_log_path_for_file(in_path)
+        log_target = (
+            auto_typing_log_path_for_file(in_path)
+            if output_path
+            else operation_report_path_for_file(in_path, "auto_typing", timestamp=run_timestamp)
+        )
         payload = {
             "folder": str(in_path.parent),
             "out_dir": str(out_path.parent if out_path is not None else in_path.parent),
@@ -1420,8 +1430,8 @@ def run_rule_batch(folder: str, opts: RuleBatchOptions) -> RuleBatchResult:
     in_dir = Path(folder)
     swc_files = sorted([p for p in in_dir.iterdir() if p.is_file() and p.suffix.lower() == ".swc"])
 
-    out_dir = in_dir / f"{in_dir.name}_auto_typing"
-    out_dir.mkdir(parents=True, exist_ok=True)
+    run_timestamp = timestamp_slug()
+    out_dir = operation_output_dir_for_folder(in_dir, "batch_auto_typing", timestamp=run_timestamp)
 
     failures: list[str] = []
     per_file: list[str] = []
@@ -1442,7 +1452,12 @@ def run_rule_batch(folder: str, opts: RuleBatchOptions) -> RuleBatchResult:
             orig_types = [int(r["type"]) for r in rows]
             orig_radii = [float(r["radius"]) for r in rows]
             types, radii, type_changes, radius_changes = _apply_rules(rows, opts)
-            out_path = out_dir / swc_path.name
+            out_path = operation_output_path_for_file(
+                swc_path,
+                "batch_auto_typing",
+                output_dir=out_dir,
+                timestamp=run_timestamp,
+            )
             _write_swc(out_path, headers, rows, types, radii)
 
             processed += 1
@@ -1476,7 +1491,7 @@ def run_rule_batch(folder: str, opts: RuleBatchOptions) -> RuleBatchResult:
 
     zip_path: str | None = None
     if opts.zip_output and processed > 0:
-        zip_target = in_dir / f"{in_dir.name}_auto_typing.zip"
+        zip_target = in_dir / f"{out_dir.name}.zip"
         with zipfile.ZipFile(zip_target, "w", compression=zipfile.ZIP_DEFLATED) as zf:
             for f in sorted(out_dir.glob("*.swc")):
                 zf.write(f, arcname=f"{out_dir.name}/{f.name}")
@@ -1496,7 +1511,10 @@ def run_rule_batch(folder: str, opts: RuleBatchOptions) -> RuleBatchResult:
         "per_file": per_file,
         "change_details": change_details,
     }
-    log_path = write_text_report(out_dir / "auto_typing_report.txt", format_auto_typing_report_text(payload))
+    log_path = write_text_report(
+        operation_report_path_for_folder(in_dir, "batch_auto_typing", output_dir=out_dir, timestamp=run_timestamp),
+        format_auto_typing_report_text(payload),
+    )
 
     return RuleBatchResult(
         folder=str(in_dir),

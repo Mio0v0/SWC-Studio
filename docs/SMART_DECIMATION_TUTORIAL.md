@@ -50,31 +50,31 @@ Key parameters:
 Preview summary without writing:
 
 ```bash
-swcstudio geometry simplify ./data/single-soma.swc
+swcstudio simplify ./data/single-soma.swc
 ```
 
 Write simplified file:
 
 ```bash
-swcstudio geometry simplify ./data/single-soma.swc --write
+swcstudio simplify ./data/single-soma.swc --write
 ```
 
 Custom output path:
 
 ```bash
-swcstudio geometry simplify ./data/single-soma.swc --write --out ./data/single-soma_simplified.swc
+swcstudio simplify ./data/single-soma.swc --write --out ./data/single-soma_simplified.swc
 ```
 
 Temporary overrides:
 
 ```bash
-swcstudio geometry simplify ./data/single-soma.swc --write --config-json '{"thresholds":{"epsilon":1.2,"radius_tolerance":0.35},"flags":{"keep_tips":true,"keep_bifurcations":true}}'
+swcstudio simplify ./data/single-soma.swc --write --config-json '{"thresholds":{"epsilon":1.2,"radius_tolerance":0.35},"flags":{"keep_tips":true,"keep_bifurcations":true}}'
 ```
 
 ## Outputs and logs
 
-- output SWC (when `--write`)
-- simplification log: `<stem>_simplification_log.txt`
+- output SWC (when `--write`): `<stem>_geometry_simplify_<timestamp>.swc`
+- simplification log: `<stem>_geometry_simplify_<timestamp>.txt`
 
 Log includes:
 

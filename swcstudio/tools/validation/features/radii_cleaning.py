@@ -49,17 +49,37 @@ def get_config() -> dict[str, Any]:
     return merge_config(DEFAULT_CONFIG, loaded)
 
 
-def clean_path(path: str, *, config_overrides: dict | None = None) -> dict[str, Any]:
+def clean_path(
+    path: str,
+    *,
+    write_file_report: bool = True,
+    config_overrides: dict | None = None,
+) -> dict[str, Any]:
     cfg = merge_config(get_config(), config_overrides)
     method = str(cfg.get("method", "shared"))
     fn = resolve_method(FEATURE_KEY, method)
+    if method == "shared":
+        cfg_overrides: dict[str, Any] = {}
+        nested = cfg.get("config_overrides", {})
+        if isinstance(nested, dict):
+            cfg_overrides.update(nested)
+        for k, v in dict(cfg).items():
+            if k in {"enabled", "method", "config_overrides"}:
+                continue
+            cfg_overrides[k] = v
+        return shared_clean_path(path, write_file_report=write_file_report, config_overrides=cfg_overrides)
     return fn(path, cfg)
 
 
-def clean_file(path: str, *, config_overrides: dict | None = None) -> dict[str, Any]:
+def clean_file(
+    path: str,
+    *,
+    write_report: bool = True,
+    config_overrides: dict | None = None,
+) -> dict[str, Any]:
     # Keep helper for callers that require explicit file-only contract.
     cfg = dict(config_overrides or {})
-    return shared_clean_file(path, config_overrides=cfg)
+    return shared_clean_file(path, write_report=write_report, config_overrides=cfg)
 
 
 def clean_folder(path: str, *, config_overrides: dict | None = None) -> dict[str, Any]:

@@ -1,4 +1,4 @@
-"""Manual single-node radius editing shared by GUI, CLI, and Python API."""
+"""Manual single-node type editing shared by GUI, CLI, and Python API."""
 
 from __future__ import annotations
 
@@ -11,34 +11,33 @@ from swcstudio.core.swc_io import parse_swc_text_preserve_tokens, write_swc_to_b
 from swcstudio.plugins.registry import register_builtin_method, resolve_method
 
 TOOL = "morphology_editing"
-FEATURE = "manual_radii"
+FEATURE = "manual_label"
 FEATURE_KEY = f"{TOOL}.{FEATURE}"
 
 DEFAULT_CONFIG: dict[str, Any] = {
     "enabled": True,
     "method": "default",
-    "output": {"suffix": "_radius_edited"},
 }
 
 
-def _builtin_set_radius(swc_text: str, node_id: int, radius: float, config: dict[str, Any]) -> dict[str, Any]:
+def _builtin_set_type(swc_text: str, node_id: int, new_type: int, config: dict[str, Any]) -> dict[str, Any]:
     _ = config
     df = parse_swc_text_preserve_tokens(swc_text)
     mask = df["id"].astype(int) == int(node_id)
     if not bool(mask.any()):
         raise ValueError(f"Node {int(node_id)} not found.")
-    old_radius = float(df.loc[mask, "radius"].iloc[0])
-    df.loc[mask, "radius"] = float(radius)
+    old_type = int(df.loc[mask, "type"].iloc[0])
+    df.loc[mask, "type"] = int(new_type)
     return {
         "dataframe": df,
         "bytes": write_swc_to_bytes_preserve_tokens(df),
         "node_id": int(node_id),
-        "old_radius": old_radius,
-        "new_radius": float(radius),
+        "old_type": old_type,
+        "new_type": int(new_type),
     }
 
 
-register_builtin_method(FEATURE_KEY, "default", _builtin_set_radius)
+register_builtin_method(FEATURE_KEY, "default", _builtin_set_type)
 
 
 def get_config() -> dict[str, Any]:
@@ -46,28 +45,28 @@ def get_config() -> dict[str, Any]:
     return merge_config(DEFAULT_CONFIG, loaded)
 
 
-def set_node_radius_text(
+def set_node_type_text(
     swc_text: str,
     *,
     node_id: int,
-    radius: float,
+    new_type: int,
     config_overrides: dict | None = None,
 ) -> dict[str, Any]:
     cfg = merge_config(get_config(), config_overrides)
     method = str(cfg.get("method", "default"))
     fn = resolve_method(FEATURE_KEY, method)
-    out = fn(swc_text, int(node_id), float(radius), cfg)
+    out = fn(swc_text, int(node_id), int(new_type), cfg)
     if not isinstance(out, dict) or "bytes" not in out:
-        raise TypeError("manual radii method must return dict with 'bytes'")
+        raise TypeError("manual label method must return dict with 'bytes'")
     out["config_used"] = cfg
     return out
 
 
-def set_node_radius_file(
+def set_node_type_file(
     path: str,
     *,
     node_id: int,
-    radius: float,
+    new_type: int,
     out_path: str | None = None,
     write_output: bool = False,
     config_overrides: dict | None = None,
@@ -76,15 +75,15 @@ def set_node_radius_file(
     if not fp.exists():
         raise FileNotFoundError(path)
     text = fp.read_text(encoding="utf-8", errors="ignore")
-    out = set_node_radius_text(text, node_id=node_id, radius=radius, config_overrides=config_overrides)
-    run_timestamp = timestamp_slug()
+    out = set_node_type_text(text, node_id=node_id, new_type=new_type, config_overrides=config_overrides)
 
     output_path: Path | None = None
+    run_timestamp = timestamp_slug()
     if write_output:
         output_path = (
             resolve_requested_output_path_for_file(fp, out_path)
             if out_path
-            else operation_output_path_for_file(fp, "morphology_set_radius", timestamp=run_timestamp)
+            else operation_output_path_for_file(fp, "morphology_set_type", timestamp=run_timestamp)
         )
         output_path.write_bytes(out["bytes"])
 

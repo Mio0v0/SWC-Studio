@@ -9,7 +9,10 @@ from __future__ import annotations
 import json
 from datetime import datetime
 from pathlib import Path
+import re
 from typing import Any
+
+import pandas as pd
 
 from swcstudio import __version__ as SWCTOOLS_VERSION
 from swcstudio.core.custom_types import load_custom_type_definitions
@@ -31,6 +34,19 @@ def _now() -> str:
 
 def _timestamp_slug() -> str:
     return datetime.now().strftime("%Y%m%d_%H%M%S")
+
+
+def timestamp_slug() -> str:
+    return _timestamp_slug()
+
+
+def _operation_slug(operation_name: str) -> str:
+    raw = str(operation_name or "").strip().lower()
+    if not raw:
+        return "operation"
+    raw = re.sub(r"[^a-z0-9]+", "_", raw)
+    raw = re.sub(r"_+", "_", raw).strip("_")
+    return raw or "operation"
 
 
 def _label_type_legend_lines() -> list[str]:
@@ -74,7 +90,10 @@ def _unique_path(path: Path) -> Path:
 
 def output_dir_for_file(path: str | Path) -> Path:
     p = Path(path)
-    out_dir = p.parent / f"{p.stem}_swc_studio_output"
+    if str(p.parent.name).endswith("_swc_studio_output"):
+        out_dir = p.parent
+    else:
+        out_dir = p.parent / f"{p.stem}_swc_studio_output"
     out_dir.mkdir(parents=True, exist_ok=True)
     return out_dir
 
@@ -90,6 +109,90 @@ def report_path_for_file(path: str | Path, report_tag: str, *, extension: str = 
     return _unique_path(base)
 
 
+def operation_output_path_for_file(
+    path: str | Path,
+    operation_name: str,
+    *,
+    extension: str | None = None,
+    output_dir: str | Path | None = None,
+    timestamp: str | None = None,
+    variant: str = "",
+) -> Path:
+    p = Path(path)
+    parent = Path(output_dir) if output_dir is not None else output_dir_for_file(p)
+    ext = extension if extension is not None else p.suffix
+    op = _operation_slug(operation_name)
+    parts = [p.stem, op]
+    variant_slug = _operation_slug(variant) if str(variant).strip() else ""
+    if variant_slug:
+        parts.append(variant_slug)
+    parts.append(str(timestamp or _timestamp_slug()))
+    base = parent / f"{'_'.join(parts)}{ext}"
+    return _unique_path(base)
+
+
+def resolve_requested_output_path_for_file(
+    path: str | Path,
+    requested_output_path: str | Path,
+) -> Path:
+    src = Path(path)
+    requested = Path(requested_output_path)
+    if requested.is_absolute():
+        return requested
+    return output_dir_for_file(src) / requested.name
+
+
+def operation_report_path_for_file(
+    path: str | Path,
+    operation_name: str,
+    *,
+    extension: str = ".txt",
+    timestamp: str | None = None,
+) -> Path:
+    return operation_output_path_for_file(
+        path,
+        operation_name,
+        extension=extension,
+        output_dir=log_dir_for_file(path),
+        timestamp=timestamp,
+    )
+
+
+def operation_output_dir_for_folder(
+    folder: str | Path,
+    operation_name: str,
+    *,
+    output_root: str | Path | None = None,
+    timestamp: str | None = None,
+) -> Path:
+    p = Path(folder)
+    parent = Path(output_root) if output_root is not None else p
+    op = _operation_slug(operation_name)
+    base = parent / f"{p.name}_{op}_{str(timestamp or _timestamp_slug())}"
+    candidate = base
+    i = 1
+    while candidate.exists():
+        candidate = parent / f"{base.name}_{i}"
+        i += 1
+    candidate.mkdir(parents=True, exist_ok=True)
+    return candidate
+
+
+def operation_report_path_for_folder(
+    folder: str | Path,
+    operation_name: str,
+    *,
+    output_dir: str | Path | None = None,
+    extension: str = ".txt",
+    timestamp: str | None = None,
+) -> Path:
+    p = Path(folder)
+    parent = Path(output_dir) if output_dir is not None else p
+    op = _operation_slug(operation_name)
+    base = parent / f"{p.name}_{op}_{str(timestamp or _timestamp_slug())}{extension}"
+    return _unique_path(base)
+
+
 def write_text_report(path: str | Path, text: str) -> str:
     p = Path(path)
     p.parent.mkdir(parents=True, exist_ok=True)
@@ -98,12 +201,12 @@ def write_text_report(path: str | Path, text: str) -> str:
 
 
 def validation_log_path_for_file(path: str | Path) -> Path:
-    return report_path_for_file(path, "validation_report")
+    return operation_report_path_for_file(path, "validation_run")
 
 
-def morphology_session_log_path(path: str | Path) -> Path:
+def morphology_session_log_path(path: str | Path, *, direct_parent: bool = False) -> Path:
     p = Path(path)
-    log_dir = log_dir_for_file(p)
+    log_dir = p.parent if direct_parent else log_dir_for_file(p)
     base = log_dir / f"{p.stem}_session_log_{_timestamp_slug()}.txt"
     return _unique_path(base)
 
@@ -113,15 +216,15 @@ def correction_summary_log_path_for_file(path: str | Path) -> Path:
 
 
 def simplification_log_path_for_file(path: str | Path) -> Path:
-    return report_path_for_file(path, "simplification_log")
+    return operation_report_path_for_file(path, "geometry_simplify")
 
 
 def auto_typing_log_path_for_file(path: str | Path) -> Path:
-    return report_path_for_file(path, "auto_typing_report")
+    return operation_report_path_for_file(path, "auto_typing")
 
 
 def radii_cleaning_log_path_for_file(path: str | Path) -> Path:
-    return report_path_for_file(path, "radii_cleaning_report")
+    return operation_report_path_for_file(path, "radii_cleaning")
 
 
 def format_validation_precheck_text(report: dict[str, Any]) -> str:
@@ -491,6 +594,277 @@ def format_morphology_session_log_text(
             lines.append("No node-level parameter changes recorded.")
         lines.append("")
     return "\n".join(lines).rstrip() + "\n"
+
+
+def _snapshot_log_value(key: str, value: Any) -> str:
+    if value is None:
+        return ""
+    if key in {"id", "type", "parent"}:
+        try:
+            return str(int(float(value)))
+        except Exception:
+            return str(value)
+    if key in {"radius", "x", "y", "z"}:
+        try:
+            return f"{float(value):.10g}"
+        except Exception:
+            return str(value)
+    return str(value)
+
+
+def _row_snapshot_for_log(row: pd.Series | dict[str, Any]) -> dict[str, str]:
+    return {
+        "id": _snapshot_log_value("id", row["id"]),
+        "type": _snapshot_log_value("type", row["type"]),
+        "parent": _snapshot_log_value("parent", row["parent"]),
+        "radius": _snapshot_log_value("radius", row["radius"]),
+        "x": _snapshot_log_value("x", row["x"]),
+        "y": _snapshot_log_value("y", row["y"]),
+        "z": _snapshot_log_value("z", row["z"]),
+    }
+
+
+def _format_snapshot_fields(snap: dict[str, str], keys: list[str]) -> str:
+    labels = {
+        "id": "id",
+        "type": "type",
+        "parent": "parent",
+        "radius": "radius",
+        "x": "x",
+        "y": "y",
+        "z": "z",
+    }
+    parts: list[str] = []
+    for key in keys:
+        val = str((snap or {}).get(key, "")).strip()
+        if val == "":
+            continue
+        parts.append(f"{labels[key]}={val}")
+    return ", ".join(parts)
+
+
+def build_change_rows_for_dataframes(
+    old_df: pd.DataFrame | None,
+    new_df: pd.DataFrame | None,
+    *,
+    id_map: dict[int, int] | None = None,
+) -> list[dict[str, Any]]:
+    if not isinstance(old_df, pd.DataFrame) and not isinstance(new_df, pd.DataFrame):
+        return []
+
+    old_lookup: dict[int, dict[str, str]] = {}
+    new_lookup: dict[int, dict[str, str]] = {}
+    if isinstance(old_df, pd.DataFrame) and not old_df.empty:
+        old_lookup = {
+            int(row["id"]): _row_snapshot_for_log(row)
+            for _, row in old_df.loc[:, ["id", "type", "x", "y", "z", "radius", "parent"]].iterrows()
+        }
+    if isinstance(new_df, pd.DataFrame) and not new_df.empty:
+        new_lookup = {
+            int(row["id"]): _row_snapshot_for_log(row)
+            for _, row in new_df.loc[:, ["id", "type", "x", "y", "z", "radius", "parent"]].iterrows()
+        }
+
+    change_rows: list[dict[str, Any]] = []
+    used_old: set[int] = set()
+    used_new: set[int] = set()
+    compare_keys = ["id", "type", "parent", "radius", "x", "y", "z"]
+
+    if isinstance(id_map, dict) and id_map:
+        for old_id, new_id in sorted((int(k), int(v)) for k, v in id_map.items()):
+            old_snap = old_lookup.get(old_id)
+            new_snap = new_lookup.get(new_id)
+            if old_snap is None or new_snap is None:
+                continue
+            used_old.add(old_id)
+            used_new.add(new_id)
+            changed_keys = [key for key in compare_keys if str(old_snap.get(key, "")) != str(new_snap.get(key, ""))]
+            if not changed_keys:
+                continue
+            change_rows.append(
+                {
+                    "node_id": f"{old_id}->{new_id}" if old_id != new_id else str(old_id),
+                    "changed_keys": list(changed_keys),
+                    "old_values": {key: str(old_snap.get(key, "")) for key in changed_keys},
+                    "new_values": {key: str(new_snap.get(key, "")) for key in changed_keys},
+                    "old_parameters": _format_snapshot_fields(old_snap, changed_keys),
+                    "new_parameters": _format_snapshot_fields(new_snap, changed_keys),
+                }
+            )
+
+    for nid in sorted(set(old_lookup).intersection(new_lookup)):
+        if nid in used_old or nid in used_new:
+            continue
+        old_snap = old_lookup[nid]
+        new_snap = new_lookup[nid]
+        used_old.add(nid)
+        used_new.add(nid)
+        changed_keys = [key for key in compare_keys if str(old_snap.get(key, "")) != str(new_snap.get(key, ""))]
+        if not changed_keys:
+            continue
+        change_rows.append(
+            {
+                "node_id": str(nid),
+                "changed_keys": list(changed_keys),
+                "old_values": {key: str(old_snap.get(key, "")) for key in changed_keys},
+                "new_values": {key: str(new_snap.get(key, "")) for key in changed_keys},
+                "old_parameters": _format_snapshot_fields(old_snap, changed_keys),
+                "new_parameters": _format_snapshot_fields(new_snap, changed_keys),
+            }
+        )
+
+    all_keys = ["id", "type", "parent", "radius", "x", "y", "z"]
+    for nid in sorted(set(old_lookup) - used_old):
+        old_snap = old_lookup[nid]
+        change_rows.append(
+            {
+                "node_id": str(nid),
+                "changed_keys": list(all_keys),
+                "old_values": {key: str(old_snap.get(key, "")) for key in all_keys},
+                "new_values": {},
+                "old_parameters": _format_snapshot_fields(old_snap, all_keys),
+                "new_parameters": "[deleted]",
+            }
+        )
+
+    for nid in sorted(set(new_lookup) - used_new):
+        new_snap = new_lookup[nid]
+        change_rows.append(
+            {
+                "node_id": str(nid),
+                "changed_keys": list(all_keys),
+                "old_values": {},
+                "new_values": {key: str(new_snap.get(key, "")) for key in all_keys},
+                "old_parameters": "[inserted]",
+                "new_parameters": _format_snapshot_fields(new_snap, all_keys),
+            }
+        )
+
+    return change_rows
+
+
+def build_operation_entry(
+    *,
+    title: str,
+    summary: str,
+    details: list[str] | None = None,
+    old_df: pd.DataFrame | None = None,
+    new_df: pd.DataFrame | None = None,
+    id_map: dict[int, int] | None = None,
+    change_rows: list[dict[str, Any]] | None = None,
+    op_time: str | None = None,
+) -> dict[str, Any]:
+    node_changes = (
+        list(change_rows or [])
+        if isinstance(change_rows, list)
+        else build_change_rows_for_dataframes(old_df, new_df, id_map=id_map)
+    )
+    stamp = str(op_time or datetime.now().strftime("%H:%M:%S"))
+    stamped_rows: list[dict[str, Any]] = []
+    seq = 0
+    for row in node_changes:
+        seq += 1
+        stamped_rows.append(
+            {
+                "seq": seq,
+                "time": stamp,
+                "node_id": str(row.get("node_id", "")),
+                "changed_keys": list(row.get("changed_keys", []) or []),
+                "old_values": dict(row.get("old_values", {}) or {}),
+                "new_values": dict(row.get("new_values", {}) or {}),
+                "old_parameters": str(row.get("old_parameters", "")),
+                "new_parameters": str(row.get("new_parameters", "")),
+            }
+        )
+    return {
+        "time": stamp,
+        "title": str(title),
+        "summary": str(summary),
+        "details": list(details or []),
+        "affected_nodes": len(stamped_rows),
+        "changes": stamped_rows,
+    }
+
+
+def validation_index_clean_detail_lines(
+    *,
+    input_path: str,
+    output_path: str,
+    original_node_count: int,
+    new_node_count: int,
+    remapped_id_count: int,
+) -> list[str]:
+    return [
+        f"Input: {str(input_path or '').strip() or '(unknown)'}",
+        f"Output: {str(output_path or '').strip() or '(not written yet)'}",
+        f"Original node count: {int(original_node_count)}",
+        f"New node count: {int(new_node_count)}",
+        f"Remapped ID count: {int(remapped_id_count)}",
+    ]
+
+
+def format_operation_report_text(
+    *,
+    source_file: str,
+    title: str,
+    summary: str,
+    details: list[str] | None = None,
+    old_df: pd.DataFrame | None = None,
+    new_df: pd.DataFrame | None = None,
+    id_map: dict[int, int] | None = None,
+    change_rows: list[dict[str, Any]] | None = None,
+    generated_at: str | None = None,
+) -> str:
+    stamp = str(generated_at or _now())
+    operation = build_operation_entry(
+        title=title,
+        summary=summary,
+        details=list(details or []),
+        old_df=old_df,
+        new_df=new_df,
+        id_map=id_map,
+        change_rows=change_rows,
+        op_time=stamp.split(" ")[-1] if " " in stamp else stamp,
+    )
+    return format_morphology_session_log_text(
+        source_file=str(source_file),
+        session_started=stamp,
+        session_ended=stamp,
+        operations=[operation],
+    )
+
+
+def write_operation_report_for_file(
+    source_path: str | Path,
+    operation_name: str,
+    *,
+    title: str,
+    summary: str,
+    details: list[str] | None = None,
+    old_df: pd.DataFrame | None = None,
+    new_df: pd.DataFrame | None = None,
+    id_map: dict[int, int] | None = None,
+    change_rows: list[dict[str, Any]] | None = None,
+    report_path: str | Path | None = None,
+    timestamp: str | None = None,
+) -> str:
+    src = Path(source_path)
+    target = Path(report_path) if report_path is not None else operation_report_path_for_file(
+        src,
+        operation_name,
+        timestamp=timestamp,
+    )
+    text = format_operation_report_text(
+        source_file=src.name,
+        title=title,
+        summary=summary,
+        details=details,
+        old_df=old_df,
+        new_df=new_df,
+        id_map=id_map,
+        change_rows=change_rows,
+    )
+    return write_text_report(target, text)
 
 
 def format_correction_summary_report_text(payload: dict[str, Any]) -> str:

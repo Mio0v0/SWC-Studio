@@ -91,7 +91,7 @@ Runs the shared auto-typing logic on a single file.
 
 Runs validation index clean in memory.
 
-#### `validation_index_clean_file(path, *, out_path=None, write_output=False, config_overrides=None) -> dict`
+#### `validation_index_clean_file(path, *, out_path=None, write_output=False, write_report=True, config_overrides=None) -> dict`
 
 Runs validation index clean on one file.
 
