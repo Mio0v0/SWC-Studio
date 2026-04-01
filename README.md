@@ -16,7 +16,7 @@ There are two main ways to use `SWC-Studio`. If you want the full Python workflo
 
 Canonical project documentation lives on the docs website:
 
-- Live docs: `https://mio0v0.github.io/SWC-Studio/`
+- Live docs: [https://mio0v0.github.io/SWC-Studio/](https://mio0v0.github.io/SWC-Studio/)
 
 ## What This Project Does
 

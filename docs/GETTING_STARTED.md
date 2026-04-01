@@ -2,6 +2,22 @@
 
 This guide gets a first-time user from clone to usable CLI, GUI, and local docs.
 
+## Installing SWC-Studio
+
+We recommend installing `SWC-Studio` into a virtual environment managed by `venv`, `conda`, or `mamba`.
+
+Supported Python versions for this project are:
+
+- Python 3.10
+- Python 3.11
+- Python 3.12
+
+Recommended version:
+
+- Python 3.11 is the safest default for most users
+
+Using an isolated environment helps avoid dependency conflicts with other Python projects and makes it easier to reproduce CLI, GUI, and docs behavior on another machine.
+
 ## 1. Clone and enter project
 
 ```bash
@@ -10,6 +26,17 @@ cd <repo-folder-name>
 ```
 
 ## 2. Create environment and install
+
+If you are creating a new conda environment, specify the Python version during creation:
+
+```bash
+conda create -n swc-studio python=3.11 -y
+conda activate swc-studio
+python -m pip install --upgrade pip
+pip install -e ".[gui]"
+```
+
+If you prefer `venv`, use one of the following:
 
 macOS/Linux (GUI + CLI):
 
