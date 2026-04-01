@@ -65,7 +65,7 @@ templates_path = ["_templates"] if os.path.isdir(os.path.join(DOCS_DIR, "_templa
 html_static_path = ["_static"] if os.path.isdir(os.path.join(DOCS_DIR, "_static")) else []
 
 html_theme = "pydata_sphinx_theme"
-html_title = "SWC-Studio Documentation"
+html_title = f"SWC-Studio v{release}"
 html_theme_options = {
     "header_links_before_dropdown": 10,
     "navbar_align": "content",
@@ -79,6 +79,12 @@ html_theme_options = {
     "sidebar_includehidden": True,
     "show_toc_level": 2,
     "secondary_sidebar_items": ["page-toc"],
+    "logo": {
+        "text": f"SWC-Studio v{release}",
+        "image_light": "../packaging/icon.png",
+        "image_dark": "../packaging/icon.png",
+        "alt_text": f"SWC-Studio v{release}",
+    },
 }
 html_css_files = ["custom.css"]
 

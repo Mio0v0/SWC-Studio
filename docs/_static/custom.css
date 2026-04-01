@@ -18,6 +18,20 @@ html[data-theme="light"] body {
   box-shadow: 0 12px 28px rgba(45, 34, 18, 0.06);
 }
 
+.navbar-brand.logo {
+  gap: 0.85rem;
+}
+
+.navbar-brand.logo img.logo__image {
+  max-height: 2.8rem;
+  width: auto;
+}
+
+.navbar-brand.logo .logo__title {
+  margin-bottom: 0;
+  font-weight: 700;
+}
+
 .bd-header .navbar-nav > li > a,
 .bd-header .navbar-nav .nav-link {
   font-weight: 600;
@@ -126,6 +140,13 @@ html[data-theme="light"] body {
 div.highlight {
   background: #fbfaf7;
   border: 1px solid var(--swc-border);
+}
+
+.bd-article-container img {
+  border: 1px solid var(--swc-border);
+  border-radius: 18px;
+  box-shadow: 0 16px 38px rgba(50, 40, 24, 0.08);
+  margin: 1rem 0 0.6rem;
 }
 
 #ethical-ad-placement {

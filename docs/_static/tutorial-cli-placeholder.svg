@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="900" viewBox="0 0 1600 900" role="img" aria-labelledby="title desc">
+  <title id="title">CLI tutorial placeholder</title>
+  <desc id="desc">Placeholder image for a CLI tutorial screenshot.</desc>
+  <rect width="1600" height="900" fill="#f7f4ee"/>
+  <rect x="70" y="70" width="1460" height="760" rx="28" fill="#171a21"/>
+  <rect x="70" y="70" width="1460" height="76" rx="28" fill="#232733"/>
+  <circle cx="125" cy="108" r="12" fill="#f06a63"/>
+  <circle cx="163" cy="108" r="12" fill="#f4be4f"/>
+  <circle cx="201" cy="108" r="12" fill="#62c454"/>
+  <text x="800" y="390" text-anchor="middle" font-family="Menlo, Monaco, Consolas, monospace" font-size="60" font-weight="700" fill="#f5f7fb">Insert CLI Screenshot Here</text>
+  <text x="800" y="462" text-anchor="middle" font-family="Menlo, Monaco, Consolas, monospace" font-size="30" fill="#c1c9d7">Replace this placeholder with terminal output or an output-folder screenshot.</text>
+</svg>
