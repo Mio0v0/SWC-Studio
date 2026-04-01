@@ -340,8 +340,6 @@ def _compute_type_bounds(
     zero_only_small = bool(cfg.get("small_radius_zero_only", True))
     preserve_soma = bool(cfg.get("preserve_soma", True))
     per_type_cfg = _resolve_type_thresholds(cfg)
-    use_legacy_mode = "sanity_bounds" not in cfg
-    legacy_mode = str(cfg.get("threshold_mode", "percentile")).strip().lower()
 
     bounds: dict[int, tuple[bool, float, float]] = {}
     for t in sorted({int(v) for v in types.tolist()}):
@@ -355,23 +353,15 @@ def _compute_type_bounds(
         lower_abs = float(t_cfg.get("lower_abs", t_cfg.get("min_abs", global_bounds["lower_abs"])))
         upper_abs = float(t_cfg.get("upper_abs", t_cfg.get("max_abs", global_bounds["upper_abs"])))
 
-        if use_legacy_mode and legacy_mode == "absolute":
+        vals = radii[(types == int(t)) & np.isfinite(radii) & (radii > 0.0)]
+        if vals.size > 0:
+            pct_lo = float(np.percentile(vals, lower_pct))
+            pct_hi = float(np.percentile(vals, upper_pct))
+            lo = max(lower_abs, pct_lo)
+            hi = min(upper_abs, pct_hi)
+        else:
             lo = lower_abs
             hi = upper_abs
-        else:
-            vals = radii[(types == int(t)) & np.isfinite(radii) & (radii > 0.0)]
-            if vals.size > 0:
-                pct_lo = float(np.percentile(vals, lower_pct))
-                pct_hi = float(np.percentile(vals, upper_pct))
-                if use_legacy_mode and legacy_mode == "percentile":
-                    lo = pct_lo
-                    hi = pct_hi
-                else:
-                    lo = max(lower_abs, pct_lo)
-                    hi = min(upper_abs, pct_hi)
-            else:
-                lo = lower_abs
-                hi = upper_abs
         if zero_only_small:
             lo = 0.0
         if hi < lo:

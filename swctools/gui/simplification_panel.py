@@ -1,11 +1,11 @@
-"""Morphology Smart Decimation (RDP) control panel."""
+"""Simplification (RDP) control panel."""
 
 from __future__ import annotations
 
 import json
 from typing import Any
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import QFileSystemWatcher, Qt, Signal
 from PySide6.QtWidgets import (
     QCheckBox,
     QDialog,
@@ -34,11 +34,9 @@ _DEFAULT_CFG: dict[str, Any] = {
 
 
 class SimplificationPanel(QWidget):
-    """UI-only control panel for Smart Decimation workflow."""
+    """UI-only control panel for simplification workflow."""
 
     process_requested = Signal(dict)
-    apply_requested = Signal()
-    cancel_requested = Signal()
     log_message = Signal(str)
 
     def __init__(self, parent=None):
@@ -46,7 +44,10 @@ class SimplificationPanel(QWidget):
         self._cfg_path = feature_config_path("morphology_editing", "simplification")
         self._cfg_dialog: _SimplificationConfigDialog | None = None
         self._guide_dialog: _SimplificationRuleGuideDialog | None = None
+        self._cfg_watcher = QFileSystemWatcher(self)
+        self._cfg_watcher.fileChanged.connect(self._on_cfg_file_changed)
         self._build_ui()
+        self._reset_cfg_watcher()
         self._load_from_json()
         self.set_preview_state(False, None, None)
 
@@ -56,24 +57,19 @@ class SimplificationPanel(QWidget):
         root.setSpacing(8)
         root.setAlignment(Qt.AlignTop)
 
-        title = QLabel("Smart Decimation (RDP)")
+        title = QLabel("Simplification (RDP)")
         title.setStyleSheet("font-size: 14px; font-weight: 600; color: #333;")
         root.addWidget(title)
 
         desc = QLabel(
-            "Process creates a temporary Simplified View tab.\n"
-            "Apply saves a new SWC and replaces the current working buffer.\n"
-            "Cancel discards temporary preview."
+            "Run applies simplification directly to the current SWC.\n"
+            "The change is recorded in the session log like the other editing tools."
         )
         desc.setWordWrap(True)
         desc.setStyleSheet("font-size: 12px; color: #555;")
         root.addWidget(desc)
 
         cfg_row = QHBoxLayout()
-        self._btn_reload_json = QPushButton("Reload JSON")
-        self._btn_reload_json.clicked.connect(self._load_from_json)
-        cfg_row.addWidget(self._btn_reload_json)
-
         self._btn_open_json = QPushButton("Open JSON")
         self._btn_open_json.clicked.connect(self._open_json)
         cfg_row.addWidget(self._btn_open_json)
@@ -110,20 +106,9 @@ class SimplificationPanel(QWidget):
         flag_row.addStretch()
         root.addLayout(flag_row)
 
-        self._btn_process = QPushButton("Process")
+        self._btn_process = QPushButton("Run")
         self._btn_process.clicked.connect(self._on_process)
         root.addWidget(self._btn_process)
-
-        action_bar = QHBoxLayout()
-        self._btn_apply = QPushButton("Apply")
-        self._btn_apply.clicked.connect(self.apply_requested.emit)
-        action_bar.addWidget(self._btn_apply)
-
-        self._btn_cancel = QPushButton("Cancel")
-        self._btn_cancel.clicked.connect(self.cancel_requested.emit)
-        action_bar.addWidget(self._btn_cancel)
-        action_bar.addStretch()
-        root.addLayout(action_bar)
 
         self._summary = QPlainTextEdit()
         self._summary.setReadOnly(True)
@@ -165,6 +150,20 @@ class SimplificationPanel(QWidget):
         self._keep_tips.setChecked(bool(flags.get("keep_tips", True)))
         self._keep_bifs.setChecked(bool(flags.get("keep_bifurcations", True)))
         self.log_message.emit(f"Loaded simplification config: {self._cfg_path}")
+        self._reset_cfg_watcher()
+
+    def _reset_cfg_watcher(self):
+        try:
+            files = list(self._cfg_watcher.files())
+            if files:
+                self._cfg_watcher.removePaths(files)
+            if self._cfg_path.exists():
+                self._cfg_watcher.addPath(str(self._cfg_path))
+        except Exception:
+            pass
+
+    def _on_cfg_file_changed(self, _path: str):
+        self._load_from_json()
 
     def _on_process(self):
         self.process_requested.emit(self.current_overrides())
@@ -187,19 +186,16 @@ class SimplificationPanel(QWidget):
         summary: dict[str, Any] | None,
         log_path: str | None,
     ):
-        self._btn_apply.setEnabled(bool(has_preview))
-        self._btn_cancel.setEnabled(bool(has_preview))
-
         if not summary:
             self._summary.setPlainText(
-                "No simplification preview yet.\n"
-                "Use Process to open a temporary Simplified View tab."
+                "No simplification run yet.\n"
+                "Use Run to apply simplification to the current SWC."
             )
             return
 
         lines = [
-            "Smart Decimation Preview",
-            "------------------------",
+            "Simplification Applied",
+            "----------------------",
             f"Original Node Count: {summary.get('original_node_count', 0)}",
             f"New Node Count: {summary.get('new_node_count', 0)}",
             f"Reduction (%): {float(summary.get('reduction_percent', 0.0)):.2f}",
@@ -302,14 +298,14 @@ class _SimplificationConfigDialog(QDialog):
 class _SimplificationRuleGuideDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("Smart Decimation Rule Guide")
+        self.setWindowTitle("Simplification Rule Guide")
         self.resize(820, 580)
 
         root = QVBoxLayout(self)
         root.setContentsMargins(10, 10, 10, 10)
         root.setSpacing(8)
 
-        title = QLabel("Smart Decimation (RDP) - Rule Guide")
+        title = QLabel("Simplification (RDP) - Rule Guide")
         title.setStyleSheet("font-size: 14px; font-weight: 600; color: #222;")
         root.addWidget(title)
 

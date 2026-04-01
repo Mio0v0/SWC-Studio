@@ -34,7 +34,7 @@ Methods are registered to a feature key + method name.
 Example:
 
 ```python
-registrar.register_method("atlas_registration.registration", "brainglobe", my_func)
+registrar.register_method("analysis.summary", "lab_summary", my_func)
 ```
 
 If selected method exists as plugin method, it overrides same-name builtin method at runtime.
@@ -98,7 +98,7 @@ set SWCTOOLS_PLUGINS=my_lab_plugins.plugin_a,my_lab_plugins.plugin_b
 
 ## 8. Thin-wrapper pattern
 
-For third-party tools (example: BrainGlobe CLI wrappers):
+For third-party tools or in-house libraries:
 
 - plugin method accepts swctools inputs
 - plugin method calls external command/library

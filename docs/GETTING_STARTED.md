@@ -97,8 +97,9 @@ CLI examples (macOS/Linux path style):
 
 ```bash
 swctools batch split ./data
+swctools check ./data/single-soma.swc
 swctools validation run ./data/single-soma.swc
-swctools morphology simplify ./data/single-soma.swc --write
+swctools geometry simplify ./data/single-soma.swc --write
 swctools geometry connect ./data/single-soma.swc --start-id 10 --end-id 22 --write
 ```
 
@@ -106,8 +107,9 @@ CLI examples (Windows path style):
 
 ```powershell
 swctools batch split .\data
+swctools check .\data\single-soma.swc
 swctools validation run .\data\single-soma.swc
-swctools morphology simplify .\data\single-soma.swc --write
+swctools geometry simplify .\data\single-soma.swc --write
 swctools geometry connect .\data\single-soma.swc --start-id 10 --end-id 22 --write
 ```
 
@@ -143,7 +145,7 @@ Common examples:
 - split folder: `<input_folder>/<input_folder>_split/split_report.txt`
 - auto typing folder: `<input_folder>/<input_folder>_auto_typing/auto_typing_report.txt`
 - radii cleaning: `*_radii_cleaning_report.txt`
-- smart decimation: `*_simplification_log.txt`
+- simplification: `*_simplification_log.txt`
 - morphology edit session: `*_morphology_session_log.txt`
 
 ## 7. Build this Sphinx documentation

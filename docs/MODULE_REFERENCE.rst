@@ -78,11 +78,8 @@ Morphology Editing
 .. automodule:: swctools.tools.morphology_editing.features.simplification
    :members:
 
-Atlas Registration and Analysis
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-.. automodule:: swctools.tools.atlas_registration.features.registration
-   :members:
+Analysis
+^^^^^^^^
 
 .. automodule:: swctools.tools.analysis.features.summary
    :members:

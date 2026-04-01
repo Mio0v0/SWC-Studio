@@ -18,7 +18,6 @@ swctools/
     visualization/
     morphology_editing/
     geometry_editing/  (planned CLI/tool wrappers; core logic already shared)
-    atlas_registration/
     analysis/
   plugins/
   cli/
@@ -102,7 +101,7 @@ Examples:
 - `validation.index_clean`
 - `batch_processing.index_clean`
 - `batch_processing.simplification`
-- `atlas_registration.registration`
+- `analysis.summary`
 
 A plugin can register one or more methods under these keys and select them through config/CLI.
 

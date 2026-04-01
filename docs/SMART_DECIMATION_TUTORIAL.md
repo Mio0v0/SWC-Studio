@@ -1,6 +1,6 @@
-# Smart Decimation Tutorial (RDP)
+# Simplification Tutorial (RDP)
 
-Smart Decimation simplifies SWC geometry while preserving important morphology structure.
+Simplification reduces SWC geometry while preserving important morphology structure.
 
 OS note: replace `./data/...` with `.\data\...` on Windows. If `swctools` is not on PATH, use module mode (`python -m swctools.cli.cli ...` on macOS/Linux, `py -m swctools.cli.cli ...` on Windows).
 
@@ -45,28 +45,28 @@ Key parameters:
 
 ## CLI usage
 
-Preview (no file write):
+Preview summary without writing:
 
 ```bash
-swctools morphology smart-decimation ./data/single-soma.swc
+swctools geometry simplify ./data/single-soma.swc
 ```
 
 Write simplified file:
 
 ```bash
-swctools morphology smart-decimation ./data/single-soma.swc --write
+swctools geometry simplify ./data/single-soma.swc --write
 ```
 
 Custom output path:
 
 ```bash
-swctools morphology smart-decimation ./data/single-soma.swc --write --out ./data/single-soma_decimated.swc
+swctools geometry simplify ./data/single-soma.swc --write --out ./data/single-soma_simplified.swc
 ```
 
 Temporary overrides:
 
 ```bash
-swctools morphology smart-decimation ./data/single-soma.swc --write --config-json '{"thresholds":{"epsilon":1.2,"radius_tolerance":0.35},"flags":{"keep_tips":true,"keep_bifurcations":true}}'
+swctools geometry simplify ./data/single-soma.swc --write --config-json '{"thresholds":{"epsilon":1.2,"radius_tolerance":0.35},"flags":{"keep_tips":true,"keep_bifurcations":true}}'
 ```
 
 ## Outputs and logs
@@ -85,10 +85,9 @@ Log includes:
 
 ## GUI workflow
 
-In Morphology Editing -> Simplification:
+In `Geometry Editing -> Simplification`:
 
 1. Open source SWC.
-2. Adjust config (JSON editor/rule guide as enabled).
-3. Process to preview simplified result.
-4. Use Apply/Redo/Cancel controls.
-5. Save final file and review simplification log.
+2. Adjust config with the JSON editor or rule guide if needed.
+3. Click `Run` to apply simplification directly to the current file.
+4. Review the updated morphology and session log.

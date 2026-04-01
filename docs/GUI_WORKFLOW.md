@@ -23,8 +23,6 @@ Top-level tools:
 - Visualization
 - Morphology Editing
 - Geometry Editing
-- Atlas Registration
-- Analysis
 
 When a tool is active, feature buttons are shown for that tool.
 The selected feature controls what appears in the lower Inspector area.
@@ -36,8 +34,6 @@ The selected feature controls what appears in the lower Inspector area.
 - Visualization: View Controls
 - Morphology Editing: Manual Label Editing, Auto Label Editing, Manual Radii Editing, Auto Radii Editing, Simplification
 - Geometry Editing: Geometry Editing
-- Atlas Registration: Registration (placeholder)
-- Analysis: Summary (placeholder)
 
 ## Document/canvas behavior
 
@@ -73,6 +69,10 @@ Validation panel supports:
 
 Validation uses the same backend as CLI (`swctools.tools.validation` + core engine).
 
+For the full check and issue matrix, use:
+
+- [Checks And Issues Reference](CHECKS_AND_ISSUES_REFERENCE.md)
+
 ## Auto Typing in GUI
 
 - Batch mode: folder-level auto label editing
@@ -89,14 +89,13 @@ Validation uses the same backend as CLI (`swctools.tools.validation` + core engi
 - shared backend for Batch + Validation + CLI
 - `Manual Radii Editing` supports one-node edits with type-level statistics
 - `Auto Radii Editing` supports distribution-based cleanup
-- thresholds configurable via JSON
+- behavior configurable via `radii_cleaning.json`
 - histogram/statistics visualization for currently loaded file
 
 ## Simplification in GUI
 
-- RDP-based Smart Decimation controls in Morphology Editing
-- process creates a simplified preview/result path
-- action bar supports apply/redo/cancel behavior
+- RDP-based simplification lives in `Geometry Editing -> Simplification`
+- `Run` applies directly to the current file
 - outputs include simplification log with node reduction stats and parameters
 
 ## Logs and status

@@ -348,8 +348,8 @@ def format_auto_typing_report_text(payload: dict[str, Any]) -> str:
 
 def format_simplification_report_text(payload: dict[str, Any]) -> str:
     lines: list[str] = []
-    lines.append("Smart Decimation Log")
-    lines.append("--------------------")
+    lines.append("Simplification Log")
+    lines.append("------------------")
     lines.append(f"Generated: {_now()}")
     lines.append(f"Input: {payload.get('input_path', '')}")
     lines.append(f"Output: {payload.get('output_path', '')}")

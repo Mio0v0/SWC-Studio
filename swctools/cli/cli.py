@@ -24,6 +24,7 @@ from swctools.core.geometry_editing import (
     reconnect_branch as geometry_reconnect_branch,
 )
 from swctools.core.swc_io import parse_swc_text_preserve_tokens, write_swc_to_bytes_preserve_tokens
+from swctools.core.issues import build_issue_list, issues_from_type_suspicion
 from swctools.plugins import (
     autoload_plugins_from_environment,
     list_all_feature_methods,
@@ -31,8 +32,6 @@ from swctools.plugins import (
     list_plugins,
     load_plugin_module,
 )
-from swctools.tools.analysis.features.summary import analyze_file
-from swctools.tools.atlas_registration.features.registration import register_to_atlas
 from swctools.tools.batch_processing.features.auto_typing import run_folder as run_auto_typing
 from swctools.tools.batch_processing.features.batch_validation import validate_folder
 from swctools.tools.batch_processing.features.index_clean import run_folder as batch_index_clean_folder
@@ -49,6 +48,7 @@ from swctools.tools.morphology_editing.features.simplification import (
 )
 
 from swctools.tools.validation.features.auto_fix import auto_fix_file
+from swctools.tools.validation.features.auto_typing import run_file as run_validation_auto_typing_file
 from swctools.tools.validation.features.index_clean import index_clean_file as validation_index_clean_file
 from swctools.tools.validation.features.radii_cleaning import clean_path as validation_clean_radii_path
 from swctools.tools.validation.features.run_checks import validate_file as run_validation_checks_file
@@ -81,45 +81,6 @@ def _parse_config_overrides(raw: str) -> dict | None:
     if not isinstance(data, dict):
         raise ValueError("--config-json must be a JSON object")
     return data
-
-
-def _apply_radii_cli_overrides(args, base: dict | None) -> dict | None:
-    out = dict(base or {})
-    rules = dict(out.get("rules", {}))
-    changed = False
-
-    if bool(getattr(args, "preserve_soma_radii", False)):
-        rules["preserve_soma"] = True
-        changed = True
-
-    sanity_bounds = dict(rules.get("sanity_bounds", {}))
-    global_bounds = dict(sanity_bounds.get("global", {}))
-
-    pct_min = getattr(args, "percentile_min", None)
-    pct_max = getattr(args, "percentile_max", None)
-    if pct_min is not None or pct_max is not None:
-        if pct_min is not None:
-            global_bounds["lower_percentile"] = float(pct_min)
-        if pct_max is not None:
-            global_bounds["upper_percentile"] = float(pct_max)
-        changed = True
-
-    abs_min = getattr(args, "abs_min", None)
-    abs_max = getattr(args, "abs_max", None)
-    if abs_min is not None or abs_max is not None:
-        if abs_min is not None:
-            global_bounds["lower_abs"] = float(abs_min)
-        if abs_max is not None:
-            global_bounds["upper_abs"] = float(abs_max)
-        changed = True
-
-    if global_bounds:
-        sanity_bounds["global"] = global_bounds
-        rules["sanity_bounds"] = sanity_bounds
-
-    if changed:
-        out["rules"] = rules
-    return out if out else None
 
 
 def _print_validation_precheck(report: dict) -> None:
@@ -201,8 +162,8 @@ def _print_simplification_rule_guide(cfg: dict | None = None) -> None:
     keep_bifs = bool(flags.get("keep_bifurcations", True))
     keep_roots = bool(flags.get("keep_roots", True))
     lines = [
-        "Smart Decimation Rule Guide",
-        "---------------------------",
+        "Simplification Rule Guide",
+        "-------------------------",
         "1) Build directed SWC graph from id/parent.",
         "2) Protect structural nodes (roots + optional tips + optional bifurcations).",
         "3) Split into anchor-to-anchor linear paths.",
@@ -258,6 +219,85 @@ def _print_batch_validation_results(batch_report: dict) -> None:
             print(f"- {err}")
 
 
+def _print_issue_check_results(file_path: Path, issues: list[dict]) -> None:
+    critical = sum(1 for item in issues if str(item.get("severity", "")).strip() == "critical")
+    warning = sum(1 for item in issues if str(item.get("severity", "")).strip() == "warning")
+    info = sum(1 for item in issues if str(item.get("severity", "")).strip() == "info")
+    muted = sum(1 for item in issues if str(item.get("status", "")).strip().lower() in {"muted", "skipped"})
+
+    print("Issue Check")
+    print("-----------")
+    print(f"Input: {file_path}")
+    print(f"Total: {len(issues)}")
+    print(f"Critical: {critical}")
+    print(f"Warning: {warning}")
+    print(f"Info: {info}")
+    print(f"Muted: {muted}")
+
+    if not issues:
+        print("")
+        print("No issues found.")
+        return
+
+    grouped = {
+        "critical": [item for item in issues if str(item.get("severity", "")).strip() == "critical"],
+        "warning": [item for item in issues if str(item.get("severity", "")).strip() == "warning"],
+        "info": [item for item in issues if str(item.get("severity", "")).strip() == "info"],
+        "muted": [item for item in issues if str(item.get("status", "")).strip().lower() in {"muted", "skipped"}],
+    }
+
+    for label, items in grouped.items():
+        if not items:
+            continue
+        print("")
+        print(label.capitalize())
+        print("-" * len(label.capitalize()))
+        for idx, issue in enumerate(items, start=1):
+            node_ids = [int(v) for v in issue.get("node_ids", []) if str(v).strip()]
+            section_ids = [int(v) for v in issue.get("section_ids", []) if str(v).strip()]
+            tool_target = str(issue.get("tool_target", "")).strip() or "validation"
+            print(f"{idx}. {issue.get('title', 'Issue')}")
+            print(f"   key: {issue.get('source_key', '') or 'n/a'}")
+            print(f"   certainty: {issue.get('certainty', '') or 'n/a'}")
+            print(f"   tool: {tool_target}")
+            if issue.get("description"):
+                print(f"   detail: {issue.get('description')}")
+            if issue.get("suggested_fix"):
+                print(f"   suggested fix: {issue.get('suggested_fix')}")
+            if node_ids:
+                preview = ", ".join(str(v) for v in node_ids[:20])
+                if len(node_ids) > 20:
+                    preview += f", ... (+{len(node_ids) - 20} more)"
+                print(f"   node_ids ({len(node_ids)}): {preview}")
+            if section_ids:
+                preview = ", ".join(str(v) for v in section_ids[:20])
+                if len(section_ids) > 20:
+                    preview += f", ... (+{len(section_ids) - 20} more)"
+                print(f"   section_ids ({len(section_ids)}): {preview}")
+
+
+def _build_cli_issue_list(file_path: Path, *, config_overrides: dict | None = None) -> list[dict]:
+    report = run_validation_checks_file(str(file_path), config_overrides=config_overrides)
+    text = file_path.read_text(encoding="utf-8", errors="ignore")
+    df = parse_swc_text_preserve_tokens(text)
+
+    type_suspicious: list[dict] = []
+    try:
+        result_obj = run_validation_auto_typing_file(
+            str(file_path),
+            write_output=False,
+            write_log=False,
+        )
+        type_suspicious = issues_from_type_suspicion(
+            list(getattr(result_obj, "rows", []) or []),
+            list(getattr(result_obj, "types", []) or []),
+        )
+    except Exception:
+        type_suspicious = []
+
+    return build_issue_list(df, report, type_suspicious=type_suspicious)
+
+
 def _write_geometry_output(input_path: Path, df, *, out_path: str = "", write_output: bool = False, suffix: str) -> str | None:
     output_path: Path | None = None
     if write_output:
@@ -268,7 +308,11 @@ def _write_geometry_output(input_path: Path, df, *, out_path: str = "", write_ou
 
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="swctools")
-    sub = p.add_subparsers(dest="tool")
+    check = p.add_subparsers(dest="tool")
+    check_cmd = check.add_parser("check", help="Print the GUI-style issue list for one SWC file")
+    check_cmd.add_argument("file", type=Path)
+    _feature_json_arg(check_cmd)
+    sub = check
 
     # ------------------------------ batch
     batch = sub.add_parser("batch", help="Batch Processing features")
@@ -299,29 +343,6 @@ def build_parser() -> argparse.ArgumentParser:
 
     batch_radii = batch_sub.add_parser("radii-clean", help="Radii cleaning on a file or folder")
     batch_radii.add_argument("target", type=Path)
-    batch_radii.add_argument(
-        "--threshold-mode",
-        choices=["percentile", "absolute"],
-        default="",
-        help="Deprecated; radii cleaning now uses combined sanity bounds instead of a single threshold mode.",
-    )
-    soma_group_b = batch_radii.add_mutually_exclusive_group()
-    soma_group_b.add_argument(
-        "--fix-soma-radii",
-        action="store_true",
-        default=False,
-        help="Deprecated; soma radii are always preserved during cleaning.",
-    )
-    soma_group_b.add_argument(
-        "--preserve-soma-radii",
-        action="store_true",
-        default=False,
-        help="Deprecated; soma radii are always preserved during cleaning.",
-    )
-    batch_radii.add_argument("--percentile-min", type=float, default=None, help="Global min percentile.")
-    batch_radii.add_argument("--percentile-max", type=float, default=None, help="Global max percentile.")
-    batch_radii.add_argument("--abs-min", type=float, default=None, help="Global min absolute radius.")
-    batch_radii.add_argument("--abs-max", type=float, default=None, help="Global max absolute radius.")
     _feature_json_arg(batch_radii)
 
     batch_simplify = batch_sub.add_parser("simplify", help="Run simplification on all SWC files in a folder")
@@ -351,29 +372,6 @@ def build_parser() -> argparse.ArgumentParser:
 
     val_radii = val_sub.add_parser("radii-clean", help="Radii cleaning on a file or folder")
     val_radii.add_argument("target", type=Path)
-    val_radii.add_argument(
-        "--threshold-mode",
-        choices=["percentile", "absolute"],
-        default="",
-        help="Deprecated; radii cleaning now uses combined sanity bounds instead of a single threshold mode.",
-    )
-    soma_group_v = val_radii.add_mutually_exclusive_group()
-    soma_group_v.add_argument(
-        "--fix-soma-radii",
-        action="store_true",
-        default=False,
-        help="Deprecated; soma radii are always preserved during cleaning.",
-    )
-    soma_group_v.add_argument(
-        "--preserve-soma-radii",
-        action="store_true",
-        default=False,
-        help="Deprecated; soma radii are always preserved during cleaning.",
-    )
-    val_radii.add_argument("--percentile-min", type=float, default=None, help="Global min percentile.")
-    val_radii.add_argument("--percentile-max", type=float, default=None, help="Global max percentile.")
-    val_radii.add_argument("--abs-min", type=float, default=None, help="Global min absolute radius.")
-    val_radii.add_argument("--abs-max", type=float, default=None, help="Global max absolute radius.")
     _feature_json_arg(val_radii)
 
     val_index = val_sub.add_parser("index-clean", help="Reorder and reindex one SWC file")
@@ -403,18 +401,6 @@ def build_parser() -> argparse.ArgumentParser:
     morph_d.add_argument("--out", default="", help="Output file path (used with --write)")
     _feature_json_arg(morph_d)
 
-    morph_s = morph_sub.add_parser("smart-decimation", help="RDP-based smart SWC simplification")
-    morph_s.add_argument("file", type=Path)
-    morph_s.add_argument("--write", action="store_true", default=False)
-    morph_s.add_argument("--out", default="", help="Output file path (used with --write)")
-    _feature_json_arg(morph_s)
-
-    morph_simplify = morph_sub.add_parser("simplify", help="RDP-based simplification (same backend as smart-decimation)")
-    morph_simplify.add_argument("file", type=Path)
-    morph_simplify.add_argument("--write", action="store_true", default=False)
-    morph_simplify.add_argument("--out", default="", help="Output file path (used with --write)")
-    _feature_json_arg(morph_simplify)
-
     morph_radius = morph_sub.add_parser("set-radius", help="Set one node radius in a file")
     morph_radius.add_argument("file", type=Path)
     morph_radius.add_argument("--node-id", required=True, type=int)
@@ -426,6 +412,12 @@ def build_parser() -> argparse.ArgumentParser:
     # ------------------------------ geometry
     geometry = sub.add_parser("geometry", help="Geometry editing operations without GUI")
     geom_sub = geometry.add_subparsers(dest="feature")
+
+    geom_simplify = geom_sub.add_parser("simplify", help="Graph-aware SWC simplification")
+    geom_simplify.add_argument("file", type=Path)
+    geom_simplify.add_argument("--write", action="store_true", default=False)
+    geom_simplify.add_argument("--out", default="", help="Output file path (used with --write)")
+    _feature_json_arg(geom_simplify)
 
     geom_move_node = geom_sub.add_parser("move-node", help="Move one node to absolute XYZ")
     geom_move_node.add_argument("file", type=Path)
@@ -484,23 +476,6 @@ def build_parser() -> argparse.ArgumentParser:
     geom_insert.add_argument("--write", action="store_true", default=False)
     geom_insert.add_argument("--out", default="", help="Output file path (used with --write)")
 
-    # ------------------------------ atlas
-    atlas = sub.add_parser("atlas", help="Atlas Registration (placeholder)")
-    atlas_sub = atlas.add_subparsers(dest="feature")
-
-    atlas_reg = atlas_sub.add_parser("register", help="Atlas registration placeholder command")
-    atlas_reg.add_argument("file", type=Path)
-    atlas_reg.add_argument("--atlas", default="")
-    _feature_json_arg(atlas_reg)
-
-    # ------------------------------ analysis
-    analysis = sub.add_parser("analysis", help="Analysis features")
-    analysis_sub = analysis.add_subparsers(dest="feature")
-
-    analysis_summary = analysis_sub.add_parser("summary", help="Compute basic morphology summary")
-    analysis_summary.add_argument("file", type=Path)
-    _feature_json_arg(analysis_summary)
-
     # ------------------------------ plugins
     plugins = sub.add_parser("plugins", help="Plugin manager and registry inspection")
     plugins_sub = plugins.add_subparsers(dest="feature")
@@ -521,6 +496,14 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     try:
+        if args.tool == "check":
+            file_path = Path(args.file)
+            if not file_path.exists():
+                raise FileNotFoundError(str(file_path))
+            issues = _build_cli_issue_list(file_path, config_overrides=_parse_config_overrides(args.config_json))
+            _print_issue_check_results(file_path, issues)
+            return 0
+
         # -------- batch
         if args.tool == "batch" and args.feature == "validate":
             cfg_overrides = _parse_config_overrides(args.config_json)
@@ -580,10 +563,9 @@ def main(argv: list[str] | None = None) -> int:
             return 0
 
         if args.tool == "batch" and args.feature == "radii-clean":
-            cfg_overrides = _apply_radii_cli_overrides(args, _parse_config_overrides(args.config_json))
             out = batch_clean_radii_path(
                 str(args.target),
-                config_overrides=cfg_overrides,
+                config_overrides=_parse_config_overrides(args.config_json),
             )
             _print_json(out)
             if out.get("log_path"):
@@ -631,10 +613,9 @@ def main(argv: list[str] | None = None) -> int:
             return 0
 
         if args.tool == "validation" and args.feature == "radii-clean":
-            cfg_overrides = _apply_radii_cli_overrides(args, _parse_config_overrides(args.config_json))
             out = validation_clean_radii_path(
                 str(args.target),
-                config_overrides=cfg_overrides,
+                config_overrides=_parse_config_overrides(args.config_json),
             )
             _print_json(out)
             if out.get("log_path"):
@@ -706,28 +687,6 @@ def main(argv: list[str] | None = None) -> int:
             _print_json(out)
             return 0
 
-        if args.tool == "morphology" and args.feature in {"smart-decimation", "simplify"}:
-            cfg_overrides = _parse_config_overrides(args.config_json)
-            cfg_effective = merge_config(get_simplification_config(), cfg_overrides or {})
-            _print_simplification_rule_guide(cfg_effective)
-            out = simplify_morphology_file(
-                str(args.file),
-                out_path=(args.out or None),
-                write_output=bool(args.write),
-                config_overrides=cfg_overrides,
-            )
-            out_print = {
-                k: v
-                for k, v in out.items()
-                if k not in {"bytes", "dataframe", "kept_node_ids", "removed_node_ids", "summary"}
-            }
-            out_print["kept_node_count"] = len(list(out.get("kept_node_ids", [])))
-            out_print["removed_node_count"] = len(list(out.get("removed_node_ids", [])))
-            _print_json(out_print)
-            if out.get("log_path"):
-                print(f"\nReport file: {out.get('log_path')}")
-            return 0
-
         if args.tool == "morphology" and args.feature == "set-radius":
             out = set_node_radius_file(
                 str(args.file),
@@ -743,6 +702,28 @@ def main(argv: list[str] | None = None) -> int:
 
         # -------- geometry
         if args.tool == "geometry" and args.feature:
+            if args.feature == "simplify":
+                cfg_overrides = _parse_config_overrides(args.config_json)
+                cfg_effective = merge_config(get_simplification_config(), cfg_overrides or {})
+                _print_simplification_rule_guide(cfg_effective)
+                out = simplify_morphology_file(
+                    str(args.file),
+                    out_path=(args.out or None),
+                    write_output=bool(args.write),
+                    config_overrides=cfg_overrides,
+                )
+                out_print = {
+                    k: v
+                    for k, v in out.items()
+                    if k not in {"bytes", "dataframe", "kept_node_ids", "removed_node_ids", "summary"}
+                }
+                out_print["kept_node_count"] = len(list(out.get("kept_node_ids", [])))
+                out_print["removed_node_count"] = len(list(out.get("removed_node_ids", [])))
+                _print_json(out_print)
+                if out.get("log_path"):
+                    print(f"\nReport file: {out.get('log_path')}")
+                return 0
+
             file_path = Path(args.file)
             if not file_path.exists():
                 raise FileNotFoundError(str(file_path))
@@ -823,25 +804,6 @@ def main(argv: list[str] | None = None) -> int:
                     "output_path": output_path,
                 })
                 return 0
-
-        # -------- atlas
-        if args.tool == "atlas" and args.feature == "register":
-            out = register_to_atlas(
-                str(args.file),
-                atlas_name=(args.atlas or None),
-                config_overrides=_parse_config_overrides(args.config_json),
-            )
-            _print_json({"ok": out.ok, "message": out.message, "payload": out.payload})
-            return 0
-
-        # -------- analysis
-        if args.tool == "analysis" and args.feature == "summary":
-            out = analyze_file(
-                str(args.file),
-                config_overrides=_parse_config_overrides(args.config_json),
-            )
-            _print_json(out)
-            return 0
 
         # -------- plugins
         if args.tool == "plugins" and args.feature == "list":

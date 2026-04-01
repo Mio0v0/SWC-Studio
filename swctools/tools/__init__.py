@@ -3,13 +3,12 @@
 This package contains subpackages for each top-level tool (batch_processing, validation, ...).
 Each tool subpackage exposes a small API surface that delegates to core implementations.
 """
-from . import batch_processing, validation, visualization, morphology_editing, atlas_registration, analysis  # noqa
+from . import analysis, batch_processing, morphology_editing, validation, visualization  # noqa
 
 __all__ = [
+    "analysis",
     "batch_processing",
     "validation",
     "visualization",
     "morphology_editing",
-    "atlas_registration",
-    "analysis",
 ]

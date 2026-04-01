@@ -42,6 +42,18 @@ from swctools.gui.constants import SWC_COLS, label_for_type
 class _CurrentPageStackedWidget(QStackedWidget):
     """A stacked widget that sizes itself to the current page only."""
 
+    def hasHeightForWidth(self):
+        widget = self.currentWidget()
+        if widget is not None:
+            return widget.hasHeightForWidth()
+        return super().hasHeightForWidth()
+
+    def heightForWidth(self, width):
+        widget = self.currentWidget()
+        if widget is not None and widget.hasHeightForWidth():
+            return widget.heightForWidth(width)
+        return super().heightForWidth(width)
+
     def sizeHint(self):
         widget = self.currentWidget()
         if widget is not None:
@@ -87,6 +99,8 @@ class GeometryEditingPanel(QWidget):
             "move/reconnect/delete/insert operations to the active selection."
         )
         desc.setWordWrap(True)
+        desc.setMinimumWidth(0)
+        desc.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Minimum)
         desc.setStyleSheet("font-size: 12px; color: #555;")
         root.addWidget(desc)
 
@@ -198,6 +212,8 @@ class GeometryEditingPanel(QWidget):
         connect_layout.setSpacing(8)
         self._connect_summary = QLabel("Pick or add one or more selection items to define default source and target nodes.")
         self._connect_summary.setWordWrap(True)
+        self._connect_summary.setMinimumWidth(0)
+        self._connect_summary.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Minimum)
         connect_layout.addWidget(self._connect_summary)
         connect_form = QFormLayout()
         connect_form.setContentsMargins(0, 0, 0, 0)
@@ -222,6 +238,8 @@ class GeometryEditingPanel(QWidget):
         disconnect_layout.setSpacing(8)
         self._disconnect_summary = QLabel("Choose a start node to disconnect from its current parent.")
         self._disconnect_summary.setWordWrap(True)
+        self._disconnect_summary.setMinimumWidth(0)
+        self._disconnect_summary.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Minimum)
         disconnect_layout.addWidget(self._disconnect_summary)
         disconnect_form = QFormLayout()
         disconnect_form.setContentsMargins(0, 0, 0, 0)
@@ -245,6 +263,8 @@ class GeometryEditingPanel(QWidget):
         insert_layout.setSpacing(8)
         self._insert_summary = QLabel("Choose start and end nodes for insertion or use the selected item defaults.")
         self._insert_summary.setWordWrap(True)
+        self._insert_summary.setMinimumWidth(0)
+        self._insert_summary.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Minimum)
         insert_layout.addWidget(self._insert_summary)
         insert_form = QFormLayout()
         self._insert_start_input = QLineEdit()
@@ -274,13 +294,17 @@ class GeometryEditingPanel(QWidget):
         delete_layout.setSpacing(8)
         self._delete_summary = QLabel("Choose a node or subtree root to delete.")
         self._delete_summary.setWordWrap(True)
+        self._delete_summary.setMinimumWidth(0)
+        self._delete_summary.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Minimum)
         delete_layout.addWidget(self._delete_summary)
         delete_form = QFormLayout()
         self._delete_node_input = QLineEdit()
         self._delete_node_input.setPlaceholderText("Node ID or subtree root")
         delete_form.addRow("Target Node:", self._delete_node_input)
         delete_layout.addLayout(delete_form)
-        delete_btn_row = QHBoxLayout()
+        delete_btn_row = QVBoxLayout()
+        delete_btn_row.setContentsMargins(0, 0, 0, 0)
+        delete_btn_row.setSpacing(8)
         self._btn_delete_node = QPushButton("Delete Node")
         self._btn_delete_node.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self._btn_delete_node.clicked.connect(lambda: self._on_delete_node_clicked(reconnect_children=False))
@@ -303,6 +327,8 @@ class GeometryEditingPanel(QWidget):
         move_layout.setSpacing(8)
         self._move_summary = QLabel("Move the currently selected nodes by entering a new XYZ position for the target anchor node.")
         self._move_summary.setWordWrap(True)
+        self._move_summary.setMinimumWidth(0)
+        self._move_summary.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Minimum)
         move_layout.addWidget(self._move_summary)
         move_form = QFormLayout()
         move_form.setContentsMargins(0, 0, 0, 0)

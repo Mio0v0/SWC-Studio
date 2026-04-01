@@ -53,6 +53,7 @@ from .validation_auto_label_panel import ValidationAutoLabelPanel
 from .validation_tab import ValidationIndexCleanWidget, ValidationPrecheckWidget, ValidationTabWidget
 from swctools.core.issues import (
     issues_from_radii_suspicion,
+    issues_from_simplification_suggestion,
     issues_from_type_suspicion,
     issues_from_validation_report,
     validation_prerequisite_summary,
@@ -119,6 +120,7 @@ class _DocumentState:
     last_auto_label_options: dict | None = None
     auto_label_preview_df: pd.DataFrame | None = None
     auto_label_preview_base_df: pd.DataFrame | None = None
+    last_simplification_result: dict | None = None
 
 
 class _CanvasTabs(QTabWidget):
@@ -341,8 +343,6 @@ class SWCMainWindow(QMainWindow):
         self._simplification_panel = SimplificationPanel(self)
         self._simplification_panel.log_message.connect(lambda msg: self._append_log(msg, "SIMPLIFY"))
         self._simplification_panel.process_requested.connect(self._on_simplification_process_requested)
-        self._simplification_panel.apply_requested.connect(self._on_simplification_apply_requested)
-        self._simplification_panel.cancel_requested.connect(self._on_simplification_cancel_requested)
         self._viz_control = self._build_visualization_control_panel()
         self._control_tabs.currentChanged.connect(self._on_control_tab_changed)
         self._set_control_tabs_for_feature("")
@@ -521,7 +521,6 @@ class SWCMainWindow(QMainWindow):
             ("Visualization", "visualization"),
             ("Morphology Editing", "morphology_editing"),
             ("Geometry Editing", "geometry_editing"),
-            ("Analysis", "analysis"),
         ]
 
         normal_fm = QFontMetrics(self.font())
@@ -831,10 +830,9 @@ class SWCMainWindow(QMainWindow):
             "batch": ["Split", "Validation", "Auto Label Editing", "Radii Cleaning", "Simplification", "Index Clean"],
             "validation": ["Validation", "Index Clean"],
             "visualization": ["View Controls"],
-            "morphology_editing": ["Manual Label Editing", "Auto Label Editing", "Manual Radii Editing", "Auto Radii Editing", "Simplification"],
-            "dendrogram": ["Manual Label Editing", "Auto Label Editing", "Manual Radii Editing", "Auto Radii Editing", "Simplification"],
-            "geometry_editing": ["Geometry Editing"],
-            "analysis": ["Summary"],
+            "morphology_editing": ["Manual Label Editing", "Auto Label Editing", "Manual Radii Editing", "Auto Radii Editing"],
+            "dendrogram": ["Manual Label Editing", "Auto Label Editing", "Manual Radii Editing", "Auto Radii Editing"],
+            "geometry_editing": ["Geometry Editing", "Simplification"],
         }
         return list(mapping.get(key, []))
 
@@ -1632,8 +1630,9 @@ class SWCMainWindow(QMainWindow):
                 self._canvas_tabs.setCurrentIndex(src_idx)
 
     def _refresh_simplification_panel_state(self):
-        source_doc, preview_doc, result = self._resolve_simplification_context()
-        if source_doc is None or preview_doc is None or not isinstance(result, dict):
+        source_doc = self._active_source_document()
+        result = None if source_doc is None else source_doc.last_simplification_result
+        if source_doc is None or not isinstance(result, dict):
             self._simplification_panel.set_preview_state(False, None, None)
             return
         summary = {
@@ -1643,164 +1642,52 @@ class SWCMainWindow(QMainWindow):
             "params_used": dict(result.get("params_used", {})),
         }
         self._simplification_panel.set_preview_state(
-            True,
+            False,
             summary,
-            str(result.get("log_path", "") or ""),
+            None,
         )
 
     def _on_simplification_process_requested(self, config_overrides: dict):
         source_doc = self._active_source_document()
         if source_doc is None or source_doc.df is None or source_doc.df.empty:
-            self._append_log("Smart Decimation: no active SWC document.", "WARN")
+            self._append_log("Simplification: no active SWC document.", "WARN")
             return
 
         try:
             result = simplify_dataframe(source_doc.df, config_overrides=dict(config_overrides or {}))
         except Exception as e:  # noqa: BLE001
-            self._append_log(f"Smart Decimation failed: {e}", "ERROR")
+            self._append_log(f"Simplification failed: {e}", "ERROR")
             return
 
         simplified_df = result.get("dataframe")
         if not isinstance(simplified_df, pd.DataFrame) or simplified_df.empty:
-            self._append_log("Smart Decimation produced empty output.", "WARN")
+            self._append_log("Simplification produced empty output.", "WARN")
             return
 
-        preview_editor = self._simplify_preview_by_source.get(source_doc.editor)
-        preview_doc = self._documents.get(preview_editor) if preview_editor is not None else None
-
-        preview_name = "Simplified View"
-        if preview_doc is None:
-            preview_editor = EditorTab()
-            self._connect_editor_signals(preview_editor)
-            preview_controls = preview_editor.take_dendrogram_controls_panel()
-            preview_doc = _DocumentState(
-                editor=preview_editor,
-                controls=preview_controls,
-                df=simplified_df.copy(),
-                filename=preview_name,
-                file_path=str(source_doc.file_path or ""),
-                is_preview=True,
-                source_editor=source_doc.editor,
-                preview_kind="simplification",
-            )
-            self._documents[preview_editor] = preview_doc
-            self._simplify_preview_by_source[source_doc.editor] = preview_editor
-            self._simplify_source_by_preview[preview_editor] = source_doc.editor
-            tab_idx = self._canvas_tabs.addTab(preview_editor, preview_name)
-            self._canvas_tabs.setCurrentIndex(tab_idx)
-        else:
-            preview_doc.df = simplified_df.copy()
-            preview_doc.file_path = str(source_doc.file_path or "")
-            tab_idx = self._canvas_tabs.indexOf(preview_doc.editor)
-            if tab_idx >= 0:
-                self._canvas_tabs.setCurrentIndex(tab_idx)
-
-        preview_doc.df = simplified_df.copy()
-        preview_doc.editor.load_swc(simplified_df, preview_name)
-        preview_doc.editor.set_mode(self._editor_mode_for_feature())
-
         payload = self._simplification_log_payload(source_doc, result, output_path=None)
-        result["summary"] = payload
-        result["log_path"] = ""
-        self._simplify_result_by_preview[preview_doc.editor] = result
-
+        source_doc.last_simplification_result = dict(payload)
+        self._apply_document_dataframe(
+            source_doc,
+            simplified_df,
+            event_title="Simplification",
+            event_summary=(
+                f"Simplified the current SWC from {payload.get('original_node_count', 0)} "
+                f"to {payload.get('new_node_count', 0)} nodes."
+            ),
+            event_details=[
+                f"Reduction (%): {float(payload.get('reduction_percent', 0.0)):.2f}",
+                f"Removed nodes: {len(list(payload.get('removed_node_ids', []) or []))}",
+                f"Protected counts: {dict(payload.get('protected_counts', {}))}",
+                f"Parameters used: {dict(payload.get('params_used', {}))}",
+            ],
+        )
+        self._rerun_active_validation()
         self._append_log(
-            "Smart Decimation preview created: "
+            "Simplification applied: "
             f"{payload.get('original_node_count', 0)} -> {payload.get('new_node_count', 0)} "
             f"({payload.get('reduction_percent', 0.0):.2f}%).",
             "INFO",
         )
-
-        self._refresh_simplification_panel_state()
-        self._sync_from_active_document(auto_run_validation=False)
-
-    def _on_simplification_apply_requested(self):
-        source_doc, preview_doc, result = self._resolve_simplification_context()
-        if source_doc is None or preview_doc is None or preview_doc.df is None or preview_doc.df.empty:
-            self._append_log("Smart Decimation Apply: no preview available.", "WARN")
-            return
-
-        src_path = str(source_doc.file_path or "")
-        input_ref = str(source_doc.file_path or source_doc.filename)
-        if src_path:
-            src_p = Path(src_path)
-            default_out = str(src_p.with_name(f"{src_p.stem}_simplified{src_p.suffix}"))
-        else:
-            default_out = f"{Path(source_doc.filename or 'swc').stem}_simplified.swc"
-
-        out_path, _ = QFileDialog.getSaveFileName(
-            self,
-            "Save Simplified SWC",
-            default_out,
-            "SWC Files (*.swc);;All Files (*)",
-        )
-        if not out_path:
-            self._append_log("Smart Decimation Apply cancelled.", "INFO")
-            return
-
-        old_df = source_doc.df.copy() if isinstance(source_doc.df, pd.DataFrame) else None
-        self._write_swc_file(out_path, preview_doc.df)
-        source_doc.df = preview_doc.df.copy()
-        source_doc.file_path = str(out_path)
-        source_doc.filename = os.path.basename(out_path)
-        source_doc.editor.load_swc(source_doc.df, source_doc.filename)
-        source_doc.editor.set_mode(self._editor_mode_for_feature())
-
-        src_idx = self._canvas_tabs.indexOf(source_doc.editor)
-        if src_idx >= 0:
-            self._canvas_tabs.setTabText(src_idx, source_doc.filename)
-
-        if not isinstance(result, dict):
-            result = {}
-        payload = self._simplification_log_payload(source_doc, result, output_path=str(out_path))
-        payload["input_path"] = input_ref
-        result["summary"] = payload
-        result["log_path"] = ""
-
-        self._record_session_operation(
-            source_doc,
-            title="Smart Decimation Apply",
-            summary=(
-                f"Saved simplified SWC to {out_path}; "
-                f"{payload.get('original_node_count', 0)} -> {payload.get('new_node_count', 0)} nodes"
-            ),
-            old_df=old_df,
-            new_df=source_doc.df,
-            details=[
-                f"Input: {input_ref}",
-                f"Output: {out_path}",
-                f"Reduction (%): {float(payload.get('reduction_percent', 0.0)):.2f}",
-                f"Removed nodes: {len(list(payload.get('removed_node_ids', []) or []))}",
-            ],
-        )
-
-        self._remove_simplification_preview(preview_doc.editor, switch_to_source=True)
-        self._update_recent_files(out_path)
-        self._sync_from_active_document(auto_run_validation=False)
-        self._append_log(f"Smart Decimation applied: {out_path}", "INFO")
-        self._refresh_simplification_panel_state()
-
-    def _on_simplification_redo_requested(self):
-        source_doc, preview_doc, _result = self._resolve_simplification_context()
-        if source_doc is None:
-            self._append_log("Smart Decimation Redo: no active SWC document.", "WARN")
-            return
-        if preview_doc is not None:
-            self._remove_simplification_preview(preview_doc.editor, switch_to_source=True)
-        self._on_simplification_process_requested(self._simplification_panel.current_overrides())
-
-    def _on_simplification_cancel_requested(self):
-        source_doc, preview_doc, _result = self._resolve_simplification_context()
-        if preview_doc is None:
-            self._append_log("Smart Decimation Cancel: no preview to discard.", "INFO")
-            return
-        self._remove_simplification_preview(preview_doc.editor, switch_to_source=True)
-        if source_doc is not None:
-            src_idx = self._canvas_tabs.indexOf(source_doc.editor)
-            if src_idx >= 0:
-                self._canvas_tabs.setCurrentIndex(src_idx)
-        self._sync_from_active_document(auto_run_validation=False)
-        self._append_log("Smart Decimation preview discarded.", "INFO")
         self._refresh_simplification_panel_state()
 
     def _is_validation_auto_label_preview(self, doc: _DocumentState | None) -> bool:
@@ -2414,20 +2301,21 @@ class SWCMainWindow(QMainWindow):
             self._control_tabs.addTab(self._wrap_control_widget(self._validation_auto_label_panel), "Auto Label Editing")
             self._control_tabs.addTab(self._wrap_control_widget(self._manual_radii_panel), "Manual Radii Editing")
             self._control_tabs.addTab(self._wrap_control_widget(self._validation_radii_panel), "Auto Radii Editing")
-            self._control_tabs.addTab(self._wrap_control_widget(self._simplification_panel), "Simplification")
             current_idx = {
                 "manual label editing": 0,
                 "auto label editing": 1,
                 "manual radii editing": 2,
                 "auto radii editing": 3,
-                "simplification": 4,
             }.get(previous_label, 0)
             self._refresh_simplification_panel_state()
         elif key == "geometry_editing":
             self._control_tabs.addTab(self._wrap_control_widget(self._geometry_panel), "Geometry Editing")
-            current_idx = 0
-        elif key == "analysis":
-            current_idx = -1
+            self._control_tabs.addTab(self._wrap_control_widget(self._simplification_panel), "Simplification")
+            current_idx = {
+                "geometry editing": 0,
+                "simplification": 1,
+            }.get(previous_label, 0)
+            self._refresh_simplification_panel_state()
         else:
             # default: visualization
             self._control_tabs.addTab(self._wrap_control_widget(self._viz_control), "View Controls")
@@ -2522,20 +2410,6 @@ class SWCMainWindow(QMainWindow):
             self._feature_label.setText("Active feature: Geometry Editing")
             self._append_log("Feature switched: Geometry Editing", "INFO")
             return
-        if key == "analysis":
-            self._active_tool = "analysis"
-            self._sync_tool_tab_selection()
-            self._set_control_tabs_for_feature("analysis")
-            self._control_tabs.setVisible(self._control_tabs.count() > 0)
-            self._control_dock.show()
-            self._precheck_dock.hide()
-            self._auto_guide_dock.hide()
-            self._apply_editor_modes()
-            self._refresh_canvas_surface()
-            self._feature_label.setText("Active feature: Analysis")
-            self._append_log("Feature switched: Analysis (placeholder)", "INFO")
-            return
-
         self._active_tool = ""
         self._sync_tool_tab_selection()
         self._set_control_tabs_for_feature("")
@@ -3087,7 +2961,8 @@ class SWCMainWindow(QMainWindow):
                 except Exception:
                     pass
 
-        all_issues = list(base_issues) + list(suspicious_radii) + list(type_suspicious)
+        simplification_suggestion = issues_from_simplification_suggestion(doc.df)
+        all_issues = list(base_issues) + list(suspicious_radii) + list(type_suspicious) + list(simplification_suggestion)
         def _issue_priority(item: dict) -> tuple[int, int, int, int, str]:
             source_key = str(item.get("source_key", "")).strip()
             severity = str(item.get("severity", "")).strip()
@@ -3163,16 +3038,6 @@ class SWCMainWindow(QMainWindow):
             return
         self._on_issue_selected(issues[0])
 
-    def _summarize_id_remap(self, id_map: dict[int, int], *, limit: int = 16) -> list[str]:
-        mapping = {int(k): int(v) for k, v in dict(id_map or {}).items()}
-        changed = [(old_id, new_id) for old_id, new_id in sorted(mapping.items()) if int(old_id) != int(new_id)]
-        if not changed:
-            return ["Node IDs were already in the desired order; no remap was needed."]
-        preview = [f"{old_id} -> {new_id}" for old_id, new_id in changed[:limit]]
-        if len(changed) > limit:
-            preview.append(f"... {len(changed) - limit} more")
-        return preview
-
     def _on_validation_index_clean_requested(self, new_df: object, id_map: object):
         doc = self._active_source_document()
         if doc is None or doc.df is None or doc.df.empty:
@@ -3183,8 +3048,7 @@ class SWCMainWindow(QMainWindow):
             return
         details = [
             "Validation Index Clean reordered the SWC so parents come before children.",
-            "Node IDs are now continuous with parent IDs remapped to match the new ordering.",
-            *self._summarize_id_remap(dict(id_map or {})),
+            "Node IDs were reassigned to a continuous parent-before-child order.",
         ]
         self._apply_document_dataframe(
             doc,
@@ -3236,16 +3100,19 @@ class SWCMainWindow(QMainWindow):
         tool_target = str(issue.get("tool_target", "")).strip().lower()
         if not tool_target:
             return
-        if tool_target in {"label_editing", "simplification", "auto_label", "radii_cleaning", "manual_radii"}:
+        if tool_target in {"label_editing", "auto_label", "radii_cleaning", "manual_radii"}:
             self._activate_feature("morphology_editing")
             target_tab = {
                 "label_editing": "manual label editing",
                 "auto_label": "auto label editing",
                 "manual_radii": "manual radii editing",
                 "radii_cleaning": "auto radii editing",
-                "simplification": "simplification",
             }.get(tool_target, "manual label editing")
             self._select_control_tab_by_label(target_tab)
+            return
+        if tool_target == "simplification":
+            self._activate_feature("geometry_editing")
+            self._select_control_tab_by_label("simplification")
             return
         if tool_target == "geometry_editing":
             self._activate_feature("geometry_editing")
@@ -3517,6 +3384,19 @@ class SWCMainWindow(QMainWindow):
                     "hide_skip_button": True,
                     "hide_apply_button": True,
                     "detail_lines": detail_lines,
+                }
+            )
+            return ctx
+
+        if str(issue.get("source_key", "")).strip() == "simplification_suggestion":
+            ctx.update(
+                {
+                    "problem_detail": str(issue.get("description", "")).strip() or "This SWC may benefit from simplification.",
+                    "suggested_solution": "Open Simplification to preview and apply graph-aware cleanup on the current SWC.",
+                    "custom_primary_label": "Simplification",
+                    "custom_primary_action": "open_simplification_tool",
+                    "hide_detail_section": True,
+                    "detail_lines": [],
                 }
             )
             return ctx
@@ -3974,16 +3854,19 @@ class SWCMainWindow(QMainWindow):
 
     def _on_context_open_tool_requested(self, tool_target: str):
         target = str(tool_target or "").strip().lower()
-        if target in {"label_editing", "simplification", "auto_label", "radii_cleaning", "manual_radii"}:
+        if target in {"label_editing", "auto_label", "radii_cleaning", "manual_radii"}:
             self._activate_feature("morphology_editing")
             target_tab = {
                 "label_editing": "manual label editing",
                 "auto_label": "auto label editing",
                 "manual_radii": "manual radii editing",
                 "radii_cleaning": "auto radii editing",
-                "simplification": "simplification",
             }.get(target, "manual label editing")
             self._select_control_tab_by_label(target_tab)
+            return
+        if target == "simplification":
+            self._activate_feature("geometry_editing")
+            self._select_control_tab_by_label("simplification")
             return
         if target == "geometry_editing":
             self._activate_feature("geometry_editing")
@@ -4012,6 +3895,11 @@ class SWCMainWindow(QMainWindow):
             self._control_tabs.setVisible(True)
             self._activate_feature("morphology_editing")
             self._select_control_tab_by_label("auto radii editing")
+            return
+        if action == "open_simplification_tool":
+            self._control_tabs.setVisible(True)
+            self._activate_feature("geometry_editing")
+            self._select_control_tab_by_label("simplification")
             return
         if action == "consolidate_soma":
             doc = self._active_document()

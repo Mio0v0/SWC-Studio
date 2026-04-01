@@ -125,11 +125,11 @@ File wrapper for single-node radius editing.
 
 #### `morphology_smart_decimation_text(swc_text, *, config_overrides=None) -> dict`
 
-Runs graph-aware RDP simplification from text.
+Runs the shared graph-aware RDP simplification backend from text.
 
 #### `morphology_smart_decimation_file(path, *, out_path=None, write_output=False, config_overrides=None) -> dict`
 
-File wrapper for smart decimation. Produces simplification log file.
+File wrapper for the shared simplification backend used by `Geometry Editing -> Simplification`.
 
 ### Geometry Editing
 
@@ -143,12 +143,6 @@ These functions expose the shared geometry-editing core used by the app:
 - `geometry_delete_subtree(df, root_id)`
 - `geometry_insert_node_between(df, start_id, end_id, x, y, z, radius=None, type_id=None)`
 - `geometry_reindex_dataframe_with_map(df)`
-
-### Atlas Registration (placeholder)
-
-#### `register_to_atlas(path, *, atlas_name=None, config_overrides=None) -> FeatureResult`
-
-Structured placeholder response for atlas registration.
 
 ### Analysis
 
@@ -269,15 +263,7 @@ These are callable if you want per-feature direct imports.
   - `simplify_dataframe(...)`
   - `simplify_swc_text(...)`
   - `simplify_file(...)`
-- `swctools.tools.morphology_editing.features.simplification`
-  - `simplify_dataframe(...)`
-  - `simplify_swc_text(...)`
-  - `simplify_file(...)`
-
-## Atlas Registration (placeholder)
-
-- `swctools.tools.atlas_registration.features.registration`
-  - `register_to_atlas(...)`
+  - shared simplification backend used by the current Geometry Editing tool
 
 ## Analysis
 
@@ -305,7 +291,7 @@ Result models:
 - `CheckResult`
 - `ValidationReport`
 
-## Smart Decimation (How It Works)
+## Simplification (How It Works)
 
 1. Build directed graph from SWC `id`/`parent`.
 2. Protect structural nodes (roots, optional tips, optional bifurcations).
@@ -332,7 +318,7 @@ def my_method(*args, **kwargs):
     ...
 
 register_method("batch_processing.auto_typing", "default", my_method)
-load_plugin_module("my_lab_plugins.brainglobe_adapter")
+load_plugin_module("my_lab_plugins.summary_plugin")
 ```
 
 ## Plugin Contract (Versioned)
@@ -348,17 +334,17 @@ Minimal `PLUGIN_MANIFEST`:
 
 ```python
 PLUGIN_MANIFEST = {
-    "plugin_id": "my_lab.brainglobe",
-    "name": "BrainGlobe Adapter",
+    "plugin_id": "my_lab.summary_plugin",
+    "name": "Custom Summary Plugin",
     "version": "0.1.0",
     "api_version": "1",
-    "capabilities": ["atlas_registration", "region_annotation"],
+    "capabilities": ["analysis", "custom_metrics"],
 }
 ```
 
 Starter template in this repo:
 
-- `examples/plugins/brainglobe_adapter_template.py`
+- `examples/plugins/summary_plugin_template.py`
 
 ## Config Files
 

@@ -47,7 +47,7 @@ Main helper functions:
 - file mode report: `<stem>_radii_cleaning_report.txt`
 - folder mode report: `<out_dir>/radii_cleaning_report.txt`
 
-## Smart Decimation
+## Simplification
 
 - report: `<stem>_simplification_log.txt`
 

@@ -23,7 +23,7 @@ It looks for:
 - non-positive radii (`<= 0`)
 - non-finite radii (`NaN`, `inf`)
 - local single-node spikes relative to a 5-node path window
-- radii that violate configured absolute / percentile sanity bounds
+- radii that violate configured sanity bounds
 - branch points that become thicker distally than biologically expected
 
 ## Triple-pass refinement
@@ -90,7 +90,7 @@ Under `rules`:
   - default: `0.5`
 - `fixed_point.enabled`
 - `fixed_point.max_passes`
-  - default: `20`
+  - default: `32`
 - `fixed_point.min_effective_delta`
   - default: `0.005`
 - `replacement.clamp_min`, `replacement.clamp_max`
@@ -103,16 +103,10 @@ Clean one file with the current JSON-configured three-pass method:
 swctools batch radii-clean ./data/single-soma.swc
 ```
 
-Clean one file while overriding sanity-bound percentiles for this run:
+Clean one file while overriding rules for this run:
 
 ```bash
-swctools batch radii-clean ./data/single-soma.swc --percentile-min 1 --percentile-max 99.5
-```
-
-Clean one file while overriding absolute sanity bounds for this run:
-
-```bash
-swctools batch radii-clean ./data/single-soma.swc --abs-min 0.05 --abs-max 30
+swctools batch radii-clean ./data/single-soma.swc --config-json '{"rules":{"local_outlier":{"max_percent_deviation":0.4}}}'
 ```
 
 Validation command path (same backend):
@@ -145,3 +139,4 @@ Report includes:
 - GUI panels expose JSON editor to adjust the three-pass behavior
 - histogram/statistics view helps inspect the affected radius distribution
 - run-on-loaded-file and run-on-folder are available in appropriate panels
+- Auto Radii Editing runs to a fixed point so the cleaned file should reopen without the `Outlier radii detected` issue under the same rules

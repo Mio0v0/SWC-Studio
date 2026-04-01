@@ -1,24 +1,29 @@
-# Docs Structure
+# Docs Overview
 
-This folder stores Sphinx **source** documentation only.
+Use these pages first:
 
-## Source files
+- [GETTING_STARTED.md](GETTING_STARTED.md)
+  - install, run, first steps
+- [GUI_WORKFLOW.md](GUI_WORKFLOW.md)
+  - current GUI layout and issue-driven workflow
+- [CLI_REFERENCE.md](CLI_REFERENCE.md)
+  - command reference
+- [CHECKS_AND_ISSUES_REFERENCE.md](CHECKS_AND_ISSUES_REFERENCE.md)
+  - canonical check, issue, parameter, and algorithm reference
+- [RADII_CLEANING_TUTORIAL.md](RADII_CLEANING_TUTORIAL.md)
+  - focused radii-cleaning guide
 
-- `index.rst`: table of contents root
-- `conf.py`: Sphinx configuration
-- `requirements.txt` (top-level): full project dependencies (core + GUI + docs)
-- `Makefile`: local build helper
-- `*.md` and `*.rst`: guide/reference source pages
-- `MACOS_PACKAGING.md`: reproducible macOS executable build guide
+Supporting pages:
 
-## Generated output
+- [VALIDATION_RULES.md](VALIDATION_RULES.md)
+- [API_DOCUMENTATION.md](API_DOCUMENTATION.md)
+- [ARCHITECTURE.md](ARCHITECTURE.md)
+- [LOGS_AND_REPORTS.md](LOGS_AND_REPORTS.md)
+- [MACOS_PACKAGING.md](MACOS_PACKAGING.md)
+- [TOOL_TUTORIALS.md](TOOL_TUTORIALS.md)
 
-Generated HTML (`docs/_build/`) is not tracked in git.
-
-Build locally when needed:
+Sphinx HTML output is generated locally and is not tracked in git:
 
 ```bash
 sphinx-build -b html docs docs/_build/html
 ```
-
-Packaging inputs live in the repo-level `packaging/` folder and are tracked in git.

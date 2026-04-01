@@ -6,6 +6,10 @@ OS note: replace `./data/...` with `.\data\...` on Windows. If `swctools` is not
 
 ## Tool -> Feature map
 
+## 0) Issue Check
+
+- GUI-style issue list (`check`)
+
 ## 1) Batch Processing
 
 - Batch Validation (`batch validate`)
@@ -31,10 +35,10 @@ OS note: replace `./data/...` with `.\data\...` on Windows. If `swctools` is not
 
 - Dendrogram Edit (`morphology dendrogram-edit`)
 - Manual Radii (`morphology set-radius`)
-- Simplification (`morphology simplify`)
 
 ## 5) Geometry Editing
 
+- Simplification (`geometry simplify`)
 - Move Node (`geometry move-node`)
 - Move Subtree (`geometry move-subtree`)
 - Connect (`geometry connect`)
@@ -42,15 +46,22 @@ OS note: replace `./data/...` with `.\data\...` on Windows. If `swctools` is not
 - Delete Node / Subtree (`geometry delete-node`, `geometry delete-subtree`)
 - Insert Node (`geometry insert`)
 
-## 5) Atlas Registration
-
-- Register (`atlas register`) placeholder, plugin-ready
-
-## 6) Analysis
-
-- Summary (`analysis summary`) basic metrics
-
 ---
+
+## Issue Check Tutorial
+
+Print the same combined issue list the GUI builds when a file is opened:
+
+```bash
+swctools check ./data/single-soma.swc
+```
+
+What it includes:
+
+- validation issues
+- suspicious radii
+- likely wrong labels
+- simplification suggestion
 
 ## Batch Processing Tutorials
 
@@ -100,14 +111,14 @@ Behavior:
 ### D. Batch Radii Cleaning
 
 ```bash
-swctools batch radii-clean ./data --threshold-mode percentile --percentile-min 1 --percentile-max 99.5
+swctools batch radii-clean ./data
 ```
 
-or absolute mode:
+Behavior:
 
-```bash
-swctools batch radii-clean ./data --threshold-mode absolute --abs-min 0.05 --abs-max 30
-```
+- uses the shared path-aware radii-cleaning backend
+- reads defaults from `swctools/tools/batch_processing/configs/radii_cleaning.json`
+- supports temporary JSON overrides through `--config-json`
 
 ### E. Batch Simplification
 
@@ -189,55 +200,35 @@ swctools morphology dendrogram-edit ./data/single-soma.swc --node-id 42 --new-ty
 swctools morphology set-radius ./data/single-soma.swc --node-id 42 --radius 0.75 --write
 ```
 
-### C. Simplification (RDP)
-
-```bash
-swctools morphology simplify ./data/single-soma.swc --write
-```
-
-Prints rule guide before processing and writes simplification log.
-
 ---
 
 ## Geometry Editing Tutorials
 
-### A. Connect two nodes
+### A. Simplification
+
+```bash
+swctools geometry simplify ./data/single-soma.swc --write
+```
+
+Prints rule guide before processing and writes simplification log.
+
+### B. Connect two nodes
 
 ```bash
 swctools geometry connect ./data/single-soma.swc --start-id 10 --end-id 22 --write
 ```
 
-### B. Disconnect a path
+### C. Disconnect a path
 
 ```bash
 swctools geometry disconnect ./data/single-soma.swc --start-id 10 --end-id 22 --write
 ```
 
-### C. Move a subtree
+### D. Move a subtree
 
 ```bash
 swctools geometry move-subtree ./data/single-soma.swc --root-id 40 --x 100 --y 120 --z 5 --write
 ```
-
----
-
-## Atlas Registration and Analysis
-
-### Atlas registration (plugin-ready)
-
-```bash
-swctools atlas register ./data/single-soma.swc --atlas allen_mouse_25um
-```
-
-Default implementation is placeholder. Register plugins to provide real atlas workflows.
-
-### Analysis summary
-
-```bash
-swctools analysis summary ./data/single-soma.swc
-```
-
----
 
 ## Config override pattern
 

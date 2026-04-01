@@ -8,7 +8,7 @@ Plugin entrypoints can be registered in two ways:
 
 2. Dynamic module load with manifest contract::
 
-       load_plugin_module("my_lab_plugins.brainglobe_adapter")
+       load_plugin_module("my_lab_plugins.summary_plugin")
 """
 
 from .contracts import PluginManifest, parse_plugin_manifest, plugin_manifest_to_dict

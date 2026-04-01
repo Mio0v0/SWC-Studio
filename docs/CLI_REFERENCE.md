@@ -17,13 +17,12 @@ swctools <tool> <feature> [args] [options]
 
 Top-level tools:
 
+- `check`
 - `batch`
 - `validation`
 - `visualization`
 - `morphology`
 - `geometry`
-- `atlas`
-- `analysis`
 - `plugins`
 
 ## OS Notes
@@ -55,6 +54,27 @@ Windows cmd:
 ```
 
 This must be a JSON object and is merged into feature config for that run.
+
+## `check`
+
+### `swctools check <file>`
+
+- Purpose: print the same combined issue list the GUI builds when an SWC is opened
+- Includes:
+  - validation issues
+  - suspicious radii issues
+  - likely wrong labels
+  - simplification suggestion
+
+Options:
+
+- `--config-json JSON`
+
+Example:
+
+```bash
+swctools check ./data/single-soma.swc
+```
 
 ## `batch`
 
@@ -118,18 +138,13 @@ Arguments:
 
 Options:
 
-- `--threshold-mode {percentile,absolute}`
 - soma radii are always preserved during radii cleaning
-- `--percentile-min FLOAT`
-- `--percentile-max FLOAT`
-- `--abs-min FLOAT`
-- `--abs-max FLOAT`
 - `--config-json JSON`
 
 Example:
 
 ```bash
-swctools batch radii-clean ./data/single-soma.swc --threshold-mode absolute --abs-min 0.05 --abs-max 20
+swctools batch radii-clean ./data/single-soma.swc
 ```
 
 ### `swctools batch simplify <folder>`
@@ -210,13 +225,19 @@ Arguments:
 
 Options:
 
-- `--threshold-mode {percentile,absolute}`
 - soma radii are always preserved during radii cleaning
-- `--percentile-min FLOAT`
-- `--percentile-max FLOAT`
-- `--abs-min FLOAT`
-- `--abs-max FLOAT`
 - `--config-json JSON`
+
+Notes:
+
+- current radii-clean behavior is driven mainly by:
+  - `sanity_bounds`
+  - `local_outlier`
+  - `taper`
+  - `axon_floor`
+  - `savgol`
+  - `fixed_point`
+- those settings live in `swctools/tools/batch_processing/configs/radii_cleaning.json`
 
 ### `swctools validation index-clean <file>`
 
@@ -265,33 +286,6 @@ Example:
 swctools morphology dendrogram-edit ./data/single-soma.swc --node-id 42 --new-type 3 --write
 ```
 
-### `swctools morphology smart-decimation <file>`
-
-- Purpose: graph-aware RDP simplification
-- CLI prints simplification rule guide before running
-
-Options:
-
-- `--write`
-- `--out PATH`
-- `--config-json JSON`
-
-Example:
-
-```bash
-swctools morphology smart-decimation ./data/single-soma.swc --write
-```
-
-### `swctools morphology simplify <file>`
-
-- Purpose: same shared simplification backend as `smart-decimation`, with a shorter current name
-
-Options:
-
-- `--write`
-- `--out PATH`
-- `--config-json JSON`
-
 ### `swctools morphology set-radius <file> --node-id N --radius R`
 
 - Purpose: set one node radius directly
@@ -312,7 +306,24 @@ swctools morphology set-radius ./data/single-soma.swc --node-id 42 --radius 0.75
 
 ## `geometry`
 
-These commands expose the same core geometry editing operations used by the app.
+These commands expose the same geometry-editing backend used by the app.
+
+### `swctools geometry simplify <file>`
+
+- Purpose: run the current simplification workflow used by `Geometry Editing -> Simplification`
+- CLI prints the simplification rule guide before running
+
+Options:
+
+- `--write`
+- `--out PATH`
+- `--config-json JSON`
+
+Example:
+
+```bash
+swctools geometry simplify ./data/single-soma.swc --write
+```
 
 ### `swctools geometry move-node <file> --node-id N --x X --y Y --z Z`
 
@@ -355,27 +366,6 @@ Options:
 - `--write`
 - `--out PATH`
 
-## `atlas`
-
-### `swctools atlas register <file>`
-
-- Purpose: atlas registration placeholder command
-
-Options:
-
-- `--atlas NAME`
-- `--config-json JSON`
-
-## `analysis`
-
-### `swctools analysis summary <file>`
-
-- Purpose: basic morphology summary
-
-Options:
-
-- `--config-json JSON`
-
 ## `plugins`
 
 ### `swctools plugins list`
@@ -404,7 +394,7 @@ swctools plugins list --feature-key batch_processing.auto_typing
 Example:
 
 ```bash
-swctools plugins load my_lab_plugins.brainglobe_adapter
+swctools plugins load my_lab_plugins.summary_plugin
 ```
 
 ### `swctools plugins list-loaded`
@@ -424,19 +414,19 @@ Plugins can autoload on every CLI run via `SWCTOOLS_PLUGINS`:
 macOS/Linux:
 
 ```bash
-export SWCTOOLS_PLUGINS="my_lab_plugins.brainglobe_adapter,my_lab_plugins.custom_auto_typing"
+export SWCTOOLS_PLUGINS="my_lab_plugins.summary_plugin,my_lab_plugins.custom_auto_typing"
 ```
 
 Windows PowerShell:
 
 ```powershell
-$env:SWCTOOLS_PLUGINS = "my_lab_plugins.brainglobe_adapter,my_lab_plugins.custom_auto_typing"
+$env:SWCTOOLS_PLUGINS = "my_lab_plugins.summary_plugin,my_lab_plugins.custom_auto_typing"
 ```
 
 Windows cmd:
 
 ```bat
-set SWCTOOLS_PLUGINS=my_lab_plugins.brainglobe_adapter,my_lab_plugins.custom_auto_typing
+set SWCTOOLS_PLUGINS=my_lab_plugins.summary_plugin,my_lab_plugins.custom_auto_typing
 ```
 
 ## Output and Reports

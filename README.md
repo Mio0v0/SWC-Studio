@@ -21,8 +21,6 @@ Top-level tool areas:
 3. Visualization
 4. Morphology Editing
 5. Geometry Editing
-6. Atlas Registration (placeholder)
-7. Analysis (placeholder)
 
 Core workflows currently include:
 
@@ -75,6 +73,7 @@ The intended app flow is:
 
 Short docs (Markdown):
 
+- [Docs Overview](docs/README.md): where to start and which page owns which topic
 - [CLI Reference](docs/CLI_REFERENCE.md): command reference and options
 - [GUI Workflow Guide](docs/GUI_WORKFLOW.md): current GUI layout, tool/feature structure, and issue-driven usage flow
 - [API / Library Documentation](docs/API_DOCUMENTATION.md): Python API surface
@@ -206,16 +205,17 @@ swctools batch radii-clean ./data
 swctools batch simplify ./data
 swctools batch index-clean ./data
 
+swctools check ./data/single-soma.swc
 swctools validation rule-guide
 swctools validation run ./data/single-soma.swc
 swctools validation auto-fix ./data/single-soma.swc --write
 swctools validation index-clean ./data/single-soma.swc --write
 
-swctools morphology simplify ./data/single-soma.swc --write
 swctools morphology set-radius ./data/single-soma.swc --node-id 42 --radius 0.75 --write
+swctools geometry simplify ./data/single-soma.swc --write
 swctools geometry connect ./data/single-soma.swc --start-id 10 --end-id 22 --write
 
-swctools plugins load my_lab_plugins.brainglobe_adapter
+swctools plugins load my_lab_plugins.summary_plugin
 swctools plugins list-loaded
 ```
 
@@ -229,16 +229,17 @@ swctools batch radii-clean .\data
 swctools batch simplify .\data
 swctools batch index-clean .\data
 
+swctools check .\data\single-soma.swc
 swctools validation rule-guide
 swctools validation run .\data\single-soma.swc
 swctools validation auto-fix .\data\single-soma.swc --write
 swctools validation index-clean .\data\single-soma.swc --write
 
-swctools morphology simplify .\data\single-soma.swc --write
 swctools morphology set-radius .\data\single-soma.swc --node-id 42 --radius 0.75 --write
+swctools geometry simplify .\data\single-soma.swc --write
 swctools geometry connect .\data\single-soma.swc --start-id 10 --end-id 22 --write
 
-swctools plugins load my_lab_plugins.brainglobe_adapter
+swctools plugins load my_lab_plugins.summary_plugin
 swctools plugins list-loaded
 ```
 
@@ -320,31 +321,31 @@ This project is released under the MIT License. See `LICENSE`.
    - `PLUGIN_METHODS` dictionary/list
 3. Plugin methods register against existing feature keys, e.g.:
    - `batch_processing.auto_typing`
-   - `atlas_registration.registration`
+   - `analysis.summary`
 
-This lets you integrate external libraries (like BrainGlobe adapters) without
-rewriting their internal algorithms.
+This lets you integrate external libraries or lab-specific methods without
+rewriting the app’s interface layer.
 
 For automatic plugin loading in CLI sessions:
 
 macOS/Linux:
 
 ```bash
-export SWCTOOLS_PLUGINS="my_lab_plugins.brainglobe_adapter,my_lab_plugins.custom_methods"
+export SWCTOOLS_PLUGINS="my_lab_plugins.summary_plugin,my_lab_plugins.custom_methods"
 ```
 
 Windows PowerShell:
 
 ```powershell
-$env:SWCTOOLS_PLUGINS = "my_lab_plugins.brainglobe_adapter,my_lab_plugins.custom_methods"
+$env:SWCTOOLS_PLUGINS = "my_lab_plugins.summary_plugin,my_lab_plugins.custom_methods"
 ```
 
 Windows cmd:
 
 ```bat
-set SWCTOOLS_PLUGINS=my_lab_plugins.brainglobe_adapter,my_lab_plugins.custom_methods
+set SWCTOOLS_PLUGINS=my_lab_plugins.summary_plugin,my_lab_plugins.custom_methods
 ```
 
 Starter template:
 
-- `examples/plugins/brainglobe_adapter_template.py`
+- `examples/plugins/summary_plugin_template.py`

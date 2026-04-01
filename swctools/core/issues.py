@@ -415,3 +415,98 @@ def issues_from_type_suspicion(
         },
     )
     return [issue.to_dict()]
+
+
+def issues_from_simplification_suggestion(df: pd.DataFrame | None) -> list[dict[str, Any]]:
+    """Surface a low-priority per-file suggestion that the SWC can be simplified."""
+    if df is None or df.empty:
+        return []
+
+    issue = Issue(
+        issue_id=f"suggestion:simplification:{int(len(df))}",
+        severity="info",
+        certainty="suggestion",
+        domain="geometry",
+        title="SWC file could be simplified",
+        description="This SWC may benefit from simplification to reduce redundant geometry while preserving overall structure.",
+        tool_target="simplification",
+        suggested_fix="Open Simplification to apply graph-aware cleanup on the current SWC.",
+        source_key="simplification_suggestion",
+        source_label="SWC file could be simplified",
+        source_category="Suggestions",
+        source_payload={"node_count": int(len(df))},
+    )
+    return [issue.to_dict()]
+
+
+def build_issue_list(
+    df: pd.DataFrame | None,
+    validation_report: dict[str, Any] | None,
+    *,
+    type_suspicious: list[dict[str, Any]] | None = None,
+) -> list[dict[str, Any]]:
+    """Build the same combined issue list used by the GUI issue navigator."""
+    base_issues = issues_from_validation_report(validation_report)
+
+    if df is not None and not df.empty:
+        type_by_id = {
+            int(row_id): int(row_type)
+            for row_id, row_type in zip(df["id"].tolist(), df["type"].tolist())
+            if pd.notna(row_id) and pd.notna(row_type)
+        }
+        soma_node_ids = [
+            int(row_id)
+            for row_id, row_type in zip(df["id"].tolist(), df["type"].tolist())
+            if pd.notna(row_id) and pd.notna(row_type) and int(row_type) == 1
+        ]
+        filtered_base_issues: list[dict[str, Any]] = []
+        for item in base_issues:
+            issue = dict(item)
+            if str(issue.get("source_key", "")).strip() == "soma_radius_nonzero" and not list(issue.get("node_ids", []) or []):
+                issue["node_ids"] = list(soma_node_ids)
+                payload = dict(issue.get("source_payload", {}) or {})
+                payload["failing_node_ids"] = list(soma_node_ids)
+                issue["source_payload"] = payload
+            if str(issue.get("source_key", "")).strip() == "no_dangling_branches":
+                original_node_ids = [int(v) for v in issue.get("node_ids", [])]
+                kept_node_ids = [node_id for node_id in original_node_ids if type_by_id.get(int(node_id), -999) != 1]
+                if not kept_node_ids:
+                    continue
+                issue["node_ids"] = kept_node_ids
+                payload = dict(issue.get("source_payload", {}) or {})
+                payload["failing_node_ids"] = kept_node_ids
+                issue["source_payload"] = payload
+            filtered_base_issues.append(issue)
+        base_issues = filtered_base_issues
+
+    prereq = validation_prerequisite_summary(validation_report)
+    hard_blocked = bool(prereq.get("soma_gate_failed")) or bool(prereq.get("multiple_somas_failed"))
+    critical_radii_node_ids = {
+        int(node_id)
+        for item in base_issues
+        if str(item.get("domain", "")) == "radii" and str(item.get("severity", "")) == "critical"
+        for node_id in item.get("node_ids", [])
+    }
+
+    suspicious_radii: list[dict[str, Any]] = []
+    if not hard_blocked and not prereq.get("unsupported_section_types") and not prereq.get("missing_soma"):
+        suspicious_radii = issues_from_radii_suspicion(df, ignore_node_ids=critical_radii_node_ids)
+
+    simplification_suggestion = issues_from_simplification_suggestion(df)
+    all_issues = list(base_issues) + list(suspicious_radii) + list(type_suspicious or []) + list(simplification_suggestion)
+
+    def _issue_priority(item: dict[str, Any]) -> tuple[int, int, int, int, str]:
+        source_key = str(item.get("source_key", "")).strip()
+        severity = str(item.get("severity", "")).strip()
+        status = str(item.get("status", "")).strip()
+        certainty = str(item.get("certainty", "")).strip()
+        return (
+            _SEVERITY_RANK.get(severity, 9),
+            CHECK_ORDER.get(source_key, 10_000),
+            {"open": 0, "muted": 1, "skipped": 1, "fixed": 2}.get(status, 9),
+            {"rule": 0, "suspicious": 1, "suggestion": 2}.get(certainty, 9),
+            str(item.get("title", "")).lower(),
+        )
+
+    all_issues.sort(key=_issue_priority)
+    return all_issues

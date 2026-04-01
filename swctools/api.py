@@ -22,7 +22,6 @@ from swctools.plugins import (
     unregister_plugin,
 )
 from swctools.tools.analysis.features.summary import analyze_file as analysis_summary_file
-from swctools.tools.atlas_registration.features.registration import register_to_atlas
 from swctools.tools.batch_processing.features.auto_typing import run_folder as batch_auto_typing
 from swctools.tools.batch_processing.features.index_clean import run_folder as batch_index_clean_folder
 from swctools.tools.batch_processing.features.simplification import (
@@ -109,7 +108,6 @@ __all__ = [
     "geometry_delete_subtree",
     "geometry_insert_node_between",
     "geometry_reindex_dataframe_with_map",
-    "register_to_atlas",
     "analysis_summary_file",
     "load_plugin_module",
     "load_plugins",
