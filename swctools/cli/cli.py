@@ -88,39 +88,34 @@ def _apply_radii_cli_overrides(args, base: dict | None) -> dict | None:
     rules = dict(out.get("rules", {}))
     changed = False
 
-    mode = str(getattr(args, "threshold_mode", "") or "").strip().lower()
-    if mode in {"percentile", "absolute"}:
-        rules["threshold_mode"] = mode
-        changed = True
-
-    if bool(getattr(args, "fix_soma_radii", False)):
-        rules["preserve_soma"] = False
-        changed = True
     if bool(getattr(args, "preserve_soma_radii", False)):
         rules["preserve_soma"] = True
         changed = True
 
+    sanity_bounds = dict(rules.get("sanity_bounds", {}))
+    global_bounds = dict(sanity_bounds.get("global", {}))
+
     pct_min = getattr(args, "percentile_min", None)
     pct_max = getattr(args, "percentile_max", None)
     if pct_min is not None or pct_max is not None:
-        g = dict(rules.get("global_percentile_bounds", {}))
         if pct_min is not None:
-            g["min"] = float(pct_min)
+            global_bounds["lower_percentile"] = float(pct_min)
         if pct_max is not None:
-            g["max"] = float(pct_max)
-        rules["global_percentile_bounds"] = g
+            global_bounds["upper_percentile"] = float(pct_max)
         changed = True
 
     abs_min = getattr(args, "abs_min", None)
     abs_max = getattr(args, "abs_max", None)
     if abs_min is not None or abs_max is not None:
-        g = dict(rules.get("global_absolute_bounds", {}))
         if abs_min is not None:
-            g["min"] = float(abs_min)
+            global_bounds["lower_abs"] = float(abs_min)
         if abs_max is not None:
-            g["max"] = float(abs_max)
-        rules["global_absolute_bounds"] = g
+            global_bounds["upper_abs"] = float(abs_max)
         changed = True
+
+    if global_bounds:
+        sanity_bounds["global"] = global_bounds
+        rules["sanity_bounds"] = sanity_bounds
 
     if changed:
         out["rules"] = rules
@@ -308,20 +303,20 @@ def build_parser() -> argparse.ArgumentParser:
         "--threshold-mode",
         choices=["percentile", "absolute"],
         default="",
-        help="Override threshold mode for this run.",
+        help="Deprecated; radii cleaning now uses combined sanity bounds instead of a single threshold mode.",
     )
     soma_group_b = batch_radii.add_mutually_exclusive_group()
     soma_group_b.add_argument(
         "--fix-soma-radii",
         action="store_true",
         default=False,
-        help="Allow soma (type 1) radii to be modified during cleaning.",
+        help="Deprecated; soma radii are always preserved during cleaning.",
     )
     soma_group_b.add_argument(
         "--preserve-soma-radii",
         action="store_true",
         default=False,
-        help="Keep soma (type 1) radii unchanged during cleaning.",
+        help="Deprecated; soma radii are always preserved during cleaning.",
     )
     batch_radii.add_argument("--percentile-min", type=float, default=None, help="Global min percentile.")
     batch_radii.add_argument("--percentile-max", type=float, default=None, help="Global max percentile.")
@@ -360,20 +355,20 @@ def build_parser() -> argparse.ArgumentParser:
         "--threshold-mode",
         choices=["percentile", "absolute"],
         default="",
-        help="Override threshold mode for this run.",
+        help="Deprecated; radii cleaning now uses combined sanity bounds instead of a single threshold mode.",
     )
     soma_group_v = val_radii.add_mutually_exclusive_group()
     soma_group_v.add_argument(
         "--fix-soma-radii",
         action="store_true",
         default=False,
-        help="Allow soma (type 1) radii to be modified during cleaning.",
+        help="Deprecated; soma radii are always preserved during cleaning.",
     )
     soma_group_v.add_argument(
         "--preserve-soma-radii",
         action="store_true",
         default=False,
-        help="Keep soma (type 1) radii unchanged during cleaning.",
+        help="Deprecated; soma radii are always preserved during cleaning.",
     )
     val_radii.add_argument("--percentile-min", type=float, default=None, help="Global min percentile.")
     val_radii.add_argument("--percentile-max", type=float, default=None, help="Global max percentile.")

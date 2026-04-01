@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 import zipfile
 import math
+import numpy as np
 from swctools.core.config import load_feature_config, merge_config, save_feature_config
 from swctools.core.reporting import (
     auto_typing_log_path_for_file,
@@ -29,31 +30,45 @@ def _default_rules_config() -> dict[str, Any]:
         "class_labels": {"1": "soma", "2": "axon", "3": "basal", "4": "apical"},
         "branch_score_weights": {
             "axon": {
-                "path": 0.18,
-                "radial": 0.14,
-                "root_path": 0.28,
-                "root_radial": 0.16,
-                "radius": 0.14,
-                "branch": 0.06,
+                "path": 0.14,
+                "radial": 0.12,
+                "root_path": 0.18,
+                "root_radial": 0.12,
+                "radius": 0.12,
+                "branch": 0.04,
+                "persistence": 0.16,
+                "taper": 0.08,
+                "symmetry": 0.04,
+                "up": 0.02,
                 "prior": 0.04,
             },
             "apical": {
-                "z": 0.28,
-                "path": 0.16,
+                "z": 0.20,
+                "up": 0.20,
+                "path": 0.12,
                 "root_path": 0.16,
-                "radius": 0.16,
+                "radius": 0.12,
                 "branch": 0.10,
+                "taper": 0.06,
+                "symmetry": 0.04,
                 "prior": 0.14,
             },
             "basal": {
-                "z": 0.18,
+                "z": 0.12,
+                "up": 0.12,
                 "branch": 0.16,
-                "radius": 0.18,
+                "radius": 0.14,
                 "path": 0.08,
                 "root_path": 0.20,
                 "root_radial": 0.12,
+                "persistence": 0.08,
+                "taper": 0.10,
+                "symmetry": 0.08,
                 "prior": 0.08,
             },
+        },
+        "feature_windows": {
+            "terminal_window_nodes": 3,
         },
         "segmenting": {"max_chunk_path": 180.0},
         "ml_blend": 0.28,
@@ -75,27 +90,37 @@ def _default_rules_config() -> dict[str, Any]:
             "propagation_weight": 0.30,
             "score_weights": {
                 "axon": {
-                    "path": 0.28,
-                    "radial": 0.22,
+                    "path": 0.20,
+                    "radial": 0.18,
                     "size": 0.18,
-                    "radius": 0.12,
+                    "radius": 0.10,
                     "branch": 0.08,
+                    "persistence": 0.14,
+                    "taper": 0.06,
+                    "symmetry": 0.04,
                     "prior": 0.12,
                 },
                 "apical": {
-                    "z": 0.32,
-                    "path": 0.18,
+                    "z": 0.22,
+                    "up": 0.22,
+                    "path": 0.14,
                     "size": 0.12,
                     "radius": 0.12,
                     "branch": 0.10,
+                    "taper": 0.06,
+                    "symmetry": 0.04,
                     "prior": 0.16,
                 },
                 "basal": {
-                    "path": 0.26,
+                    "path": 0.20,
                     "radial": 0.18,
-                    "radius": 0.18,
+                    "radius": 0.14,
                     "branch": 0.12,
                     "z": 0.10,
+                    "up": 0.10,
+                    "persistence": 0.06,
+                    "taper": 0.08,
+                    "symmetry": 0.10,
                     "prior": 0.16,
                 },
             },
@@ -108,9 +133,22 @@ def _default_rules_config() -> dict[str, Any]:
             "iterations": 4,
         },
         "radius": {"copy_parent_if_zero": True},
+        "constraints": {
+            "inherit_primary_subtree": True,
+            "single_axon": True,
+            "single_apical": True,
+            "axon_primary_min_score": 0.42,
+            "apical_primary_min_score": 0.42,
+            "far_basal_distance_um": 500.0,
+            "far_basal_penalty": 0.22,
+            "thin_axon_max_base_radius_um": 1.0,
+            "thin_axon_bonus": 0.10,
+        },
         "notes": (
             "This JSON controls the auto-labeling behavior "
-            "(weights, thresholds, and options), including the topology-aware second pass. Edit carefully."
+            "(weights, thresholds, and options), including hard primary-subtree inheritance, "
+            "single-axon/apical constraints, path-persistence / terminal-taper features, "
+            "and topology-aware refinement. Edit carefully."
         ),
     }
 
@@ -416,6 +454,60 @@ def _compute_root_metrics(
     return path_from_root, radial_from_root, branch_order, root_idx
 
 
+def _window_mean(vals: list[float], count: int) -> float:
+    if not vals:
+        return 0.0
+    take = max(1, min(int(count), len(vals)))
+    return float(sum(vals[:take]) / take)
+
+
+def _terminal_taper_ratio(nodes: list[int], rows: list[dict[str, Any]], *, window_nodes: int) -> float:
+    if not nodes:
+        return 1.0
+    radii = [max(0.0, float(rows[idx]["radius"])) for idx in nodes]
+    count = max(1, min(int(window_nodes), len(radii)))
+    base = _window_mean(radii, count)
+    tail = _window_mean(list(reversed(radii)), count)
+    if base <= 1e-9:
+        return 1.0
+    return max(0.0, float(tail / base))
+
+
+def _terminal_up_alignment(nodes: list[int], rows: list[dict[str, Any]]) -> float:
+    if len(nodes) <= 1:
+        return 0.5
+    start = rows[nodes[0]]
+    end = rows[nodes[-1]]
+    dx = float(end["x"]) - float(start["x"])
+    dy = float(end["y"]) - float(start["y"])
+    dz = float(end["z"]) - float(start["z"])
+    dist = math.sqrt(dx * dx + dy * dy + dz * dz)
+    if dist <= 1e-9:
+        return 0.5
+    return max(0.0, min(1.0, (dz / dist + 1.0) * 0.5))
+
+
+def _directional_persistence(path_length: float, euclidean_distance: float) -> float:
+    if path_length <= 1e-9 or euclidean_distance <= 1e-9:
+        return 0.5
+    return max(0.0, min(1.0, float(euclidean_distance / path_length)))
+
+
+def _branch_symmetry(anchor: int, rows: list[dict[str, Any]], children: list[list[int]]) -> float:
+    kids = children[anchor]
+    if len(kids) <= 1:
+        return 0.5
+    child_radii = [max(0.0, float(rows[idx]["radius"])) for idx in kids]
+    if not child_radii:
+        return 0.5
+    med = float(np.median(child_radii))
+    if med <= 1e-9:
+        return 0.5
+    mad = float(np.mean([abs(val - med) for val in child_radii]))
+    symmetry = 1.0 - min(1.0, mad / med)
+    return max(0.0, min(1.0, symmetry))
+
+
 def _soma_child_owners(
     rows: list[dict[str, Any]],
     parent_idx: list[int | None],
@@ -471,6 +563,23 @@ def _assign_soma_child_subtrees(
         child: max(float(rows[i]["z"]) - soma_z for i in nodes)
         for child, nodes in child_nodes.items()
     }
+    terminal_window = int(_load_cfg().get("feature_windows", {}).get("terminal_window_nodes", 3))
+    persistence = {
+        child: _directional_persistence(path_max.get(child, 0.0), radial_max.get(child, 0.0))
+        for child in child_nodes
+    }
+    taper_ratio = {
+        child: _terminal_taper_ratio(nodes, rows, window_nodes=terminal_window)
+        for child, nodes in child_nodes.items()
+    }
+    up_alignment = {
+        child: _terminal_up_alignment(nodes, rows)
+        for child, nodes in child_nodes.items()
+    }
+    symmetry = {
+        child: _branch_symmetry(child, rows, children)
+        for child in child_nodes
+    }
     existing_ratio: dict[tuple[int, int], float] = {}
     for child, nodes in child_nodes.items():
         for cls in enabled_neurites:
@@ -482,8 +591,18 @@ def _assign_soma_child_subtrees(
     n_radius = _normalize_map(mean_radius)
     n_branch = _normalize_map(branch_density)
     n_z = _normalize_map(z_max_rel)
+    n_persistence = dict(persistence)
+    n_taper = {child: 1.0 - min(1.0, max(0.0, taper_ratio.get(child, 1.0))) for child in child_nodes}
+    n_taper_axon = {child: min(1.0, max(0.0, taper_ratio.get(child, 1.0))) for child in child_nodes}
+    n_up = dict(up_alignment)
+    n_symmetry = dict(symmetry)
 
     cfg = _load_cfg().get("soma_child_prior", {})
+    constraints = _load_cfg().get("constraints", {})
+    far_basal_distance_um = float(constraints.get("far_basal_distance_um", 500.0))
+    far_basal_penalty = float(constraints.get("far_basal_penalty", 0.22))
+    thin_axon_max_base_radius = float(constraints.get("thin_axon_max_base_radius_um", 1.0))
+    thin_axon_bonus = float(constraints.get("thin_axon_bonus", 0.10))
     weights = cfg.get("score_weights", {})
     child_scores: dict[int, dict[int, float]] = {}
     for child in child_nodes:
@@ -493,38 +612,118 @@ def _assign_soma_child_subtrees(
             if cls == 2:
                 w = weights.get("axon", {})
                 s = (
-                    w.get("path", 0.28) * n_path.get(child, 0.5)
-                    + w.get("radial", 0.22) * n_radial.get(child, 0.5)
+                    w.get("path", 0.20) * n_path.get(child, 0.5)
+                    + w.get("radial", 0.18) * n_radial.get(child, 0.5)
                     + w.get("size", 0.18) * n_size.get(child, 0.5)
-                    + w.get("radius", 0.12) * (1.0 - n_radius.get(child, 0.5))
+                    + w.get("radius", 0.10) * (1.0 - n_radius.get(child, 0.5))
                     + w.get("branch", 0.08) * (1.0 - n_branch.get(child, 0.5))
+                    + w.get("persistence", 0.14) * n_persistence.get(child, 0.5)
+                    + w.get("taper", 0.06) * n_taper_axon.get(child, 0.5)
+                    + w.get("symmetry", 0.04) * (1.0 - n_symmetry.get(child, 0.5))
                     + w.get("prior", 0.12) * prior
                 )
+                if float(rows[child]["radius"]) <= thin_axon_max_base_radius:
+                    s += thin_axon_bonus
             elif cls == 4:
                 w = weights.get("apical", {})
                 s = (
-                    w.get("z", 0.32) * n_z.get(child, 0.5)
-                    + w.get("path", 0.18) * n_path.get(child, 0.5)
+                    w.get("z", 0.22) * n_z.get(child, 0.5)
+                    + w.get("up", 0.22) * n_up.get(child, 0.5)
+                    + w.get("path", 0.14) * n_path.get(child, 0.5)
                     + w.get("size", 0.12) * n_size.get(child, 0.5)
                     + w.get("radius", 0.12) * n_radius.get(child, 0.5)
                     + w.get("branch", 0.10) * n_branch.get(child, 0.5)
+                    + w.get("taper", 0.06) * n_taper.get(child, 0.5)
+                    + w.get("symmetry", 0.04) * n_symmetry.get(child, 0.5)
                     + w.get("prior", 0.16) * prior
                 )
             else:
                 w = weights.get("basal", {})
                 s = (
-                    w.get("path", 0.26) * (1.0 - n_path.get(child, 0.5))
+                    w.get("path", 0.20) * (1.0 - n_path.get(child, 0.5))
                     + w.get("radial", 0.18) * (1.0 - n_radial.get(child, 0.5))
-                    + w.get("radius", 0.18) * n_radius.get(child, 0.5)
+                    + w.get("radius", 0.14) * n_radius.get(child, 0.5)
                     + w.get("branch", 0.12) * n_branch.get(child, 0.5)
                     + w.get("z", 0.10) * (1.0 - n_z.get(child, 0.5))
+                    + w.get("up", 0.10) * (1.0 - n_up.get(child, 0.5))
+                    + w.get("persistence", 0.06) * (1.0 - n_persistence.get(child, 0.5))
+                    + w.get("taper", 0.08) * n_taper.get(child, 0.5)
+                    + w.get("symmetry", 0.10) * n_symmetry.get(child, 0.5)
                     + w.get("prior", 0.16) * prior
                 )
+                if max(path_max.get(child, 0.0), radial_max.get(child, 0.0)) > far_basal_distance_um:
+                    s -= far_basal_penalty
             sc[cls] = s
         child_scores[child] = sc
 
     child_class = _assign_branches(child_nodes, child_scores, enabled_neurites)
     return child_class, child_scores, node_child_owner
+
+
+def _pick_best_class(scores: dict[int, float], allowed: set[int]) -> int | None:
+    if not allowed:
+        return None
+    ordered = sorted(allowed)
+    return max(ordered, key=lambda cls: (float(scores.get(cls, float("-inf"))), -int(cls)))
+
+
+def _enforce_primary_subtree_constraints(
+    child_scores: dict[int, dict[int, float]],
+    enabled_neurites: set[int],
+) -> dict[int, int]:
+    if not child_scores or not enabled_neurites:
+        return {}
+
+    cfg = _load_cfg().get("constraints", {})
+    inherit_primary_subtree = bool(cfg.get("inherit_primary_subtree", True))
+    single_axon = bool(cfg.get("single_axon", True))
+    single_apical = bool(cfg.get("single_apical", True))
+    axon_primary_min = float(cfg.get("axon_primary_min_score", 0.42))
+    apical_primary_min = float(cfg.get("apical_primary_min_score", 0.42))
+
+    child_ids = sorted(child_scores)
+    out = _assign_branches({child: [child] for child in child_ids}, child_scores, enabled_neurites)
+    if not inherit_primary_subtree:
+        return out
+
+    axon_owner: int | None = None
+    if single_axon and 2 in enabled_neurites and child_ids:
+        best = max(child_ids, key=lambda child: float(child_scores.get(child, {}).get(2, float("-inf"))))
+        if float(child_scores.get(best, {}).get(2, float("-inf"))) >= axon_primary_min:
+            axon_owner = best
+
+    apical_owner: int | None = None
+    if single_apical and 4 in enabled_neurites and child_ids:
+        remaining = [child for child in child_ids if child != axon_owner]
+        if remaining:
+            best = max(remaining, key=lambda child: float(child_scores.get(child, {}).get(4, float("-inf"))))
+            if float(child_scores.get(best, {}).get(4, float("-inf"))) >= apical_primary_min:
+                apical_owner = best
+
+    fallback_shared = set(enabled_neurites)
+    if len(fallback_shared - {2, 4}) <= 0:
+        fallback_shared = set(enabled_neurites)
+
+    for child in child_ids:
+        if child == axon_owner:
+            out[child] = 2
+            continue
+        if child == apical_owner:
+            out[child] = 4
+            continue
+
+        allowed = set(enabled_neurites)
+        if single_axon and axon_owner is not None and 2 in allowed and len(allowed - {2}) >= 1:
+            allowed.discard(2)
+        if single_apical and apical_owner is not None and 4 in allowed and len(allowed - {4}) >= 1:
+            allowed.discard(4)
+        if not allowed:
+            allowed = set(fallback_shared)
+
+        picked = _pick_best_class(child_scores.get(child, {}), allowed)
+        if picked is not None:
+            out[child] = picked
+    return out
 
 
 def _branch_scores(
@@ -553,8 +752,13 @@ def _branch_scores(
     z_mean_rel: dict[int, float] = {}
     root_path_mean: dict[int, float] = {}
     root_radial_mean: dict[int, float] = {}
+    persistence: dict[int, float] = {}
+    taper_ratio: dict[int, float] = {}
+    up_alignment: dict[int, float] = {}
+    symmetry: dict[int, float] = {}
     existing_ratio: dict[tuple[int, int], float] = {}
 
+    terminal_window = int(_load_cfg().get("feature_windows", {}).get("terminal_window_nodes", 3))
     for bid, nodes in branch_nodes.items():
         a = branch_anchor[bid]
         ax, ay, az = x[a], y[a], z[a]
@@ -582,6 +786,10 @@ def _branch_scores(
         z_mean_rel[bid] = sum((z[i] - az) for i in nodes) / max(1, len(nodes))
         root_path_mean[bid] = sum(path_from_root[i] for i in nodes) / max(1, len(nodes))
         root_radial_mean[bid] = sum(radial_from_root[i] for i in nodes) / max(1, len(nodes))
+        persistence[bid] = _directional_persistence(plen, max_r)
+        taper_ratio[bid] = _terminal_taper_ratio(nodes, rows, window_nodes=terminal_window)
+        up_alignment[bid] = _terminal_up_alignment([a] + nodes, rows)
+        symmetry[bid] = _branch_symmetry(a, rows, children)
 
         for cls in enabled_neurites:
             c = sum(1 for i in nodes if int(types[i]) == cls)
@@ -594,10 +802,20 @@ def _branch_scores(
     n_z = _normalize_map(z_mean_rel)
     n_root_path = _normalize_map(root_path_mean)
     n_root_radial = _normalize_map(root_radial_mean)
+    n_persistence = dict(persistence)
+    n_taper = {bid: 1.0 - min(1.0, max(0.0, taper_ratio.get(bid, 1.0))) for bid in branch_nodes}
+    n_taper_axon = {bid: min(1.0, max(0.0, taper_ratio.get(bid, 1.0))) for bid in branch_nodes}
+    n_up = dict(up_alignment)
+    n_symmetry = dict(symmetry)
 
     scores: dict[int, dict[int, float]] = {}
     features: dict[int, tuple[float, ...]] = {}
     cfg = _load_cfg()
+    constraints = cfg.get("constraints", {})
+    far_basal_distance_um = float(constraints.get("far_basal_distance_um", 500.0))
+    far_basal_penalty = float(constraints.get("far_basal_penalty", 0.22))
+    thin_axon_max_base_radius = float(constraints.get("thin_axon_max_base_radius_um", 1.0))
+    thin_axon_bonus = float(constraints.get("thin_axon_bonus", 0.10))
     weights = cfg.get("branch_score_weights", {})
     child_prior_cfg = cfg.get("soma_child_prior", {})
     child_branch_weight = float(child_prior_cfg.get("branch_weight", 0.38))
@@ -611,6 +829,10 @@ def _branch_scores(
             n_z.get(bid, 0.5),
             n_root_path.get(bid, 0.5),
             n_root_radial.get(bid, 0.5),
+            n_persistence.get(bid, 0.5),
+            n_taper.get(bid, 0.5),
+            n_up.get(bid, 0.5),
+            n_symmetry.get(bid, 0.5),
         )
         owner = next((node_child_owner[i] for i in branch_nodes[bid] if node_child_owner[i] is not None), None)
         br_scores: dict[int, float] = {}
@@ -619,35 +841,50 @@ def _branch_scores(
             if cls == 2:
                 w = weights.get("axon", {})
                 s = (
-                    w.get("path", 0.18) * n_path.get(bid, 0.5)
-                    + w.get("radial", 0.14) * n_radial.get(bid, 0.5)
-                    + w.get("root_path", 0.28) * n_root_path.get(bid, 0.5)
-                    + w.get("root_radial", 0.16) * n_root_radial.get(bid, 0.5)
-                    + w.get("radius", 0.14) * (1.0 - n_radius.get(bid, 0.5))
-                    + w.get("branch", 0.06) * (1.0 - n_branch.get(bid, 0.5))
+                    w.get("path", 0.14) * n_path.get(bid, 0.5)
+                    + w.get("radial", 0.12) * n_radial.get(bid, 0.5)
+                    + w.get("root_path", 0.18) * n_root_path.get(bid, 0.5)
+                    + w.get("root_radial", 0.12) * n_root_radial.get(bid, 0.5)
+                    + w.get("radius", 0.12) * (1.0 - n_radius.get(bid, 0.5))
+                    + w.get("branch", 0.04) * (1.0 - n_branch.get(bid, 0.5))
+                    + w.get("persistence", 0.16) * n_persistence.get(bid, 0.5)
+                    + w.get("taper", 0.08) * n_taper_axon.get(bid, 0.5)
+                    + w.get("symmetry", 0.04) * (1.0 - n_symmetry.get(bid, 0.5))
+                    + w.get("up", 0.02) * (1.0 - abs(0.5 - n_up.get(bid, 0.5)) * 2.0)
                     + w.get("prior", 0.04) * prior
                 )
+                if float(rows[branch_nodes[bid][0]]["radius"]) <= thin_axon_max_base_radius:
+                    s += thin_axon_bonus
             elif cls == 4:
                 w = weights.get("apical", {})
                 s = (
-                    w.get("z", 0.28) * n_z.get(bid, 0.5)
-                    + w.get("path", 0.16) * n_path.get(bid, 0.5)
+                    w.get("z", 0.20) * n_z.get(bid, 0.5)
+                    + w.get("up", 0.20) * n_up.get(bid, 0.5)
+                    + w.get("path", 0.12) * n_path.get(bid, 0.5)
                     + w.get("root_path", 0.16) * n_root_path.get(bid, 0.5)
-                    + w.get("radius", 0.16) * n_radius.get(bid, 0.5)
+                    + w.get("radius", 0.12) * n_radius.get(bid, 0.5)
                     + w.get("branch", 0.10) * n_branch.get(bid, 0.5)
+                    + w.get("taper", 0.06) * n_taper.get(bid, 0.5)
+                    + w.get("symmetry", 0.04) * n_symmetry.get(bid, 0.5)
                     + w.get("prior", 0.14) * prior
                 )
             else:
                 w = weights.get("basal", {})
                 s = (
-                    w.get("z", 0.18) * (1.0 - n_z.get(bid, 0.5))
+                    w.get("z", 0.12) * (1.0 - n_z.get(bid, 0.5))
+                    + w.get("up", 0.12) * (1.0 - n_up.get(bid, 0.5))
                     + w.get("branch", 0.16) * n_branch.get(bid, 0.5)
-                    + w.get("radius", 0.18) * n_radius.get(bid, 0.5)
+                    + w.get("radius", 0.14) * n_radius.get(bid, 0.5)
                     + w.get("path", 0.08) * (1.0 - n_path.get(bid, 0.5))
                     + w.get("root_path", 0.20) * (1.0 - n_root_path.get(bid, 0.5))
                     + w.get("root_radial", 0.12) * (1.0 - n_root_radial.get(bid, 0.5))
+                    + w.get("persistence", 0.08) * (1.0 - n_persistence.get(bid, 0.5))
+                    + w.get("taper", 0.10) * n_taper.get(bid, 0.5)
+                    + w.get("symmetry", 0.08) * n_symmetry.get(bid, 0.5)
                     + w.get("prior", 0.08) * prior
                 )
+                if max(root_path_mean.get(bid, 0.0), root_radial_mean.get(bid, 0.0)) > far_basal_distance_um:
+                    s -= far_basal_penalty
             if owner is not None and owner in child_scores:
                 s += child_branch_weight * child_scores[owner].get(cls, 0.0)
                 if child_class.get(owner) == cls:
@@ -655,6 +892,24 @@ def _branch_scores(
             br_scores[cls] = s
         scores[bid] = br_scores
     return scores, features, existing_ratio
+
+
+def _enforce_owner_labels_on_branches(
+    branch_class: dict[int, int],
+    branch_nodes: dict[int, list[int]],
+    node_child_owner: list[int | None],
+    child_class: dict[int, int],
+) -> dict[int, int]:
+    if not branch_class or not child_class:
+        return branch_class
+    if not bool(_load_cfg().get("constraints", {}).get("inherit_primary_subtree", True)):
+        return branch_class
+    out = dict(branch_class)
+    for bid, nodes in branch_nodes.items():
+        owner = next((node_child_owner[i] for i in nodes if i < len(node_child_owner) and node_child_owner[i] is not None), None)
+        if owner is not None and owner in child_class:
+            out[bid] = int(child_class[owner])
+    return out
 
 
 def _euclid_similarity(a: tuple[float, ...], b: tuple[float, ...]) -> float:
@@ -969,6 +1224,7 @@ def _apply_rules(rows: list[dict[str, Any]], opts: RuleBatchOptions) -> tuple[li
             path_from_root,
             radial_from_root,
         )
+        child_class = _enforce_primary_subtree_constraints(child_scores, enabled_neurites)
         branch_nodes, branch_anchor, node_branch = _branch_partition(rows, parent_idx, children, types)
         scores, features, existing_ratio = _branch_scores(
             rows,
@@ -987,11 +1243,13 @@ def _apply_rules(rows: list[dict[str, Any]], opts: RuleBatchOptions) -> tuple[li
         scores = _ml_refine_scores(scores, features, existing_ratio, enabled_neurites)
         branch_class = _assign_branches(branch_nodes, scores, enabled_neurites)
         branch_class = _smooth_branch_labels(branch_class, scores, branch_anchor, node_branch)
+        branch_class = _enforce_owner_labels_on_branches(branch_class, branch_nodes, node_child_owner, child_class)
         branch_parent, branch_children = _branch_graph(branch_anchor, node_branch)
         branch_lengths = _branch_path_lengths(rows, parent_idx, branch_nodes)
         scores = _neighbor_refine_scores(scores, branch_class, branch_parent, branch_children)
         branch_class = _assign_branches(branch_nodes, scores, enabled_neurites)
         branch_class = _smooth_branch_labels(branch_class, scores, branch_anchor, node_branch)
+        branch_class = _enforce_owner_labels_on_branches(branch_class, branch_nodes, node_child_owner, child_class)
         branch_class = _refine_topology_branch_labels(
             branch_class,
             scores,
@@ -999,6 +1257,7 @@ def _apply_rules(rows: list[dict[str, Any]], opts: RuleBatchOptions) -> tuple[li
             branch_children,
             branch_lengths,
         )
+        branch_class = _enforce_owner_labels_on_branches(branch_class, branch_nodes, node_child_owner, child_class)
 
         for bid, nodes in branch_nodes.items():
             cls = branch_class.get(bid)
@@ -1008,53 +1267,6 @@ def _apply_rules(rows: list[dict[str, Any]], opts: RuleBatchOptions) -> tuple[li
                 if opts.soma and int(types[i]) == 1:
                     continue
                 types[i] = cls
-
-        prop_cfg = _load_cfg().get("propagation_weights", {})
-        w_self = float(prop_cfg.get("self", 0.35))
-        w_parent = float(prop_cfg.get("parent", 0.35))
-        w_children_total = float(prop_cfg.get("children", 0.20))
-        w_branch_prior = float(prop_cfg.get("branch_prior", 0.30))
-        w_child_subtree = float(_load_cfg().get("soma_child_prior", {}).get("propagation_weight", 0.30))
-        prop_iters = int(prop_cfg.get("iterations", 4))
-
-        for _ in range(prop_iters):
-            new_types = list(types)
-            for idx in order:
-                if opts.soma and int(types[idx]) == 1:
-                    continue
-                if idx < len(node_branch) and node_branch[idx] == -1:
-                    continue
-                votes: dict[int, float] = {c: 0.0 for c in enabled_neurites}
-                cur = int(types[idx])
-                if cur in votes:
-                    votes[cur] += w_self
-
-                pidx = parent_idx[idx]
-                if pidx is not None:
-                    pt = int(types[pidx])
-                    if pt in votes:
-                        votes[pt] += w_parent
-
-                ch = children[idx]
-                if ch:
-                    w = (w_children_total / len(ch)) if len(ch) > 0 else 0.0
-                    for c in ch:
-                        ct = int(types[c])
-                        if ct in votes:
-                            votes[ct] += w
-
-                bid = node_branch[idx] if idx < len(node_branch) else -1
-                if bid in branch_class:
-                    votes[branch_class[bid]] = votes.get(branch_class[bid], 0.0) + w_branch_prior
-
-                owner = node_child_owner[idx] if idx < len(node_child_owner) else None
-                if owner in child_class:
-                    votes[child_class[owner]] = votes.get(child_class[owner], 0.0) + w_child_subtree
-
-                if votes:
-                    best = max(votes.items(), key=lambda kv: kv[1])[0]
-                    new_types[idx] = best
-            types = new_types
 
         if opts.soma:
             for i, row in enumerate(rows):

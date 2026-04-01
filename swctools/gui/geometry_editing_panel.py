@@ -74,6 +74,7 @@ class GeometryEditingPanel(QWidget):
         self._df: pd.DataFrame | None = None
         self._current_node_id: int | None = None
         self._items: list[dict[str, Any]] = []
+        self.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
         self._build_ui()
 
     def _build_ui(self):
@@ -90,7 +91,7 @@ class GeometryEditingPanel(QWidget):
         root.addWidget(desc)
 
         select_group = QGroupBox("Selection")
-        select_group.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Maximum)
+        select_group.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Maximum)
         select_layout = QVBoxLayout(select_group)
         select_layout.setContentsMargins(10, 10, 10, 10)
         select_layout.setSpacing(8)
@@ -167,7 +168,7 @@ class GeometryEditingPanel(QWidget):
         root.addWidget(select_group)
 
         op_picker = QGroupBox("Edit Operation")
-        op_picker.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Maximum)
+        op_picker.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Maximum)
         op_picker_layout = QVBoxLayout(op_picker)
         op_picker_layout.setContentsMargins(10, 10, 10, 10)
         op_picker_layout.setSpacing(8)
@@ -188,10 +189,10 @@ class GeometryEditingPanel(QWidget):
         op_picker_layout.addLayout(op_row)
 
         self._operation_stack = _CurrentPageStackedWidget()
-        self._operation_stack.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Maximum)
+        self._operation_stack.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Maximum)
 
         connect_page = QWidget()
-        connect_page.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Maximum)
+        connect_page.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Maximum)
         connect_layout = QVBoxLayout(connect_page)
         connect_layout.setContentsMargins(0, 0, 0, 0)
         connect_layout.setSpacing(8)
@@ -215,7 +216,7 @@ class GeometryEditingPanel(QWidget):
         self._operation_stack.addWidget(connect_page)
 
         disconnect_page = QWidget()
-        disconnect_page.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Maximum)
+        disconnect_page.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Maximum)
         disconnect_layout = QVBoxLayout(disconnect_page)
         disconnect_layout.setContentsMargins(0, 0, 0, 0)
         disconnect_layout.setSpacing(8)
@@ -296,7 +297,7 @@ class GeometryEditingPanel(QWidget):
         self._operation_stack.addWidget(delete_page)
 
         move_page = QWidget()
-        move_page.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Maximum)
+        move_page.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Maximum)
         move_layout = QVBoxLayout(move_page)
         move_layout.setContentsMargins(0, 0, 0, 0)
         move_layout.setSpacing(8)

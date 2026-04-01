@@ -96,10 +96,7 @@ def _check_valid_soma_format(ctx, params: dict[str, Any]) -> CheckResult:
     if passed:
         msg = "Soma format is a single-node representation or already simple."
     else:
-        msg = (
-            f"Found {len(complex_groups)} connected multi-node soma group(s). "
-            "Complex somas may render poorly; downstream checks use a temporary consolidated soma working copy."
-        )
+        msg = f"Found {len(complex_groups)} connected multi-node soma group(s)."
     return CheckResult.from_pass_fail(
         key="valid_soma_format",
         label="Soma format is simple",

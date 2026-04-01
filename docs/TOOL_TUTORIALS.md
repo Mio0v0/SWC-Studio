@@ -152,7 +152,7 @@ swctools validation auto-fix ./data/single-soma.swc --write --out ./data/single-
 ### D. Validation Radii Cleaning
 
 ```bash
-swctools validation radii-clean ./data/single-soma.swc --preserve-soma-radii
+swctools validation radii-clean ./data/single-soma.swc
 ```
 
 ### E. Validation Index Clean

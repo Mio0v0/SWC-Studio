@@ -158,6 +158,13 @@ def _array_to_swc_text(arr: np.ndarray) -> str:
 
 
 def consolidate_complex_somas_array(arr: np.ndarray) -> dict[str, Any]:
+    """Collapse connected soma groups without renumbering surviving node IDs.
+
+    Each connected type-1 soma component is reduced to one anchor soma node with
+    updated centroid/radius. Non-anchor soma nodes are removed, and any child that
+    pointed to a removed soma node is rewired to the surviving anchor ID. Surviving
+    node IDs are preserved; no global reindexing is performed here.
+    """
     out = np.array(arr, copy=True)
     if out.size == 0:
         return {
@@ -272,6 +279,9 @@ def consolidate_complex_somas_array(arr: np.ndarray) -> dict[str, Any]:
             out["parent"][i] = int(anchor_map[parent_id])
 
     final_arr = np.array(out[keep_mask], copy=True)
+    # Compatibility field retained for callers that expect a mapping payload.
+    # Soma consolidation preserves surviving IDs, so there is intentionally no
+    # automatic remap here.
     reindex_map: dict[int, int] = {}
     complex_groups = [group for group in group_infos if int(group.get("group_size", 0)) > 1]
     return {

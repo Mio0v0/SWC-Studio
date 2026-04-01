@@ -24,9 +24,10 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from swctools.core.config import feature_config_path, load_feature_config, save_feature_config
-from swctools.core.radii_cleaning import radii_stats_by_type
+from swctools.core.config import feature_config_path, load_feature_config, merge_config, save_feature_config
+from swctools.core.radii_cleaning import clean_radii_dataframe, radii_stats_by_type
 from swctools.tools.batch_processing.features.radii_cleaning import clean_path, preview_folder_radii
+from swctools.tools.batch_processing.features.radii_cleaning import get_config as get_radii_cleaning_config
 
 _CFG_TOOL = "batch_processing"
 _CFG_FEATURE = "radii_cleaning"
@@ -111,6 +112,7 @@ class RadiiCleaningPanel(QWidget):
     """Run shared radii cleaning backend for either file or folder."""
 
     log_message = Signal(str)
+    loaded_apply_requested = Signal(object)
 
     def __init__(self, parent=None, *, allow_loaded_swc_run: bool = True):
         super().__init__(parent)
@@ -146,17 +148,6 @@ class RadiiCleaningPanel(QWidget):
         desc.setStyleSheet("font-size: 12px; color: #555;")
         root.addWidget(desc)
 
-        mode_row = QHBoxLayout()
-        mode_row.addWidget(QLabel("Threshold mode:"))
-        self._threshold_mode = QComboBox()
-        self._threshold_mode.addItem("Use JSON setting", "")
-        self._threshold_mode.addItem("Percentile", "percentile")
-        self._threshold_mode.addItem("Absolute", "absolute")
-        self._threshold_mode.setCurrentIndex(0)
-        mode_row.addWidget(self._threshold_mode)
-        mode_row.addStretch()
-        root.addLayout(mode_row)
-
         row = QHBoxLayout()
         if self._allow_loaded_swc_run:
             b_run_loaded = QPushButton("Run")
@@ -191,6 +182,7 @@ class RadiiCleaningPanel(QWidget):
         hist_row = QHBoxLayout()
         hist_row.addWidget(QLabel("Histogram Type:"))
         self._hist_type = QComboBox()
+        self._style_combo(self._hist_type)
         self._hist_type.currentIndexChanged.connect(self._draw_selected_histogram)
         self._hist_type.activated.connect(lambda _i: self._draw_selected_histogram())
         hist_row.addWidget(self._hist_type)
@@ -246,6 +238,24 @@ class RadiiCleaningPanel(QWidget):
             self._status.setPlainText("Select a folder to inspect combined per-type distributions before cleaning.")
         root.addWidget(self._status, stretch=1)
 
+    def _style_combo(self, combo: QComboBox):
+        combo.setStyleSheet(
+            "QComboBox QAbstractItemView {"
+            "  background: #ffffff;"
+            "  color: #132238;"
+            "  selection-background-color: #d9e8fb;"
+            "  selection-color: #132238;"
+            "}"
+            "QComboBox QAbstractItemView::item:hover {"
+            "  background: #d9e8fb;"
+            "  color: #132238;"
+            "}"
+            "QComboBox QAbstractItemView::item:selected {"
+            "  background: #d9e8fb;"
+            "  color: #132238;"
+            "}"
+        )
+
     def set_loaded_swc(self, df: pd.DataFrame | None, filename: str = "", file_path: str = ""):
         if df is None or df.empty:
             self._loaded_df = None
@@ -293,11 +303,49 @@ class RadiiCleaningPanel(QWidget):
         self._cfg_dialog.activateWindow()
 
     def _on_run_loaded(self):
-        path = str(self._loaded_path or "").strip()
-        if not path:
-            self._set_status("No loaded SWC file path available. Open an SWC from disk first.")
+        if self._loaded_df is None or self._loaded_df.empty:
+            self._set_status("No loaded SWC data available. Open an SWC from disk first.")
             return
-        self._run_path(path)
+        cfg_overrides = self._build_run_config_overrides()
+        try:
+            cfg = merge_config(get_radii_cleaning_config(), cfg_overrides)
+            result = clean_radii_dataframe(self._loaded_df, rules=dict(cfg.get("rules", {})))
+            out = {
+                "changes": int(result.get("total_changes", 0)),
+                "change_details": list(result.get("change_details", [])),
+                "dataframe": result.get("dataframe"),
+                "stats_by_type": dict(result.get("stats_by_type", {})),
+                "config_used": cfg,
+                "passes": int(result.get("passes", 0)),
+            }
+        except Exception as e:  # noqa: BLE001
+            self._set_status(f"Radii cleaning failed:\n{e}")
+            return
+
+        out["mode"] = "loaded_file"
+        out["input_path"] = str(self._loaded_path or self._loaded_name or "")
+        out["output_path"] = None
+        out["log_path"] = ""
+        lines = [
+            "Radii cleaning applied to current SWC.",
+            f"Input: {out.get('input_path', '')}",
+            f"Radius changes: {int(out.get('changes', 0))}",
+            f"Passes used: {int(out.get('passes', 0))}",
+        ]
+        detail = list(out.get("change_details", []))
+        if detail:
+            lines.append("")
+            lines.append("Node changes:")
+            for row in detail[:80]:
+                reasons = ",".join(str(r) for r in list(row.get("reasons", [])) or []) or "unknown"
+                lines.append(
+                    f"node_id={row.get('node_id')} old={row.get('old_radius')} "
+                    f"new={row.get('new_radius')} reasons={reasons}"
+                )
+            if len(detail) > 80:
+                lines.append(f"... ({len(detail) - 80} more)")
+        self._set_status("\n".join(lines))
+        self.loaded_apply_requested.emit(dict(out))
 
     def _on_run_folder(self):
         folder = str(self._selected_folder or "").strip()
@@ -321,17 +369,12 @@ class RadiiCleaningPanel(QWidget):
             self._set_status(f"Radii cleaning failed:\n{e}")
             return
 
-        cfg_used = dict(out.get("config_used", {}))
-        rules_used = dict(cfg_used.get("rules", {}))
-        mode_used = str(rules_used.get("threshold_mode", ""))
-
         mode = str(out.get("mode", ""))
         if mode == "file":
             lines = [
                 "Radii cleaning completed (file).",
                 f"Input: {out.get('input_path', '')}",
                 f"Output: {out.get('output_path', '')}",
-                f"Threshold mode used: {mode_used or 'unknown'}",
                 f"Radius changes: {out.get('radius_changes', 0)}",
                 f"Log: {out.get('log_path', '')}",
             ]
@@ -349,7 +392,6 @@ class RadiiCleaningPanel(QWidget):
             "Radii cleaning completed (folder).",
             f"Folder: {out.get('folder', '')}",
             f"Output folder: {out.get('out_dir', '')}",
-            f"Threshold mode used: {mode_used or 'unknown'}",
             f"SWC files detected: {out.get('files_total', 0)}",
             f"Processed: {out.get('files_processed', 0)}",
             f"Failed: {out.get('files_failed', 0)}",
@@ -367,10 +409,7 @@ class RadiiCleaningPanel(QWidget):
         self._set_status("\n".join(lines))
 
     def _build_run_config_overrides(self) -> dict | None:
-        mode = str(self._threshold_mode.currentData() or "").strip().lower()
-        if mode not in {"percentile", "absolute"}:
-            return None
-        return {"rules": {"threshold_mode": mode}}
+        return None
 
     def _refresh_stats_from_loaded_swc(self):
         if self._loaded_df is None or self._loaded_df.empty:

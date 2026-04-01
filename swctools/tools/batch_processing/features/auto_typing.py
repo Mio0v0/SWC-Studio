@@ -34,6 +34,15 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "seed_prior_threshold": 0.55,
         "assign_missing": {"min_score": 0.58, "min_gain": -0.06},
         "smoothing": {"maj_fraction": 0.67, "flip_margin": 0.10},
+        "constraints": {
+            "inherit_primary_subtree": True,
+            "single_axon": True,
+            "single_apical": True,
+            "axon_primary_min_score": 0.42,
+            "apical_primary_min_score": 0.42,
+            "far_basal_distance_um": 500.0,
+            "far_basal_penalty": 0.22,
+        },
         "propagation_weights": {
             "self": 0.35,
             "parent": 0.35,
@@ -44,7 +53,8 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "radius": {"copy_parent_if_zero": True},
         "notes": (
             "This JSON controls the auto-labeling behavior "
-            "(weights, thresholds, and options). Edit carefully."
+            "(weights, thresholds, and options), including hard primary-subtree inheritance, "
+            "single-axon/apical constraints, and topology-aware refinement. Edit carefully."
         ),
     },
 }

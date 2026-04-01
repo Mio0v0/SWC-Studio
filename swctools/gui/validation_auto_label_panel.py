@@ -92,8 +92,6 @@ class _AutoTypingConfigDialog(QDialog):
 
 class ValidationAutoLabelPanel(QWidget):
     process_requested = Signal(object)
-    apply_requested = Signal()
-    cancel_requested = Signal()
     guide_requested = Signal()
     log_message = Signal(str)
 
@@ -149,16 +147,6 @@ class ValidationAutoLabelPanel(QWidget):
         top_btns.addStretch()
         root.addLayout(top_btns)
 
-        action_row = QHBoxLayout()
-        self._btn_apply = QPushButton("Apply")
-        self._btn_apply.clicked.connect(self.apply_requested.emit)
-        action_row.addWidget(self._btn_apply)
-        self._btn_cancel = QPushButton("Cancel")
-        self._btn_cancel.clicked.connect(self.cancel_requested.emit)
-        action_row.addWidget(self._btn_cancel)
-        action_row.addStretch()
-        root.addLayout(action_row)
-
         self._summary = QPlainTextEdit()
         self._summary.setReadOnly(True)
         self._summary.setMinimumHeight(160)
@@ -192,20 +180,19 @@ class ValidationAutoLabelPanel(QWidget):
         self._config_dialog.activateWindow()
 
     def set_preview_state(self, has_preview: bool, summary: dict | None):
-        self._btn_apply.setEnabled(bool(has_preview))
-        self._btn_cancel.setEnabled(bool(has_preview))
+        _ = has_preview
 
         if not summary:
             self._summary.setPlainText(
-                "No auto-label preview yet.\n"
-                "Use Run to preview auto label editing on the current canvas."
+                "No auto-label result yet.\n"
+                "Use Run to apply auto label editing to the current canvas."
             )
             return
 
         out_counts = dict(summary.get("out_type_counts", {}))
         lines = [
-            "Auto Label Editing Preview",
-            "------------------",
+            "Auto Label Editing Result",
+            "-------------------------",
             f"Nodes processed: {summary.get('nodes_total', 0)}",
             f"Type changes: {summary.get('type_changes', 0)}",
             f"Radius changes: {summary.get('radius_changes', 0)}",

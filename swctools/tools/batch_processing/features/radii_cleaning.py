@@ -31,31 +31,44 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "enabled": True,
     "method": "default",
     "rules": {
-        "preserve_soma": True,
         "small_radius_zero_only": True,
-        "threshold_mode": "percentile",
-        "global_percentile_bounds": {
-            "min": 1.0,
-            "max": 99.5,
+        "sanity_bounds": {
+            "global": {
+                "lower_percentile": 1.0,
+                "upper_percentile": 99.5,
+                "lower_abs": 0.05,
+                "upper_abs": 30.0,
+            },
+            "per_type": {
+                "2": {"enabled": True, "lower_percentile": 1.0, "upper_percentile": 99.5, "lower_abs": 0.05, "upper_abs": 30.0},
+                "3": {"enabled": True, "lower_percentile": 1.0, "upper_percentile": 99.5, "lower_abs": 0.05, "upper_abs": 30.0},
+                "4": {"enabled": True, "lower_percentile": 1.0, "upper_percentile": 99.5, "lower_abs": 0.05, "upper_abs": 30.0},
+            },
         },
-        "global_absolute_bounds": {
-            "min": 0.05,
-            "max": 30.0,
+        "local_outlier": {
+            "enabled": True,
+            "window_nodes": 5,
+            "max_percent_deviation": 0.5,
         },
-        "type_thresholds": {
-            "2": {"enabled": True, "min_percentile": 1.0, "max_percentile": 99.5, "min_abs": 0.05, "max_abs": 30.0},
-            "3": {"enabled": True, "min_percentile": 1.0, "max_percentile": 99.5, "min_abs": 0.05, "max_abs": 30.0},
-            "4": {"enabled": True, "min_percentile": 1.0, "max_percentile": 99.5, "min_abs": 0.05, "max_abs": 30.0},
+        "taper": {
+            "enabled": True,
+            "slack": 0.05,
         },
-        "replace_non_positive": True,
-        "replace_non_finite": True,
-        "detect_spikes": True,
-        "detect_dips": True,
-        "spike_ratio_threshold": 2.8,
-        "dip_ratio_threshold": 0.35,
-        "min_neighbor_count": 1,
-        "iterations": 4,
-        "max_descendant_search_depth": 32,
+        "axon_floor": {
+            "enabled": True,
+            "min_radius": 0.12,
+        },
+        "savgol": {
+            "enabled": True,
+            "window_nodes": 7,
+            "polyorder": 2,
+            "gaussian_sigma_fraction": 0.5,
+        },
+        "fixed_point": {
+            "enabled": True,
+            "max_passes": 20,
+            "min_effective_delta": 0.005,
+        },
         "replacement": {
             "clamp_min": 0.05,
             "clamp_max": 30.0,

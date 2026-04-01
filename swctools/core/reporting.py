@@ -72,9 +72,15 @@ def _unique_path(path: Path) -> Path:
         i += 1
 
 
-def log_dir_for_file(path: str | Path) -> Path:
+def output_dir_for_file(path: str | Path) -> Path:
     p = Path(path)
-    return p.parent / f"{p.stem}_logs"
+    out_dir = p.parent / f"{p.stem}_swc_studio_output"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    return out_dir
+
+
+def log_dir_for_file(path: str | Path) -> Path:
+    return output_dir_for_file(path)
 
 
 def report_path_for_file(path: str | Path, report_tag: str, *, extension: str = ".txt") -> Path:
@@ -96,7 +102,10 @@ def validation_log_path_for_file(path: str | Path) -> Path:
 
 
 def morphology_session_log_path(path: str | Path) -> Path:
-    return report_path_for_file(path, "morphology_session_log")
+    p = Path(path)
+    log_dir = log_dir_for_file(p)
+    base = log_dir / f"{p.stem}_session_log_{_timestamp_slug()}.txt"
+    return _unique_path(base)
 
 
 def correction_summary_log_path_for_file(path: str | Path) -> Path:
@@ -383,10 +392,9 @@ def format_morphology_session_log_text(
     source_file: str,
     session_started: str,
     session_ended: str,
-    changes: list[dict[str, Any]],
-    events: list[dict[str, Any]] | None = None,
+    operations: list[dict[str, Any]],
 ) -> str:
-    events = list(events or [])
+    operations = list(operations or [])
     lines: list[str] = []
     lines.append("SWC Session Report")
     lines.append("------------------")
@@ -394,38 +402,94 @@ def format_morphology_session_log_text(
     lines.append(f"Source file: {source_file}")
     lines.append(f"Session started: {session_started}")
     lines.append(f"Session ended: {session_ended}")
-    lines.append(f"Total morphology type changes: {len(changes)}")
-    lines.append(f"Total processing events: {len(events)}")
     lines.append("")
     lines.extend(_label_type_legend_lines())
-
-    if events:
-        lines.append("")
-        lines.append("Processing Events")
-        lines.append("-----------------")
-        for event in events:
-            lines.append(f"* [{event.get('time', '')}] {event.get('title', event.get('kind', 'event'))}")
-            summary = str(event.get('summary', '')).strip()
-            if summary:
-                lines.append(f"  summary: {summary}")
-            for detail in list(event.get('details', []) or []):
-                lines.append(f"  - {detail}")
-
     lines.append("")
-    lines.append("Morphology Type Changes")
-    lines.append("-----------------------")
-    if changes:
-        lines.append(f"{'Seq':<6}{'Time':<12}{'NodeID':<10}{'OldType':<10}{'NewType':<10}")
-        for row in changes:
-            lines.append(
-                f"{str(row.get('seq', '')):<6}"
-                f"{str(row.get('time', '')):<12}"
-                f"{str(row.get('node_id', '')):<10}"
-                f"{str(row.get('old_type', '')):<10}"
-                f"{str(row.get('new_type', '')):<10}"
-            )
-    else:
-        lines.append("No direct node-type edits were recorded.")
+    lines.append("Change Summary")
+    lines.append("--------------")
+    if not operations:
+        lines.append("No morphology changes were recorded in this session.")
+        return "\n".join(lines).rstrip() + "\n"
+
+    field_order = ["id", "type", "parent", "radius", "x", "y", "z"]
+    field_labels = {
+        "id": "ID",
+        "type": "Type",
+        "parent": "Parent",
+        "radius": "Radius",
+        "x": "X",
+        "y": "Y",
+        "z": "Z",
+    }
+
+    for op in operations:
+        lines.append(f"Operation: {str(op.get('title', '')).strip()}")
+        summary = str(op.get("summary", "")).strip()
+        if summary:
+            lines.append(f"Summary: {summary}")
+        lines.append(f"Affected nodes: {int(op.get('affected_nodes', 0))}")
+        for detail in list(op.get("details", []) or []):
+            lines.append(f"- {detail}")
+        changes = list(op.get("changes", []) or [])
+        if changes:
+            op_fields: list[str] = []
+            for key in field_order:
+                if any(key in list(row.get("changed_keys", []) or []) for row in changes):
+                    op_fields.append(key)
+            if not op_fields:
+                op_fields = ["id"]
+
+            columns: list[dict[str, Any]] = [
+                {"key": "seq", "header": "Seq", "values": [str(row.get("seq", "")) for row in changes]},
+                {"key": "time", "header": "Time", "values": [str(row.get("time", "")) for row in changes]},
+                {"key": "node_id", "header": "NodeID", "values": [str(row.get("node_id", "")) for row in changes]},
+            ]
+            for key in op_fields:
+                label = field_labels.get(key, key)
+                columns.append(
+                    {
+                        "key": f"old_{key}",
+                        "header": f"Old{label}",
+                        "values": [str(dict(row.get("old_values", {}) or {}).get(key, "")) for row in changes],
+                    }
+                )
+                columns.append(
+                    {
+                        "key": f"new_{key}",
+                        "header": f"New{label}",
+                        "values": [str(dict(row.get("new_values", {}) or {}).get(key, "")) for row in changes],
+                    }
+                )
+
+            for col in columns:
+                col["width"] = max(len(str(col["header"])), *(len(v) for v in list(col["values"]) or [""]))
+
+            def _rule() -> str:
+                return "+" + "+".join("-" * (int(col["width"]) + 2) for col in columns) + "+"
+
+            def _fmt_row(values: list[str]) -> str:
+                cells = [f" {str(value):<{int(col['width'])}} " for value, col in zip(values, columns)]
+                return "|" + "|".join(cells) + "|"
+
+            lines.append(_rule())
+            lines.append(_fmt_row([str(col["header"]) for col in columns]))
+            lines.append(_rule())
+            for row in changes:
+                values = [
+                    str(row.get("seq", "")),
+                    str(row.get("time", "")),
+                    str(row.get("node_id", "")),
+                ]
+                old_values = dict(row.get("old_values", {}) or {})
+                new_values = dict(row.get("new_values", {}) or {})
+                for key in op_fields:
+                    values.append(str(old_values.get(key, "")))
+                    values.append(str(new_values.get(key, "")))
+                lines.append(_fmt_row(values))
+            lines.append(_rule())
+        else:
+            lines.append("No node-level parameter changes recorded.")
+        lines.append("")
     return "\n".join(lines).rstrip() + "\n"
 
 

@@ -92,6 +92,7 @@ swctools batch split ./data
 
 - Purpose: rule-based auto-labeling for SWCs in folder
 - CLI prints auto-typing rule guide before processing
+- current method uses branch-consistent subtree inheritance with single-axon / single-apical primary selection rules
 
 Flags:
 
@@ -118,8 +119,7 @@ Arguments:
 Options:
 
 - `--threshold-mode {percentile,absolute}`
-- `--fix-soma-radii`
-- `--preserve-soma-radii`
+- soma radii are always preserved during radii cleaning
 - `--percentile-min FLOAT`
 - `--percentile-max FLOAT`
 - `--abs-min FLOAT`
@@ -211,8 +211,7 @@ Arguments:
 Options:
 
 - `--threshold-mode {percentile,absolute}`
-- `--fix-soma-radii`
-- `--preserve-soma-radii`
+- soma radii are always preserved during radii cleaning
 - `--percentile-min FLOAT`
 - `--percentile-max FLOAT`
 - `--abs-min FLOAT`

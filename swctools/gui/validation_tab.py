@@ -12,7 +12,7 @@ import pandas as pd
 
 from PySide6.QtCore import QObject, QThread, Qt, QUrl, Signal, Slot
 from PySide6.QtGui import QBrush, QColor, QDesktopServices, QFont
-from PySide6.QtWidgets import QFileDialog, QHBoxLayout, QLabel, QPlainTextEdit, QPushButton, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QFileDialog, QHBoxLayout, QLabel, QPlainTextEdit, QPushButton, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget, QHeaderView, QSizePolicy
 
 from swctools.core.config import feature_config_path, load_feature_config
 from swctools.core.geometry_editing import reindex_dataframe_with_map
@@ -91,6 +91,7 @@ class ValidationPrecheckWidget(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        self.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Expanding)
         self._build_ui()
         self.populate_catalog()
 
@@ -112,8 +113,11 @@ class ValidationPrecheckWidget(QWidget):
             "QTreeWidget { font-size: 12px; gridline-color: #ddd; }"
             "QHeaderView::section { font-weight: 600; padding: 4px; }"
         )
-        self._tree.setColumnWidth(0, 250)
-        self._tree.setColumnWidth(1, 640)
+        header = self._tree.header()
+        header.setStretchLastSection(True)
+        header.setSectionResizeMode(0, QHeaderView.Interactive)
+        header.setSectionResizeMode(1, QHeaderView.Stretch)
+        self._tree.setColumnWidth(0, 220)
         layout.addWidget(self._tree, stretch=1)
 
     def populate_catalog(self):
@@ -153,6 +157,7 @@ class ValidationTabWidget(QWidget):
     result_activated = Signal(dict)
     def __init__(self, parent=None, as_panel: bool = True):
         super().__init__(parent)
+        self.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Expanding)
         self._as_panel = as_panel
         self._source_stem = "file"
         self._source_file_path = ""
@@ -197,8 +202,12 @@ class ValidationTabWidget(QWidget):
 
         self._results_tree = QTreeWidget()
         self._results_tree.setHeaderLabels(["Issue", "Status", "Detail"])
-        self._results_tree.setColumnWidth(0, 260)
-        self._results_tree.setColumnWidth(1, 90)
+        header = self._results_tree.header()
+        header.setStretchLastSection(True)
+        header.setSectionResizeMode(0, QHeaderView.Interactive)
+        header.setSectionResizeMode(1, QHeaderView.ResizeToContents)
+        header.setSectionResizeMode(2, QHeaderView.Stretch)
+        self._results_tree.setColumnWidth(0, 220)
         self._results_tree.itemActivated.connect(self._on_results_tree_activated)
         self._results_tree.itemDoubleClicked.connect(self._on_results_tree_activated)
         results_root.addWidget(self._results_tree, stretch=1)

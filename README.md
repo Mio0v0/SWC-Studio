@@ -38,6 +38,21 @@ Core workflows currently include:
 - Simplification (graph-aware RDP)
 - Geometry editing operations for move/connect/disconnect/delete/insert
 
+Current auto-labeling is directed-path and subtree-consistent:
+
+- primary soma-child subtrees are scored as axon, basal, or apical
+- one primary axon winner and one primary apical winner can be enforced
+- labels inherit root-to-leaf within a classified primary subtree
+- path persistence, terminal taper, branch structure, and +Z alignment are used in the scores
+- distant branches are penalized as basal candidates
+
+Current radii cleaning is three-pass and path-aware:
+
+- pass 1: local median outlier repair on a 5-node neighborhood
+- pass 2: monotonic taper enforcement away from the soma with a small slack
+- pass 3: Savitzky-Golay-style local polynomial smoothing
+- axons can keep a configurable biological minimum floor
+
 ## Recommended App Workflow
 
 `SWC-Studio` is built around an issue-driven repair workflow for one SWC at a time:

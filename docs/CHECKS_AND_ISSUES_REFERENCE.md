@@ -38,6 +38,437 @@ In the issue-driven workflow, a file can therefore raise:
 - `suspicious radii issues`
 - `suspicious label issues`
 
+## Canonical Check Matrix
+
+This section is the compact source-of-truth summary for every validation check that can run on an SWC file.
+
+Interpretation:
+
+- `Source`
+  - `native` means the check is implemented directly in `swctools/core/validation_checks/native_checks.py`
+  - `NeuroM` means the check is wrapped through `swctools/core/validation_checks/neuron_morphology_checks.py`
+- `Params`
+  - values shown here are the current defaults from `swctools/tools/validation/configs/default.json`
+- `Param source`
+  - `JSON` means the value is explicitly exposed in `default.json`
+  - `backend default` means the check currently has no extra JSON params and uses the check implementation as-is
+- `JSON override`
+  - `yes` means users can change `enabled`, `severity`, and listed `params` in `default.json`
+  - `enabled/severity only` means there are no exposed params for that check, but the check can still be turned on/off or have severity changed
+
+### Structural Presence
+
+#### `valid_soma_format`
+
+- Issue title: `Complex soma format found`
+- Source: `native`
+- How checked:
+  - finds all type `1` nodes
+  - groups connected soma nodes within the soma subgraph
+  - fails if any connected soma group contains more than one node
+- Params: none
+- Param source: backend default
+- JSON override: enabled/severity only
+- Related tool: none
+  - inspector action uses `Consolidate Soma`
+
+#### `multiple_somas`
+
+- Issue title: `Multiple somas found`
+- Source: `native`
+- How checked:
+  - runs after temporary soma consolidation
+  - counts how many soma anchors remain
+  - fails if more than one connected soma group remains
+- Params: none
+- Param source: backend default
+- JSON override: enabled/severity only
+- Related tool: none
+  - inspector action uses `Split`
+
+#### `has_soma`
+
+- Issue title: `Soma missing`
+- Source: `native`
+- How checked:
+  - checks whether any node has type `1`
+- Params: none
+- Param source: backend default
+- JSON override: enabled/severity only
+- Related tool: `manual_label_editing` `auto_label_editing`
+
+#### `no_invalid_negative_types`
+
+- Issue title: `Invalid negative types found`
+- Source: `native`
+- How checked:
+  - scans all node types
+  - fails if any type value is `< 0`
+- Params: none
+- Param source: backend default
+- JSON override: enabled/severity only
+- Related tool: `manual_label_editing`
+
+#### `custom_types_defined`
+
+- Issue title: `Custom types need definitions`
+- Source: `native`
+- How checked:
+  - finds all node types `>= 5`
+  - requires each used custom type to have a saved name and color
+- Params: none
+- Param source: backend default
+- JSON override: enabled/severity only
+- Related tool: `manual_label_editing`
+
+#### `has_axon`
+
+- Issue title: `Axon missing`
+- Source: `native`
+- How checked:
+  - counts nodes with type `2`
+  - fails when count is `0`
+- Params: none
+- Param source: backend default
+- JSON override: enabled/severity only
+- Related tool: `manual_label_editing` `auto_label_editing`
+
+#### `has_basal_dendrite`
+
+- Issue title: `Basal dendrite missing`
+- Source: `native`
+- How checked:
+  - counts nodes with type `3`
+  - fails when count is `0`
+- Params: none
+- Param source: backend default
+- JSON override: enabled/severity only
+- Related tool: `manual_label_editing` `auto_label_editing`
+
+#### `has_apical_dendrite`
+
+- Issue title: `Apical dendrite missing`
+- Source: `native`
+- How checked:
+  - counts nodes with type `4`
+  - fails when count is `0`
+- Params: none
+- Param source: backend default
+- JSON override: enabled/severity only
+- Related tool: `manual_label_editing` `auto_label_editing`
+
+### Radius And Size
+
+#### `all_neurite_radii_nonzero`
+
+- Issue title: `Invalid neurite radii found`
+- Source: `native`
+- How checked:
+  - scans all non-soma nodes
+  - fails on `NaN`, non-finite, or `<= 0` radii
+- Params: none
+- Param source: backend default
+- JSON override: enabled/severity only
+- Related tool: `manual_radii`
+
+#### `soma_radius_nonzero`
+
+- Issue title: `Invalid soma radius found`
+- Source: `NeuroM`
+- How checked:
+  - calls NeuroM `has_nonzero_soma_radius`
+- Params:
+  - `threshold = 0.0`
+- Param source: JSON
+- JSON override: yes
+- Related tool: `manual_radii`
+
+#### `no_ultranarrow_sections`
+
+- Issue title: `Ultranarrow sections found`
+- Source: `NeuroM`
+- How checked:
+  - calls NeuroM `has_no_narrow_neurite_section`
+- Params:
+  - `radius_threshold = 0.05`
+  - `considered_section_min_length = 50.0`
+- Param source: JSON
+- JSON override: yes
+- Related tool: `manual_radii`
+
+#### `no_ultranarrow_starts`
+
+- Issue title: `Ultranarrow branch starts found`
+- Source: `NeuroM`
+- How checked:
+  - calls NeuroM `has_no_narrow_start`
+- Params:
+  - `frac = 0.9`
+- Param source: JSON
+- JSON override: yes
+- Related tool: `manual_radii`
+
+#### `no_fat_terminal_ends`
+
+- Issue title: `Oversized terminal ends found`
+- Source: `NeuroM`
+- How checked:
+  - calls NeuroM `has_no_fat_ends`
+- Params:
+  - `multiple_of_mean = 2.0`
+  - `final_point_count = 5`
+- Param source: JSON
+- JSON override: yes
+- Related tool: `manual_radii`
+
+#### `radius_upper_bound`
+
+- Issue title: `Oversized radii found`
+- Source: `native`
+- How checked:
+  - scans all radii
+  - fails when any node has `radius > max_radius`
+- Params:
+  - `max_radius = 20.0`
+- Param source: JSON
+- JSON override: yes
+- Related tool: `validation`
+- Default enabled: no
+
+### Length And Geometry
+
+#### `all_section_lengths_nonzero`
+
+- Issue title: `Zero-length sections found`
+- Source: `native`
+- How checked:
+  - computes parent-child segment lengths in 3D
+  - uses segment-based approximation for section validity
+  - fails if derived section length is non-positive or invalid
+- Params: none
+- Param source: backend default
+- JSON override: enabled/severity only
+- Related tool: `geometry_editing`
+
+#### `all_segment_lengths_nonzero`
+
+- Issue title: `Zero-length segments found`
+- Source: `native`
+- How checked:
+  - computes Euclidean child-parent length
+  - fails if any segment length is non-finite or `<= 0`
+- Params: none
+- Param source: backend default
+- JSON override: enabled/severity only
+- Related tool: `geometry_editing`
+
+#### `no_back_tracking`
+
+- Issue title: `Geometric backtracking found`
+- Source: `NeuroM`
+- How checked:
+  - calls NeuroM `has_no_back_tracking`
+- Params: none
+- Param source: backend default
+- JSON override: enabled/severity only
+- Related tool: `geometry_editing`
+- Default enabled: no
+
+#### `no_flat_neurites`
+
+- Issue title: `Flattened neurites found`
+- Source: `NeuroM`
+- How checked:
+  - calls NeuroM `has_no_flat_neurites`
+- Params:
+  - `tol = 0.1`
+  - `method = "ratio"`
+- Param source: JSON
+- JSON override: yes
+- Related tool: `geometry_editing`
+
+#### `no_duplicate_3d_points`
+
+- Issue title: `Duplicated points found`
+- Source: `native`
+- How checked:
+  - compares full `x,y,z` triplets
+  - fails only when all three coordinates match exactly
+- Params: none
+- Param source: backend default
+- JSON override: enabled/severity only
+- Related tool: `geometry_editing`
+
+#### `no_extreme_spatial_jump`
+
+- Issue title: `Extreme spatial jumps found`
+- Source: `native`
+- How checked:
+  - computes all valid parent-child 3D segment lengths
+  - derives a threshold from the maximum of:
+    - absolute minimum jump
+    - median-length times ratio
+    - MAD-based robust threshold
+  - fails on segments above that threshold
+- Params:
+  - `min_jump_um = 200.0`
+  - `median_ratio = 10.0`
+  - `mad_scale = 12.0`
+  - `mad_floor_um = 1.0`
+- Param source: JSON
+- JSON override: yes
+- Related tool: `geometry_editing`
+
+### Topology
+
+#### `no_dangling_branches`
+
+- Issue title: `Dangling branches found`
+- Source: `native`
+- How checked:
+  - scans all non-soma nodes
+  - fails when `parent == -1`
+- Params: none
+- Param source: backend default
+- JSON override: enabled/severity only
+- Related tool: `geometry_editing`
+
+#### `no_self_loop`
+
+- Issue title: `Self loops found`
+- Source: `native`
+- How checked:
+  - scans all nodes
+  - fails when `parent == id`
+- Params: none
+- Param source: backend default
+- JSON override: enabled/severity only
+- Related tool: `geometry_editing`
+
+#### `no_single_child_chains`
+
+- Issue title: `Single-child chains found`
+- Source: `NeuroM`
+- How checked:
+  - calls NeuroM `has_no_single_children`
+- Params: none
+- Param source: backend default
+- JSON override: enabled/severity only
+- Related tool: `geometry_editing`
+
+#### `has_unifurcation`
+
+- Issue title: `Unifurcation found`
+- Source: `NeuroM`
+- How checked:
+  - calls NeuroM `has_unifurcation`
+- Params: none
+- Param source: backend default
+- JSON override: enabled/severity only
+- Related tool: `geometry_editing`
+
+#### `has_multifurcation`
+
+- Issue title: `Multifurcation found`
+- Source: `NeuroM`
+- How checked:
+  - calls NeuroM `has_multifurcation`
+- Params: none
+- Param source: backend default
+- JSON override: enabled/severity only
+- Related tool: `geometry_editing`
+
+### Index Consistency
+
+#### `no_section_index_jumps`
+
+- Issue title: `Sections jump too far along Z`
+- Source: `NeuroM`
+- How checked:
+  - calls NeuroM `has_no_jumps`
+  - in this app it is used as a Z-axis jump consistency check
+- Params:
+  - `max_distance = 30.0`
+  - `axis = "z"`
+- Param source: JSON
+- JSON override: yes
+- Related tool: `geometry_editing`
+
+#### `no_root_index_jumps`
+
+- Issue title: `Neurite roots too far from soma`
+- Source: `NeuroM`
+- How checked:
+  - calls NeuroM `has_no_root_node_jumps`
+  - fails when neurite roots start too far from the soma center relative to soma radius
+- Params:
+  - `radius_multiplier = 2.0`
+- Param source: JSON
+- JSON override: yes
+- Related tool: `geometry_editing`
+
+#### `parent_id_less_than_child_id`
+
+- Issue title: `Parent-child ID order violations found`
+- Source: `native`
+- How checked:
+  - scans nodes with valid in-file parents
+  - fails when `parent_id >= child_id`
+- Params: none
+- Param source: backend default
+- JSON override: enabled/severity only
+- Related tool: `index_clean`
+
+#### `no_node_id_gaps`
+
+- Issue title: `Node ID gaps found`
+- Source: `native`
+- How checked:
+  - sorts unique node IDs
+  - fails when integer IDs are missing in the sequence
+- Params: none
+- Param source: backend default
+- JSON override: enabled/severity only
+- Related tool: `index_clean`
+
+## Additional GUI-Only Issue Generators
+
+These are issue types shown in the app but are not validation checks in `default.json`.
+
+### `blocked_validation_checks`
+
+- Source: grouped blocked validation rows in `issues_from_validation_report(...)`
+- How checked:
+  - raised when downstream checks cannot run because the morphology cannot be built for validation
+  - common example: `Unsupported section type: 0`
+- Params: none
+- JSON override: no direct per-issue JSON entry
+- Related tool:
+  - usually `label_editing` when caused by unsupported labels
+  - otherwise `validation`
+
+### `Outlier radii detected`
+
+- Source: `issues_from_radii_suspicion(...)`
+- How checked:
+  - runs the shared radii-cleaning engine on the current dataframe
+  - every node the cleaner would modify becomes part of the suspicious batch
+- Params source:
+  - `swctools/tools/batch_processing/configs/radii_cleaning.json`
+- JSON override: yes, but through `radii_cleaning.json`, not `default.json`
+- Related tool: `radii_cleaning`
+
+### `Likely wrong labels`
+
+- Source: `issues_from_type_suspicion(...)`
+- How checked:
+  - runs the shared rule-based auto-typing pipeline
+  - every node where current type differs from suggested type becomes part of the suspicious batch
+- Params source:
+  - `swctools/tools/batch_processing/configs/auto_typing.json`
+- JSON override: yes, but through `auto_typing.json`, not `default.json`
+- Related tool: `label_editing`
+
 ## Core Issue Model
 
 Current issue fields come from `swctools/core/issues.py`:
@@ -748,85 +1179,100 @@ The radii suspicion issue and the Radii Cleaning tool both use `swctools/core/ra
 
 ### Main logic
 
-The current radii cleaner:
+The current radii cleaner is a three-pass directed-path refinement:
 
-1. loads configured rules
-2. computes per-type radius statistics
-3. computes allowable lower/upper bounds per type
-4. marks abnormal nodes using several detectors
-5. proposes replacement radii using nearby valid topology context
-6. iterates several times
-7. performs final enforcement so no abnormal non-soma nodes remain
-8. optionally preserves soma radii exactly
+1. load configured rules and build directed branch paths
+2. compute per-type radius statistics and sanity bounds
+3. `Pass 1`: local outlier repair
+   - use a 5-node path window by default
+   - compute local median radius
+   - immediately repair strong single-node spikes / invalid radii
+4. `Pass 2`: taper enforcement
+   - walk each segment from proximal anchor toward the leaf
+   - enforce monotonic non-thickening away from the soma with a small slack
+   - enforce an axon minimum floor when enabled
+5. `Pass 3`: Savitzky-Golay-style local polynomial smoothing
+   - smooth each directed path with a local quadratic fit
+6. re-apply taper once after smoothing
+7. optionally preserve soma radii exactly
 
 ### Detectors used
 
-The cleaner can mark a node abnormal for these reasons:
+The cleaner can mark a node abnormal or corrected for these reasons:
 
 - `non_finite`
 - `non_positive`
 - `below_type_min`
 - `above_type_max`
-- `local_spike`
-- `local_dip`
-- `final_enforce`
+- `local_outlier`
+- `taper_cap`
+- `post_smooth_taper_cap`
+- `axon_floor`
+- `savitzky_golay`
 
 ### Replacement strategy
 
-For an abnormal node, the replacement value is estimated from:
+For a locally abnormal node, the first replacement value is estimated from:
 
-- nearest valid ancestor radius
+- local median inside the directed path window
+- otherwise nearest valid ancestor radius
 - nearest valid descendant radius or descendant mean
 - otherwise per-type median
 - otherwise global median
 
-Then the replacement is clamped to configured bounds.
+Then the replacement is clamped to configured bounds before taper and smoothing passes run.
 
 ### Radii-clean parameters
 
 Current parameters from `swctools/tools/batch_processing/configs/radii_cleaning.json`:
 
-- `preserve_soma`
-  - default: `true`
-  - soma radii are restored after cleaning
+- soma radii are always preserved during radii cleaning
 - `small_radius_zero_only`
   - default: `true`
   - lower-bound failures are only treated as abnormal when the value is `<= 0`
-- `threshold_mode`
-  - `percentile` or `absolute`
-- `global_percentile_bounds.min`
+- `sanity_bounds.global.lower_percentile`
   - default: `1.0`
-- `global_percentile_bounds.max`
+- `sanity_bounds.global.upper_percentile`
   - default: `99.5`
-- `global_absolute_bounds.min`
+- `sanity_bounds.global.lower_abs`
   - default: `0.05`
-- `global_absolute_bounds.max`
+- `sanity_bounds.global.upper_abs`
   - default: `30.0`
-- `type_thresholds`
+- `sanity_bounds.per_type`
   - per-type overrides for:
     - `enabled`
-    - `min_percentile`
-    - `max_percentile`
-    - `min_abs`
-    - `max_abs`
-- `replace_non_positive`
+    - `lower_percentile`
+    - `upper_percentile`
+    - `lower_abs`
+    - `upper_abs`
+- `local_outlier.enabled`
   - default: `true`
-- `replace_non_finite`
+- `local_outlier.window_nodes`
+  - default: `5`
+- `local_outlier.max_percent_deviation`
+  - default: `0.5`
+- `taper.enabled`
   - default: `true`
-- `detect_spikes`
+- `taper.slack`
+  - default: `0.05`
+- `axon_floor.enabled`
   - default: `true`
-- `detect_dips`
+- `axon_floor.min_radius`
+  - default: `0.12`
+- `savgol.enabled`
   - default: `true`
-- `spike_ratio_threshold`
-  - default: `2.8`
-- `dip_ratio_threshold`
-  - default: `0.35`
-- `min_neighbor_count`
-  - default: `1`
-- `iterations`
-  - default: `4`
-- `max_descendant_search_depth`
-  - default: `32`
+- `savgol.window_nodes`
+  - default: `7`
+- `savgol.polyorder`
+  - default: `2`
+- `savgol.gaussian_sigma_fraction`
+  - default: `0.5`
+- `fixed_point.enabled`
+  - default: `true`
+- `fixed_point.max_passes`
+  - default: `20`
+- `fixed_point.min_effective_delta`
+  - default: `0.005`
 - `replacement.clamp_min`
   - default: `0.05`
 - `replacement.clamp_max`
@@ -846,17 +1292,34 @@ References:
 
 The current guide text describes the pipeline like this:
 
-1. partition morphology into branch segments at soma/roots and bifurcations
-2. compute branch features
-   - path length
-   - radial extent
-   - mean radius
-   - branchiness
-   - z-mean
-3. score each branch for axon / apical / basal using weighted features and priors
-4. optionally refine with a nearest-centroid ML-like step seeded by confident branches
-5. assign branch-level classes, smooth locally, then propagate labels back to nodes
-6. optionally copy parent radius into zero/invalid radii
+1. partition morphology into directed branch segments at soma/roots and bifurcations
+2. identify soma-child primary subtrees and score them as axon / apical / basal
+3. compute path-aware branch features
+   - path length and radial extent
+   - mean radius and branchiness
+   - directional persistence (`euclidean / path length`)
+   - terminal taper (`distal radius / proximal radius`)
+   - up-direction alignment against the global `+Z` axis
+   - local branch symmetry around branch origins
+4. enforce hard constraints at the soma boundary
+   - one primary axon winner
+   - one primary apical winner
+   - subtree-wide inheritance from each winning primary branch
+5. score each branch for axon / apical / basal using weighted features and priors
+6. optionally refine with a nearest-centroid ML-like step seeded by confident branches
+7. smooth short local topology disagreements, then override every branch inside a classified primary subtree back to that subtree class
+8. optionally copy parent radius into zero/invalid radii
+
+Practical consequences of the current method:
+
+- no mid-branch type switching is allowed below a non-soma parent
+- once a primary soma-child subtree is chosen as axon, all descendants remain axon
+- once a primary soma-child subtree is chosen as apical, all descendants remain apical
+- long thin persistent branches are pushed toward axon
+- strongly upward primary shafts are pushed toward apical
+- dendritic taper and symmetric branching patterns are rewarded for basal / apical trees
+- distant unlabeled branches are penalized as basal candidates
+- the old late node-voting propagation pass is no longer the main driver of final labels
 
 ### Auto-typing parameters
 
@@ -885,18 +1348,26 @@ Per-class weighted feature scoring:
 - `rules.branch_score_weights.axon`
   - `branch`
   - `path`
+  - `persistence`
   - `prior`
   - `radial`
   - `radius`
   - `root_path`
   - `root_radial`
+  - `symmetry`
+  - `taper`
+  - `up`
 - `rules.branch_score_weights.basal`
   - `branch`
   - `path`
+  - `persistence`
   - `prior`
   - `radius`
   - `root_path`
   - `root_radial`
+  - `symmetry`
+  - `taper`
+  - `up`
   - `z`
 - `rules.branch_score_weights.apical`
   - `branch`
@@ -904,6 +1375,9 @@ Per-class weighted feature scoring:
   - `prior`
   - `radius`
   - `root_path`
+  - `symmetry`
+  - `taper`
+  - `up`
   - `z`
 
 #### ML / centroid blend
@@ -913,7 +1387,35 @@ Per-class weighted feature scoring:
 - `rules.ml_blend`
   - default: `0.28`
 
-#### Propagation
+#### Hard subtree constraints
+
+- `rules.constraints.inherit_primary_subtree`
+  - default: `true`
+- `rules.constraints.single_axon`
+  - default: `true`
+- `rules.constraints.single_apical`
+  - default: `true`
+- `rules.constraints.axon_primary_min_score`
+  - default: `0.42`
+- `rules.constraints.apical_primary_min_score`
+  - default: `0.42`
+- `rules.constraints.far_basal_distance_um`
+  - default: `500.0`
+- `rules.constraints.far_basal_penalty`
+  - default: `0.22`
+- `rules.constraints.thin_axon_max_base_radius_um`
+  - default: `1.0`
+- `rules.constraints.thin_axon_bonus`
+  - default: `0.10`
+
+These now control the biologically constrained top-level assignment:
+
+- root-to-leaf inheritance from the soma boundary
+- unique primary axon selection
+- unique primary apical selection
+- far-from-soma penalty against calling distant branches basal
+
+#### Legacy propagation weights
 
 - `rules.propagation_weights.branch_prior`
   - default: `0.30`
@@ -926,12 +1428,16 @@ Per-class weighted feature scoring:
 - `rules.propagation_weights.self`
   - default: `0.35`
 
+These values remain in JSON for compatibility and guide display, but the current final labeling logic is primarily branch-consistent and subtree-constrained rather than driven by a late node-voting pass.
+
 #### Seeding and chunking
 
 - `rules.seed_prior_threshold`
   - default: `0.55`
 - `rules.segmenting.max_chunk_path`
   - default: `180.0`
+- `rules.feature_windows.terminal_window_nodes`
+  - default: `3`
 
 #### Refinement
 
@@ -968,6 +1474,8 @@ Per-class weighted feature scoring:
 - `rules.soma_child_prior.score_weights.axon`
 - `rules.soma_child_prior.score_weights.basal`
 - `rules.soma_child_prior.score_weights.apical`
+
+This block now matters more than before because the soma-child subtree choice is used as a hard constraint on downstream branch labels.
 
 #### Radius handling
 

@@ -37,7 +37,7 @@ class ContextInspectorWidget(QWidget):
         super().__init__(parent)
         self._current_issue_id = ""
         self._compact_mode = False
-        self.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Maximum)
+        self.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Maximum)
         self._build_ui()
         self.clear()
 
@@ -84,7 +84,7 @@ class ContextInspectorWidget(QWidget):
         self._btn_apply_fix.clicked.connect(self._on_apply_fix_clicked)
         action_row.addWidget(self._btn_apply_fix)
 
-        self._btn_open_tool = QPushButton("Open Related Tool")
+        self._btn_open_tool = QPushButton("Related Tool")
         self._btn_open_tool.clicked.connect(self._on_open_tool_clicked)
         action_row.addWidget(self._btn_open_tool)
 
@@ -147,7 +147,7 @@ class ContextInspectorWidget(QWidget):
         self._btn_apply_fix.setText("Apply Suggested Fix")
         self._btn_open_tool.setEnabled(False)
         self._btn_open_tool.setVisible(False)
-        self._btn_open_tool.setText("Open Related Tool")
+        self._btn_open_tool.setText("Related Tool")
         self._btn_open_tool.setProperty("tool_target", "validation")
         self._btn_expand_detail.setVisible(False)
         self._btn_secondary.setVisible(False)
@@ -179,10 +179,11 @@ class ContextInspectorWidget(QWidget):
         self._btn_skip.setEnabled(bool(self._current_issue_id))
         status_text = str(issue.get("status", "")).strip().lower()
         self._btn_skip.setText("Unmute" if status_text in {"muted", "skipped"} else "Mute")
+        self._btn_skip.setVisible(True)
 
         tool_target = str(issue.get("tool_target", "validation")).strip() or "validation"
         self._btn_open_tool.setEnabled(True)
-        self._btn_open_tool.setText(str(ctx.get("tool_button_label", "")).strip() or "Open Related Tool")
+        self._btn_open_tool.setText(str(ctx.get("tool_button_label", "")).strip() or "Related Tool")
         self._btn_open_tool.setProperty("tool_target", tool_target)
 
         auto_fix_available = bool(ctx.get("auto_fix_available"))
@@ -199,7 +200,6 @@ class ContextInspectorWidget(QWidget):
             self._btn_open_tool.setText(custom_primary)
             self._btn_open_tool.setProperty("tool_target", f"custom:{custom_primary_action}")
         else:
-            self._btn_skip.setVisible(True)
             self._btn_open_tool.setVisible(True)
 
         custom_secondary = str(ctx.get("custom_secondary_label", "")).strip()

@@ -79,6 +79,10 @@ Validation uses the same backend as CLI (`swctools.tools.validation` + core engi
 - Validation mode: single-file auto label editing
 - JSON editor for rule parameters
 - shared backend logic (same as CLI/API)
+- branch-consistent labeling from the soma boundary
+- one primary axon winner and one primary apical winner when enabled
+- primary subtree inheritance, so a labeled subtree keeps one neurite class downstream
+- far-from-soma penalty against unlikely basal assignments
 
 ## Radii Editing in GUI
 

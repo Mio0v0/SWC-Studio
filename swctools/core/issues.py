@@ -7,6 +7,7 @@ from typing import Any
 
 import pandas as pd
 
+from swctools.core.config import load_feature_config, merge_config
 from swctools.core.radii_cleaning import clean_radii_dataframe
 from swctools.core.validation_catalog import CHECK_CATEGORY, CHECK_LABEL, CHECK_ORDER
 
@@ -82,8 +83,7 @@ def _blocked_reason_from_validation_row(row: dict[str, Any]) -> dict[str, str] |
             "tool_target": "label_editing",
             "suggested_fix": (
                 "Soma may already be present, but some neurite nodes still use unsupported type "
-                f"{section_type}. Relabel those nodes to valid SWC neurite types in Morphology Editing. "
-                "Dependent checks will run automatically after relabeling."
+                f"{section_type}. Relabel those nodes to valid SWC neurite types in Morphology Editing."
             ),
         }
 
@@ -170,7 +170,7 @@ def _tool_target_for_key(key: str) -> tuple[str, str, str]:
     if key in radii_keys:
         return ("radii", "manual_radii", "Use Manual Radii Editing to inspect and set individual node radii, or Auto Radii Editing for broader cleanup.")
     if key in label_keys:
-        return ("label", "auto_label", "Use the Auto Label panel to assign missing neurite types, then rerun dependent checks automatically.")
+        return ("label", "auto_label", "Use the Auto Label panel to assign missing neurite types.")
     if key in geometry_edit_keys:
         return (
             "geometry",
@@ -196,7 +196,7 @@ def _tool_target_for_key(key: str) -> tuple[str, str, str]:
             "Multiple disconnected soma groups remain. The only supported next step is to split each tree into its own SWC file.",
         )
     if key == "has_soma":
-        return ("structure", "auto_label", "Use the Auto Label panel to assign a soma label so dependent checks can run.")
+        return ("structure", "auto_label", "Use the Auto Label panel to assign a soma label.")
     if key == "no_invalid_negative_types":
         return ("label", "label_editing", "Relabel nodes with invalid negative type values to supported SWC types.")
     if key == "custom_types_defined":
@@ -310,7 +310,12 @@ def issues_from_radii_suspicion(
 
     ignored = {int(v) for v in (ignore_node_ids or set())}
     try:
-        result = clean_radii_dataframe(df)
+        feature_cfg = load_feature_config("batch_processing", "radii_cleaning", default={})
+        suspicion_rule_overrides = {
+            "fixed_point": {"enabled": False},
+        }
+        rules = merge_config(dict(feature_cfg.get("rules", {})), suspicion_rule_overrides)
+        result = clean_radii_dataframe(df, rules=rules)
     except Exception:
         return []
 
