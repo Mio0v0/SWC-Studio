@@ -12,6 +12,23 @@ CLI and GUI call the same feature backend functions.
 
 There are two main ways to use `SWC-Studio`. If you want the full Python workflow, you can create a virtual environment and install it with `pip`, which gives you the shared library, CLI, and GUI together. If you just want to use it as desktop software, you can download a packaged executable `.zip` release, extract it, and run the desktop application directly without setting up a Python environment.
 
+## Documentation
+
+Short docs (Markdown):
+
+- [Docs Overview](docs/README.md): reading order and page ownership
+- [Getting Started](docs/GETTING_STARTED.md): install, run, first steps
+- [GUI Workflow Guide](docs/GUI_WORKFLOW.md): current GUI layout and issue-driven flow
+- [CLI Reference](docs/CLI_REFERENCE.md): current command surface
+- [Checks And Issues Reference](docs/CHECKS_AND_ISSUES_REFERENCE.md): canonical checks, issues, and algorithms
+- [Logs And Reports](docs/LOGS_AND_REPORTS.md): report names, session logs, and output folders
+- [API / Library Documentation](docs/API_DOCUMENTATION.md): Python integration surface
+
+Comprehensive docs site (Sphinx source):
+
+- Live docs: `https://mio0v0.github.io/SWC-Studio/`
+- includes tutorials, architecture, logs/reporting, plugin development, and auto-generated API/module references
+
 ## What This Project Does
 
 Top-level tool areas:
@@ -69,22 +86,6 @@ The intended app flow is:
 - fixes are applied on the current SWC
 - once the issue list is resolved or reduced to acceptable warnings, the SWC is ready for export or downstream workflows
 
-## Documentation
-
-Short docs (Markdown):
-
-- [Docs Overview](docs/README.md): reading order and page ownership
-- [Getting Started](docs/GETTING_STARTED.md): install, run, first steps
-- [GUI Workflow Guide](docs/GUI_WORKFLOW.md): current GUI layout and issue-driven flow
-- [CLI Reference](docs/CLI_REFERENCE.md): current command surface
-- [Checks And Issues Reference](docs/CHECKS_AND_ISSUES_REFERENCE.md): canonical checks, issues, and algorithms
-- [Logs And Reports](docs/LOGS_AND_REPORTS.md): report names, session logs, and output folders
-- [API / Library Documentation](docs/API_DOCUMENTATION.md): Python integration surface
-
-Comprehensive docs site (Sphinx source):
-
-- Live docs: `https://mio0v0.github.io/SWC-Studio/`
-- includes tutorials, architecture, logs/reporting, plugin development, and auto-generated API/module references
 
 ## Install
 
