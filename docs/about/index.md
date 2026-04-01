@@ -42,7 +42,7 @@ Current workflows include:
 
 The main application flow is issue-driven.
 
-A typical session starts by opening one SWC file, running validation, reviewing the issue list, applying repairs in the relevant tool, and rerunning validation until the morphology is ready for export or downstream processing.
+A typical session starts by opening one SWC file, running validation, clicking issues in the issue list, reviewing the detailed problem in the Inspector panel, letting the app route you to the related repair tool, and rerunning validation until the morphology is ready for export or downstream processing.
 
 This makes the GUI useful for focused repair work, while the CLI and Python interface support the same underlying operations in repeatable scripts and larger pipelines.
 

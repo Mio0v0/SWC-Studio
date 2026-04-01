@@ -55,7 +55,11 @@ The GUI is designed around an issue-driven repair loop. Run validation first, th
 
 Use the left-side issue list to inspect the current file one issue at a time.
 
-When you select an issue, the application should focus the relevant nodes and guide you toward the tool that best matches the repair.
+When you select an issue, the application should:
+
+- focus the relevant nodes in the canvas
+- open the issue details in the Inspector panel
+- switch to the tool that best matches the repair automatically
 
 Typical follow-up tools include:
 
@@ -66,7 +70,7 @@ Typical follow-up tools include:
 
 ## Step 4: Apply Repairs in the Matching Tool
 
-After selecting an issue, switch to the suggested tool and apply the appropriate fix.
+After selecting an issue, review the detailed problem shown in the Inspector and use the automatically selected repair tool to apply the appropriate fix.
 
 Common patterns:
 
@@ -108,6 +112,7 @@ By the end of this tutorial, you should be able to:
 
 - open and inspect one SWC file in the GUI
 - run validation and interpret the issue list
+- use the Issue Navigator to open issue details in the Inspector
 - move between repair tools based on the active issue
 - rerun validation after edits
 - save the cleaned result and review generated outputs

@@ -44,7 +44,7 @@ The selected feature controls what appears in the lower Inspector area.
 
 1. Open an SWC file from the File menu.
 2. Run **Validation** and review the Issue Navigator on the left.
-3. Click an issue to focus the affected nodes and jump to the matching repair feature.
+3. Click an issue to focus the affected nodes, open the issue details in the Inspector panel, and jump to the matching repair feature automatically.
 4. Fix the issue in the suggested feature, such as **Index Clean**, **Manual Label Editing**, **Auto Label Editing**, **Manual Radii Editing**, **Auto Radii Editing**, or **Geometry Editing**.
 5. Rerun validation and continue until the issue list is cleared or reduced to acceptable warnings.
 6. Save the cleaned SWC or close the tab to write the session log and saved copy into the file output folder.
@@ -53,7 +53,8 @@ This is the intended desktop workflow:
 
 - validation surfaces structural and annotation problems
 - the Issue Navigator shows what needs attention
-- the app directs you to the corresponding fix tool
+- clicking an issue opens its detailed problem summary in the Inspector
+- the app directs you to the corresponding fix tool automatically
 - once the issues are resolved, the SWC is ready for downstream work
 
 ## Validation in GUI
