@@ -2,15 +2,15 @@
 
 Radii Cleaning fixes abnormal radius values while preserving branch continuity.
 
-OS note: replace `./data/...` with `.\data\...` on Windows. If `swctools` is not on PATH, use module mode (`python -m swctools.cli.cli ...` on macOS/Linux, `py -m swctools.cli.cli ...` on Windows).
+OS note: replace `./data/...` with `.\data\...` on Windows. If `swcstudio` is not on PATH, use module mode (`python -m swcstudio.cli.cli ...` on macOS/Linux, `py -m swcstudio.cli.cli ...` on Windows).
 
 Shared backend module:
 
-- `swctools.tools.batch_processing.features.radii_cleaning`
+- `swcstudio.tools.batch_processing.features.radii_cleaning`
 
 Validation tool reuses the same implementation through:
 
-- `swctools.tools.validation.features.radii_cleaning`
+- `swcstudio.tools.validation.features.radii_cleaning`
 
 So GUI Batch tab, GUI Validation tab, and CLI all use one core behavior.
 
@@ -48,11 +48,11 @@ The current cleaner follows a path-aware three-pass method:
 
 ## Key config file
 
-- `swctools/tools/batch_processing/configs/radii_cleaning.json`
+- `swcstudio/tools/batch_processing/configs/radii_cleaning.json`
 
 Validation radii cleaning is a thin wrapper over the same backend and can layer per-tool overrides through:
 
-- `swctools/tools/validation/configs/radii_cleaning.json`
+- `swcstudio/tools/validation/configs/radii_cleaning.json`
 
 ## Important config fields
 
@@ -100,19 +100,19 @@ Under `rules`:
 Clean one file with the current JSON-configured three-pass method:
 
 ```bash
-swctools batch radii-clean ./data/single-soma.swc
+swcstudio batch radii-clean ./data/single-soma.swc
 ```
 
 Clean one file while overriding rules for this run:
 
 ```bash
-swctools batch radii-clean ./data/single-soma.swc --config-json '{"rules":{"local_outlier":{"max_percent_deviation":0.4}}}'
+swcstudio batch radii-clean ./data/single-soma.swc --config-json '{"rules":{"local_outlier":{"max_percent_deviation":0.4}}}'
 ```
 
 Validation command path (same backend):
 
 ```bash
-swctools validation radii-clean ./data/single-soma.swc
+swcstudio validation radii-clean ./data/single-soma.swc
 ```
 
 ## Outputs and logs

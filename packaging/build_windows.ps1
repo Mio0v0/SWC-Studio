@@ -8,7 +8,7 @@ if (-not (Test-Path $PythonExe)) {
 
 $DistDir = Join-Path $RootDir "dist"
 $BuildDir = Join-Path $RootDir "build"
-$SpecPath = Join-Path $RootDir "packaging\swctools_gui_windows.spec"
+$SpecPath = Join-Path $RootDir "packaging\swcstudio_gui_windows.spec"
 $ZipPath = Join-Path $DistDir "SWC-Studio-windows.zip"
 $AppDir = Join-Path $DistDir "SWC-Studio"
 

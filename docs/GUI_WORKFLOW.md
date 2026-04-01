@@ -32,13 +32,12 @@ The selected feature controls what appears in the lower Inspector area.
 - Batch Processing: Split, Validation, Auto Label Editing, Radii Cleaning, Simplification, Index Clean
 - Validation: Validation, Index Clean
 - Visualization: View Controls
-- Morphology Editing: Manual Label Editing, Auto Label Editing, Manual Radii Editing, Auto Radii Editing, Simplification
-- Geometry Editing: Geometry Editing
+- Morphology Editing: Manual Label Editing, Auto Label Editing, Manual Radii Editing, Auto Radii Editing
+- Geometry Editing: Geometry Editing, Simplification
 
 ## Document/canvas behavior
 
 - Multiple SWC files can be open in separate canvas tabs.
-- Preview outputs (for some operations) open as temporary comparison tabs.
 - Closing a changed tab triggers save/discard flow and session logging.
 
 ## Recommended GUI usage sequence
@@ -48,7 +47,7 @@ The selected feature controls what appears in the lower Inspector area.
 3. Click an issue to focus the affected nodes and jump to the matching repair feature.
 4. Fix the issue in the suggested feature, such as **Index Clean**, **Manual Label Editing**, **Auto Label Editing**, **Manual Radii Editing**, **Auto Radii Editing**, or **Geometry Editing**.
 5. Rerun validation and continue until the issue list is cleared or reduced to acceptable warnings.
-6. Save the cleaned SWC for downstream analysis, batch processing, or further editing.
+6. Save the cleaned SWC or close the tab to write the session log and saved copy into the file output folder.
 
 This is the intended desktop workflow:
 
@@ -67,7 +66,7 @@ Validation panel supports:
 - results table with status/label
 - report export controls
 
-Validation uses the same backend as CLI (`swctools.tools.validation` + core engine).
+Validation uses the same backend as CLI (`swcstudio.tools.validation` + core engine).
 
 For the full check and issue matrix, use:
 
@@ -96,11 +95,11 @@ For the full check and issue matrix, use:
 
 - RDP-based simplification lives in `Geometry Editing -> Simplification`
 - `Run` applies directly to the current file
-- outputs include simplification log with node reduction stats and parameters
+- updates are recorded in the same session log format as the other editing tools
 
 ## Logs and status
 
 - transient status: status bar and bottom log
-- persistent logs: text report files written by backend reporting layer
+- persistent logs: text report files written by the shared reporting layer
 
 See [LOGS_AND_REPORTS](LOGS_AND_REPORTS.md) for full report naming conventions.

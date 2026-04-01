@@ -1,18 +1,18 @@
 # CLI Reference
 
-This is the complete command reference for the SWC-Studio CLI (command: `swctools`).
+This is the current command reference for the SWC-Studio CLI (`swcstudio`).
 
 ## Install and Verify
 
 ```bash
 pip install -e .
-swctools --help
+swcstudio --help
 ```
 
 ## Command Shape
 
 ```bash
-swctools <tool> <feature> [args] [options]
+swcstudio <tool> <feature> [args] [options]
 ```
 
 Top-level tools:
@@ -30,8 +30,8 @@ Top-level tools:
 - Command names and flags are the same on macOS/Linux/Windows.
 - Path style differs: macOS/Linux `./data/file.swc`, Windows `.\data\file.swc`.
 - If script entrypoints are not on PATH, use module mode:
-  - macOS/Linux: `python -m swctools.cli.cli ...`
-  - Windows: `py -m swctools.cli.cli ...`
+  - macOS/Linux: `python -m swcstudio.cli.cli ...`
+  - Windows: `py -m swcstudio.cli.cli ...`
 - Shell line continuation differs:
   - macOS/Linux: `\`
   - PowerShell: `` ` ``
@@ -57,7 +57,7 @@ This must be a JSON object and is merged into feature config for that run.
 
 ## `check`
 
-### `swctools check <file>`
+### `swcstudio check <file>`
 
 - Purpose: print the same combined issue list the GUI builds when an SWC is opened
 - Includes:
@@ -73,12 +73,12 @@ Options:
 Example:
 
 ```bash
-swctools check ./data/single-soma.swc
+swcstudio check ./data/single-soma.swc
 ```
 
 ## `batch`
 
-### `swctools batch validate <folder>`
+### `swcstudio batch validate <folder>`
 
 - Purpose: run validation on all SWC files in a folder
 - Special behavior: if `folder` is literal `rule-guide`, prints rules only
@@ -90,11 +90,11 @@ Options:
 Example:
 
 ```bash
-swctools batch validate ./data
-swctools batch validate rule-guide
+swcstudio batch validate ./data
+swcstudio batch validate rule-guide
 ```
 
-### `swctools batch split <folder>`
+### `swcstudio batch split <folder>`
 
 - Purpose: split SWC files by soma-root trees
 
@@ -105,10 +105,10 @@ Options:
 Example:
 
 ```bash
-swctools batch split ./data
+swcstudio batch split ./data
 ```
 
-### `swctools batch auto-typing <folder>`
+### `swcstudio batch auto-typing <folder>`
 
 - Purpose: rule-based auto-labeling for SWCs in folder
 - CLI prints auto-typing rule guide before processing
@@ -125,10 +125,10 @@ Flags:
 Example:
 
 ```bash
-swctools batch auto-typing ./data --soma --axon --basal
+swcstudio batch auto-typing ./data --soma --axon --basal
 ```
 
-### `swctools batch radii-clean <target>`
+### `swcstudio batch radii-clean <target>`
 
 - Purpose: clean abnormal radii on a file or folder
 
@@ -144,10 +144,10 @@ Options:
 Example:
 
 ```bash
-swctools batch radii-clean ./data/single-soma.swc
+swcstudio batch radii-clean ./data/single-soma.swc
 ```
 
-### `swctools batch simplify <folder>`
+### `swcstudio batch simplify <folder>`
 
 - Purpose: run simplification on every SWC file in a folder
 
@@ -158,10 +158,10 @@ Options:
 Example:
 
 ```bash
-swctools batch simplify ./data
+swcstudio batch simplify ./data
 ```
 
-### `swctools batch index-clean <folder>`
+### `swcstudio batch index-clean <folder>`
 
 - Purpose: reorder and reindex every SWC file in a folder so parents come before children and IDs become continuous
 
@@ -172,12 +172,12 @@ Options:
 Example:
 
 ```bash
-swctools batch index-clean ./data
+swcstudio batch index-clean ./data
 ```
 
 ## `validation`
 
-### `swctools validation rule-guide`
+### `swcstudio validation rule-guide`
 
 - Purpose: print validation pre-check/rule guide only
 
@@ -185,7 +185,7 @@ Options:
 
 - `--config-json JSON`
 
-### `swctools validation run <file>`
+### `swcstudio validation run <file>`
 
 - Purpose: run full structured validation for one file
 
@@ -196,10 +196,10 @@ Options:
 Example:
 
 ```bash
-swctools validation run ./data/single-soma.swc
+swcstudio validation run ./data/single-soma.swc
 ```
 
-### `swctools validation auto-fix <file>`
+### `swcstudio validation auto-fix <file>`
 
 - Purpose: sanitize + revalidate one file
 
@@ -212,10 +212,10 @@ Options:
 Example:
 
 ```bash
-swctools validation auto-fix ./data/single-soma.swc --write
+swcstudio validation auto-fix ./data/single-soma.swc --write
 ```
 
-### `swctools validation radii-clean <target>`
+### `swcstudio validation radii-clean <target>`
 
 - Purpose: same shared radii-clean backend used by batch
 
@@ -230,16 +230,10 @@ Options:
 
 Notes:
 
-- current radii-clean behavior is driven mainly by:
-  - `sanity_bounds`
-  - `local_outlier`
-  - `taper`
-  - `axon_floor`
-  - `savgol`
-  - `fixed_point`
-- those settings live in `swctools/tools/batch_processing/configs/radii_cleaning.json`
+- radii cleaning uses the same shared backend and JSON config as batch mode
+- see [Radii Cleaning Tutorial](RADII_CLEANING_TUTORIAL.md) for the algorithm and config groups
 
-### `swctools validation index-clean <file>`
+### `swcstudio validation index-clean <file>`
 
 - Purpose: reorder and reindex one SWC file
 
@@ -252,12 +246,12 @@ Options:
 Example:
 
 ```bash
-swctools validation index-clean ./data/single-soma.swc --write
+swcstudio validation index-clean ./data/single-soma.swc --write
 ```
 
 ## `visualization`
 
-### `swctools visualization mesh-editing <file>`
+### `swcstudio visualization mesh-editing <file>`
 
 - Purpose: build reusable mesh payload summary
 
@@ -268,7 +262,7 @@ Options:
 
 ## `morphology`
 
-### `swctools morphology dendrogram-edit <file> --node-id N --new-type T`
+### `swcstudio morphology dendrogram-edit <file> --node-id N --new-type T`
 
 - Purpose: reassign subtree node types
 
@@ -283,10 +277,10 @@ Options:
 Example:
 
 ```bash
-swctools morphology dendrogram-edit ./data/single-soma.swc --node-id 42 --new-type 3 --write
+swcstudio morphology dendrogram-edit ./data/single-soma.swc --node-id 42 --new-type 3 --write
 ```
 
-### `swctools morphology set-radius <file> --node-id N --radius R`
+### `swcstudio morphology set-radius <file> --node-id N --radius R`
 
 - Purpose: set one node radius directly
 
@@ -301,14 +295,14 @@ Options:
 Example:
 
 ```bash
-swctools morphology set-radius ./data/single-soma.swc --node-id 42 --radius 0.75 --write
+swcstudio morphology set-radius ./data/single-soma.swc --node-id 42 --radius 0.75 --write
 ```
 
 ## `geometry`
 
 These commands expose the same geometry-editing backend used by the app.
 
-### `swctools geometry simplify <file>`
+### `swcstudio geometry simplify <file>`
 
 - Purpose: run the current simplification workflow used by `Geometry Editing -> Simplification`
 - CLI prints the simplification rule guide before running
@@ -322,26 +316,26 @@ Options:
 Example:
 
 ```bash
-swctools geometry simplify ./data/single-soma.swc --write
+swcstudio geometry simplify ./data/single-soma.swc --write
 ```
 
-### `swctools geometry move-node <file> --node-id N --x X --y Y --z Z`
+### `swcstudio geometry move-node <file> --node-id N --x X --y Y --z Z`
 
 - Purpose: move one node to absolute coordinates
 
-### `swctools geometry move-subtree <file> --root-id N --x X --y Y --z Z`
+### `swcstudio geometry move-subtree <file> --root-id N --x X --y Y --z Z`
 
 - Purpose: move a whole subtree by setting the subtree root to absolute coordinates
 
-### `swctools geometry connect <file> --start-id A --end-id B`
+### `swcstudio geometry connect <file> --start-id A --end-id B`
 
 - Purpose: connect nodes by setting `parent(end) = start`
 
-### `swctools geometry disconnect <file> --start-id A --end-id B`
+### `swcstudio geometry disconnect <file> --start-id A --end-id B`
 
 - Purpose: disconnect every parent-child edge along the path between start and end
 
-### `swctools geometry delete-node <file> --node-id N`
+### `swcstudio geometry delete-node <file> --node-id N`
 
 - Purpose: delete one node
 
@@ -351,11 +345,11 @@ Options:
 - `--write`
 - `--out PATH`
 
-### `swctools geometry delete-subtree <file> --root-id N`
+### `swcstudio geometry delete-subtree <file> --root-id N`
 
 - Purpose: delete one subtree
 
-### `swctools geometry insert <file> --start-id A [--end-id B] --x X --y Y --z Z`
+### `swcstudio geometry insert <file> --start-id A [--end-id B] --x X --y Y --z Z`
 
 - Purpose: insert a new node after start and optionally before end
 
@@ -368,7 +362,7 @@ Options:
 
 ## `plugins`
 
-### `swctools plugins list`
+### `swcstudio plugins list`
 
 - Purpose: list builtin/plugin methods in registry
 
@@ -379,59 +373,59 @@ Options:
 Example:
 
 ```bash
-swctools plugins list
-swctools plugins list --feature-key batch_processing.auto_typing
+swcstudio plugins list
+swcstudio plugins list --feature-key batch_processing.auto_typing
 ```
 
-### `swctools plugins load <module>`
+### `swcstudio plugins load <module>`
 
 - Purpose: load an external plugin module by Python import path
 - Contract expected:
   - `PLUGIN_MANIFEST` dict (or `get_plugin_manifest()`)
   - `register_plugin(registrar)` OR `PLUGIN_METHODS`
-- Scope: current CLI process only (use `SWCTOOLS_PLUGINS` for autoload in each run)
+- Scope: current CLI process only (use `SWCSTUDIO_PLUGINS` for autoload in each run)
 
 Example:
 
 ```bash
-swctools plugins load my_lab_plugins.summary_plugin
+swcstudio plugins load my_lab_plugins.summary_plugin
 ```
 
-### `swctools plugins list-loaded`
+### `swcstudio plugins list-loaded`
 
 - Purpose: list loaded plugin manifests (`plugin_id`, version, capabilities, API version)
 
 Example:
 
 ```bash
-swctools plugins list-loaded
+swcstudio plugins list-loaded
 ```
 
 ### Environment Autoload
 
-Plugins can autoload on every CLI run via `SWCTOOLS_PLUGINS`:
+Plugins can autoload on every CLI run via `SWCSTUDIO_PLUGINS`:
 
 macOS/Linux:
 
 ```bash
-export SWCTOOLS_PLUGINS="my_lab_plugins.summary_plugin,my_lab_plugins.custom_auto_typing"
+export SWCSTUDIO_PLUGINS="my_lab_plugins.summary_plugin,my_lab_plugins.custom_auto_typing"
 ```
 
 Windows PowerShell:
 
 ```powershell
-$env:SWCTOOLS_PLUGINS = "my_lab_plugins.summary_plugin,my_lab_plugins.custom_auto_typing"
+$env:SWCSTUDIO_PLUGINS = "my_lab_plugins.summary_plugin,my_lab_plugins.custom_auto_typing"
 ```
 
 Windows cmd:
 
 ```bat
-set SWCTOOLS_PLUGINS=my_lab_plugins.summary_plugin,my_lab_plugins.custom_auto_typing
+set SWCSTUDIO_PLUGINS=my_lab_plugins.summary_plugin,my_lab_plugins.custom_auto_typing
 ```
 
 ## Output and Reports
 
-Most commands return JSON/text in terminal and also write report files where applicable.
+Most commands print terminal output and, where applicable, also write report files.
 
 Typical reports include:
 

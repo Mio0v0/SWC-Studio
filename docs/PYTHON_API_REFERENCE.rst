@@ -6,7 +6,7 @@ This section documents the public import surface intended for Python callers.
 Primary module
 --------------
 
-.. automodule:: swctools.api
+.. automodule:: swcstudio.api
    :members:
    :undoc-members:
    :show-inheritance:
@@ -14,13 +14,13 @@ Primary module
 Validation API layer
 --------------------
 
-.. automodule:: swctools.tools.validation
+.. automodule:: swcstudio.tools.validation
    :members:
    :undoc-members:
 
 Plugin API layer
 ----------------
 
-.. automodule:: swctools.plugins
+.. automodule:: swcstudio.plugins
    :members:
    :undoc-members:

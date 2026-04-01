@@ -10,15 +10,15 @@ This is the canonical reference for:
 
 Primary code sources:
 
-- `swctools/core/validation_catalog.py`
-- `swctools/core/validation_checks/native_checks.py`
-- `swctools/core/validation_checks/neuron_morphology_checks.py`
-- `swctools/core/issues.py`
-- `swctools/core/radii_cleaning.py`
-- `swctools/core/auto_typing_impl.py`
-- `swctools/tools/validation/configs/default.json`
-- `swctools/tools/batch_processing/configs/radii_cleaning.json`
-- `swctools/tools/batch_processing/configs/auto_typing.json`
+- `swcstudio/core/validation_catalog.py`
+- `swcstudio/core/validation_checks/native_checks.py`
+- `swcstudio/core/validation_checks/neuron_morphology_checks.py`
+- `swcstudio/core/issues.py`
+- `swcstudio/core/radii_cleaning.py`
+- `swcstudio/core/auto_typing_impl.py`
+- `swcstudio/tools/validation/configs/default.json`
+- `swcstudio/tools/batch_processing/configs/radii_cleaning.json`
+- `swcstudio/tools/batch_processing/configs/auto_typing.json`
 
 ## How To Read This Page
 
@@ -26,7 +26,7 @@ Primary code sources:
   - `native`: implemented directly in SWC-Studio
   - `NeuroM`: wrapped from NeuroM
 - `Severity`
-  - current default from `swctools/tools/validation/configs/default.json`
+  - current default from `swcstudio/tools/validation/configs/default.json`
 - `JSON`
   - `yes`: params are exposed in JSON
   - `enabled/severity only`: the check can be turned on/off and reclassified, but has no extra exposed params
@@ -114,12 +114,12 @@ These are shown in the issue-driven workflow but are not entries in `default.jso
 | Source key | Title | How generated | Config source | Related tool |
 |---|---|---|---|---|
 | `blocked_validation_checks` | `Checks blocked by ...` | Grouped from validation rows that could not run because morphology building failed. | none | Validation or Manual Label Editing, depending on cause |
-| `radii_outlier_batch` | `Outlier radii detected` | Runs the shared radii-cleaning engine and groups nodes the cleaner would change. | `swctools/tools/batch_processing/configs/radii_cleaning.json` | Auto Radii Editing |
-| `type_suspicion_batch` | `Likely wrong labels` | Runs the shared auto-typing engine and groups nodes where current type differs from suggested type. | `swctools/tools/batch_processing/configs/auto_typing.json` | Auto Label Editing |
+| `radii_outlier_batch` | `Outlier radii detected` | Runs the shared radii-cleaning engine and groups nodes the cleaner would change. | `swcstudio/tools/batch_processing/configs/radii_cleaning.json` | Auto Radii Editing |
+| `type_suspicion_batch` | `Likely wrong labels` | Runs the shared auto-typing engine and groups nodes where current type differs from suggested type. | `swcstudio/tools/batch_processing/configs/auto_typing.json` | Auto Label Editing |
 
 ## Issue Model
 
-Issues normalized in `swctools/core/issues.py` use these fields:
+Issues normalized in `swcstudio/core/issues.py` use these fields:
 
 - `issue_id`
 - `severity`
@@ -139,7 +139,7 @@ Issues normalized in `swctools/core/issues.py` use these fields:
 
 ## Radii Cleaning Algorithm
 
-The suspicious radii issue and Auto Radii Editing use the same shared backend in `swctools/core/radii_cleaning.py`.
+The suspicious radii issue and Auto Radii Editing use the same shared backend in `swcstudio/core/radii_cleaning.py`.
 
 ### Current method
 
@@ -171,7 +171,7 @@ Soma radii are always preserved.
 
 Main config file:
 
-- `swctools/tools/batch_processing/configs/radii_cleaning.json`
+- `swcstudio/tools/batch_processing/configs/radii_cleaning.json`
 
 Current top-level rule groups:
 
@@ -200,8 +200,8 @@ Important defaults:
 
 The suspicious label issue and Auto Label Editing use the shared backend in:
 
-- `swctools/core/auto_typing_impl.py`
-- `swctools/tools/batch_processing/configs/auto_typing.json`
+- `swcstudio/core/auto_typing_impl.py`
+- `swcstudio/tools/batch_processing/configs/auto_typing.json`
 
 ### Current method
 
@@ -234,7 +234,7 @@ The current method is branch-consistent and subtree-constrained:
 
 Main config file:
 
-- `swctools/tools/batch_processing/configs/auto_typing.json`
+- `swcstudio/tools/batch_processing/configs/auto_typing.json`
 
 Most important current rule groups:
 
@@ -277,11 +277,11 @@ Current conversion rules:
 ## Where To Edit Behavior
 
 - validation check enable/severity/params
-  - `swctools/tools/validation/configs/default.json`
+  - `swcstudio/tools/validation/configs/default.json`
 - radii cleaning behavior
-  - `swctools/tools/batch_processing/configs/radii_cleaning.json`
+  - `swcstudio/tools/batch_processing/configs/radii_cleaning.json`
 - auto labeling behavior
-  - `swctools/tools/batch_processing/configs/auto_typing.json`
+  - `swcstudio/tools/batch_processing/configs/auto_typing.json`
 
 ## Related Docs
 

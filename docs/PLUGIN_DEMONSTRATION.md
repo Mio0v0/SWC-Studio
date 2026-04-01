@@ -87,13 +87,13 @@ set PYTHONPATH=%CD%\examples\plugins
 ### 3) Load plugin
 
 ```bash
-swctools plugins load my_lab_plugin
+swcstudio plugins load my_lab_plugin
 ```
 
 ### 4) Verify plugin manifest loaded
 
 ```bash
-swctools plugins list-loaded
+swcstudio plugins list-loaded
 ```
 
 You should see your `plugin_id`.
@@ -101,7 +101,7 @@ You should see your `plugin_id`.
 ### 5) Verify method registration under target feature
 
 ```bash
-swctools plugins list --feature-key analysis.summary
+swcstudio plugins list --feature-key analysis.summary
 ```
 
 You should see your method name in `plugin_methods`.
@@ -112,7 +112,7 @@ Example:
 
 ```bash
 python - <<'PY'
-from swctools.api import analysis_summary_file
+from swcstudio.api import analysis_summary_file
 print(analysis_summary_file("./data/single-soma.swc", config_overrides={"method": "lab_summary"}))
 PY
 ```
@@ -121,24 +121,24 @@ The `method` value must exactly match the name used in `register_method(...)`.
 
 ## Persistent Plugin Loading (Recommended)
 
-`swctools plugins load ...` is process-scoped. To auto-load every run:
+`swcstudio plugins load ...` is process-scoped. To auto-load every run:
 
 macOS/Linux:
 
 ```bash
-export SWCTOOLS_PLUGINS="my_lab_plugin"
+export SWCSTUDIO_PLUGINS="my_lab_plugin"
 ```
 
 Windows PowerShell:
 
 ```powershell
-$env:SWCTOOLS_PLUGINS = "my_lab_plugin"
+$env:SWCSTUDIO_PLUGINS = "my_lab_plugin"
 ```
 
 Windows cmd:
 
 ```bat
-set SWCTOOLS_PLUGINS=my_lab_plugin
+set SWCSTUDIO_PLUGINS=my_lab_plugin
 ```
 
 ## Common Errors and Fixes

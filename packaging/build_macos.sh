@@ -17,6 +17,6 @@ source "${VENV_DIR}/bin/activate"
 python -m pip install --upgrade pip setuptools wheel
 pip install --no-cache-dir -e ".[gui,build]"
 
-pyinstaller --noconfirm --clean "${ROOT_DIR}/packaging/swctools_gui.spec"
+pyinstaller --noconfirm --clean "${ROOT_DIR}/packaging/swcstudio_gui.spec"
 
 echo "[SWC-Studio] build complete: ${ROOT_DIR}/dist/SWC-Studio.app"

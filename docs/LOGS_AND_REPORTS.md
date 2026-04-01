@@ -4,7 +4,7 @@ The project has a shared report layer so CLI and GUI produce consistent text log
 
 Core module:
 
-- `swctools.core.reporting`
+- `swcstudio.core.reporting`
 
 ## Why this matters
 
@@ -27,34 +27,36 @@ Main helper functions:
 
 ## Default report naming
 
-## Validation
+### Validation
 
 - single file: `<stem>_validation_report.txt`
 - batch folder: `<folder>_batch_validation_report.txt` (in target/output folder)
 
-## Batch Split
+### Batch Split
 
 - output folder: `<folder>/<folder>_split/`
 - report file: `split_report.txt`
 
-## Auto Typing
+### Auto Typing
 
 - output folder: `<folder>/<folder>_auto_typing/`
 - report file: `auto_typing_report.txt`
 
-## Radii Cleaning
+### Radii Cleaning
 
 - file mode report: `<stem>_radii_cleaning_report.txt`
 - folder mode report: `<out_dir>/radii_cleaning_report.txt`
 
-## Simplification
+### Simplification
 
 - report: `<stem>_simplification_log.txt`
 
-## Morphology edit session
+### GUI Edit Session
 
-- report: `<stem>_morphology_session_log.txt`
-- records all edits in one app session for that SWC
+- output folder: `<input_folder>/<stem>_swc_studio_output/`
+- session log: `<stem>_session_log_<timestamp>.txt`
+- saved copy: `<stem>_closed_<timestamp>.swc`
+- records all edits in one GUI session for that SWC
 
 ## Typical report contents
 
@@ -83,6 +85,12 @@ Simplification logs:
 - reduction percentage
 - parameters used
 - protected node stats
+
+GUI session logs:
+
+- one header per open-to-close session
+- one operation block per applied change
+- operation-specific node-change tables with only the columns that changed
 
 ## Programmatic use
 

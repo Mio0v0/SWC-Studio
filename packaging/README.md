@@ -4,8 +4,8 @@ This folder contains the tracked files needed to build reproducible GUI executab
 
 ## Files
 
-- `swctools_gui.spec`: PyInstaller spec file for the macOS app bundle
-- `swctools_gui_windows.spec`: PyInstaller spec file for the Windows executable folder
+- `swcstudio_gui.spec`: PyInstaller spec file for the macOS app bundle
+- `swcstudio_gui_windows.spec`: PyInstaller spec file for the Windows executable folder
 - `build_macos.sh`: reproducible macOS build script
 - `build_windows.ps1`: reproducible Windows build script
 - `make_windows_icon.py`: converts `packaging/icon.png` into a Windows `.ico` file

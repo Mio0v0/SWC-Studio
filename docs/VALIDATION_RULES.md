@@ -10,11 +10,11 @@ For the full per-check matrix, issue titles, params, and related tools, use:
 
 GUI and CLI both use the same validation stack:
 
-- engine: `swctools.core.validation_engine`
-- registry: `swctools.core.validation_registry`
-- result models: `swctools.core.validation_results`
-- labels and categories: `swctools.core.validation_catalog`
-- feature wrapper: `swctools.tools.validation.features.run_checks`
+- engine: `swcstudio.core.validation_engine`
+- registry: `swcstudio.core.validation_registry`
+- result models: `swcstudio.core.validation_results`
+- labels and categories: `swcstudio.core.validation_catalog`
+- feature wrapper: `swcstudio.tools.validation.features.run_checks`
 
 Common flow:
 
@@ -28,7 +28,7 @@ Common flow:
 
 Validation config lives in:
 
-- `swctools/tools/validation/configs/default.json`
+- `swcstudio/tools/validation/configs/default.json`
 
 Per-check shape:
 

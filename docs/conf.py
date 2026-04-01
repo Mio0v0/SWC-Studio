@@ -17,7 +17,7 @@ author = "SWC-Studio Contributors"
 copyright = f"{datetime.now():%Y}, {author}"
 
 try:
-    release = pkg_version("swctools")
+    release = pkg_version("swcstudio")
 except PackageNotFoundError:
     release = "0.1.0"
 

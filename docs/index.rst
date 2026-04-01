@@ -1,7 +1,7 @@
 SWC-Studio Documentation
 ========================
 
-`SWC-Studio` is a modular SWC morphology toolkit with a shared backend used by both CLI and GUI (Python package: ``swctools``).
+`SWC-Studio` is a modular SWC morphology toolkit with a shared backend used by both CLI and GUI (Python package: ``swcstudio``).
 
 .. note::
    This documentation set is intended for three audiences:
@@ -16,6 +16,7 @@ SWC-Studio Documentation
 
    GETTING_STARTED
    GUI_WORKFLOW
+   CHECKS_AND_ISSUES_REFERENCE
    TOOL_TUTORIALS
    MACOS_PACKAGING
    VALIDATION_RULES

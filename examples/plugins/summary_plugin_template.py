@@ -1,7 +1,7 @@
-"""Template plugin: custom analysis summary method for swctools.
+"""Template plugin: custom analysis summary method for swcstudio.
 
 Copy this file into your own plugin package and update function bodies.
-This template follows the swctools plugin contract (api_version=1).
+This template follows the swcstudio plugin contract (api_version=1).
 """
 
 from __future__ import annotations
@@ -14,7 +14,7 @@ PLUGIN_MANIFEST = {
     "name": "Custom Summary Plugin",
     "version": "0.1.0",
     "api_version": "1",
-    "description": "Example plugin that extends analysis.summary in swctools.",
+    "description": "Example plugin that extends analysis.summary in swcstudio.",
     "author": "SWC-Studio",
     "capabilities": [
         "analysis",
@@ -33,7 +33,7 @@ def _custom_summary(swc_text: str, config: dict[str, object]) -> dict[str, objec
 
 
 def register_plugin(registrar) -> None:
-    """Entry point required by swctools plugin loader."""
+    """Entry point required by swcstudio plugin loader."""
     registrar.register_method(
         "analysis.summary",
         "lab_summary",

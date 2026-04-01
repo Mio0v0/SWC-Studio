@@ -2,11 +2,13 @@
 
 Simplification reduces SWC geometry while preserving important morphology structure.
 
-OS note: replace `./data/...` with `.\data\...` on Windows. If `swctools` is not on PATH, use module mode (`python -m swctools.cli.cli ...` on macOS/Linux, `py -m swctools.cli.cli ...` on Windows).
+This page keeps the older filename for link compatibility, but the current feature name is `Simplification`.
 
-Implementation:
+OS note: replace `./data/...` with `.\data\...` on Windows. If `swcstudio` is not on PATH, use module mode (`python -m swcstudio.cli.cli ...` on macOS/Linux, `py -m swcstudio.cli.cli ...` on Windows).
 
-- `swctools.tools.morphology_editing.features.simplification`
+Backend implementation:
+
+- `swcstudio.tools.morphology_editing.features.simplification`
 
 Algorithm type:
 
@@ -26,7 +28,7 @@ Algorithm type:
 
 ## Config file
 
-- `swctools/tools/morphology_editing/configs/simplification.json`
+- `swcstudio/tools/morphology_editing/configs/simplification.json`
 
 Key parameters:
 
@@ -48,25 +50,25 @@ Key parameters:
 Preview summary without writing:
 
 ```bash
-swctools geometry simplify ./data/single-soma.swc
+swcstudio geometry simplify ./data/single-soma.swc
 ```
 
 Write simplified file:
 
 ```bash
-swctools geometry simplify ./data/single-soma.swc --write
+swcstudio geometry simplify ./data/single-soma.swc --write
 ```
 
 Custom output path:
 
 ```bash
-swctools geometry simplify ./data/single-soma.swc --write --out ./data/single-soma_simplified.swc
+swcstudio geometry simplify ./data/single-soma.swc --write --out ./data/single-soma_simplified.swc
 ```
 
 Temporary overrides:
 
 ```bash
-swctools geometry simplify ./data/single-soma.swc --write --config-json '{"thresholds":{"epsilon":1.2,"radius_tolerance":0.35},"flags":{"keep_tips":true,"keep_bifurcations":true}}'
+swcstudio geometry simplify ./data/single-soma.swc --write --config-json '{"thresholds":{"epsilon":1.2,"radius_tolerance":0.35},"flags":{"keep_tips":true,"keep_bifurcations":true}}'
 ```
 
 ## Outputs and logs
