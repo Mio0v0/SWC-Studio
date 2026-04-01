@@ -178,28 +178,7 @@ Common examples:
   - session log: `<input_stem>_session_log_<timestamp>.txt`
   - saved copy: `<input_stem>_closed_<timestamp>.swc`
 
-## 7. Build this Sphinx documentation
-
-Install docs dependencies:
-
-```bash
-pip install -e ".[docs]"
-```
-
-Build HTML:
-
-```bash
-sphinx-build -b html docs docs/_build/html
-```
-
-Open built docs:
-
-- macOS: `open docs/_build/html/index.html`
-- Linux: `xdg-open docs/_build/html/index.html`
-- Windows (PowerShell): `start docs/_build/html/index.html`
-- Windows (cmd): `start docs\_build\html\index.html`
-
-## 8. Troubleshooting quick list
+## 7. Troubleshooting quick list
 
 - GUI fails to start: ensure `PySide6`, `pyqtgraph`, `vispy` are installed (`pip install -e ".[gui]"`).
 - command not found: activate venv and reinstall editable package.

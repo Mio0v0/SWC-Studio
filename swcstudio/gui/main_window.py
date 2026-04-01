@@ -178,7 +178,17 @@ class _DetachedEditorWindow(QMainWindow):
         self.setCentralWidget(editor)
 
     def closeEvent(self, event):
-        self.editor_closing.emit(self._editor)
+        parent = self.parent()
+        if parent is not None and hasattr(parent, "_request_detached_editor_close"):
+            try:
+                allow_close = bool(parent._request_detached_editor_close(self._editor))
+            except Exception:
+                allow_close = True
+            if not allow_close:
+                event.ignore()
+                return
+        else:
+            self.editor_closing.emit(self._editor)
         super().closeEvent(event)
 
 
@@ -685,9 +695,7 @@ class SWCMainWindow(QMainWindow):
         short_action.triggered.connect(self._show_shortcuts)
         help_menu.addAction(short_action)
         about_action = QAction("About", self)
-        about_action.triggered.connect(
-            lambda: self._append_log("SWC Studio - issue-driven neuron reconstruction workspace.", "INFO")
-        )
+        about_action.triggered.connect(self._show_about_dialog)
         help_menu.addAction(about_action)
 
     def _build_visualization_control_panel(self) -> QWidget:
@@ -1506,6 +1514,19 @@ class SWCMainWindow(QMainWindow):
         recovery_path = self._recovery_path_for_document(doc)
         self._write_swc_file(str(recovery_path), doc.df)
 
+    def _clear_recovery_copy(self, doc: _DocumentState):
+        if doc is None:
+            return
+        recovery_path = Path(doc.recovery_path) if str(doc.recovery_path or "").strip() else None
+        doc.recovery_path = ""
+        if recovery_path is None:
+            return
+        try:
+            if recovery_path.exists():
+                recovery_path.unlink()
+        except Exception as e:  # noqa: BLE001
+            self._append_log(f"Could not remove recovery copy {recovery_path}: {e}", "WARN")
+
     def _next_closed_output_path(self, doc: _DocumentState) -> Path:
         base = Path(doc.file_path) if str(doc.file_path or "").strip() else Path.cwd() / (doc.filename or "swc")
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -1517,16 +1538,98 @@ class SWCMainWindow(QMainWindow):
             i += 1
         return cand
 
-    def _write_closed_copy_and_log(self, doc: _DocumentState):
-        if not self._document_has_unsaved_edits(doc) and not doc.session_operations:
-            return
-        if self._document_has_unsaved_edits(doc):
-            out_swc = self._next_closed_output_path(doc)
-            self._write_swc_file(str(out_swc), doc.df)
-            self._append_log(f"Closed tab saved to: {out_swc}", "INFO")
-            self._finalize_morphology_session(doc, show_popup=False)
-            return
-        self._finalize_morphology_session(doc, show_popup=False)
+    def _plan_document_close(self, doc: _DocumentState, *, app_closing: bool) -> dict | None:
+        if doc is None or doc.is_preview:
+            return {"kind": "close"}
+
+        filename = doc.filename or "SWC"
+        has_unsaved_edits = self._document_has_unsaved_edits(doc)
+        has_session_log = bool(doc.session_operations)
+        title = "Exit SWC-Studio" if app_closing else "Close SWC File"
+
+        if has_unsaved_edits:
+            default_output_path = self._next_closed_output_path(doc)
+            box = QMessageBox(self)
+            box.setIcon(QMessageBox.Warning)
+            box.setWindowTitle(title)
+            box.setText(f"Close {filename}?")
+            box.setInformativeText(
+                "Unsaved changes will be saved to:\n"
+                f"{default_output_path}\n\n"
+                "Or choose a different location."
+            )
+            save_default_btn = box.addButton("Save To Default Location", QMessageBox.AcceptRole)
+            change_location_btn = box.addButton("Change Save Location...", QMessageBox.ActionRole)
+            box.addButton(QMessageBox.Cancel)
+            box.setDefaultButton(save_default_btn)
+            box.exec()
+
+            clicked = box.clickedButton()
+            if clicked is save_default_btn:
+                return {"kind": "write_close_copy", "output_path": str(default_output_path)}
+            if clicked is change_location_btn:
+                path, _ = QFileDialog.getSaveFileName(
+                    self,
+                    "Save Changed SWC Copy",
+                    str(default_output_path),
+                    "SWC Files (*.swc);;All Files (*)",
+                )
+                if not path:
+                    self._append_log("Close cancelled while choosing a save location.", "INFO")
+                    return None
+                return {"kind": "write_close_copy", "output_path": str(path)}
+            self._append_log(f"Close cancelled for {filename}.", "INFO")
+            return None
+
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Question)
+        box.setWindowTitle(title)
+        box.setText(f"Close {filename}?")
+        if has_session_log:
+            box.setInformativeText(
+                "No new SWC copy will be saved.\n"
+                "The session log will be written."
+            )
+        else:
+            box.setInformativeText("No unsaved changes.")
+        close_btn = box.addButton("Close", QMessageBox.AcceptRole)
+        box.addButton(QMessageBox.Cancel)
+        box.setDefaultButton(close_btn)
+        box.exec()
+        if box.clickedButton() is not close_btn:
+            self._append_log(f"Close cancelled for {filename}.", "INFO")
+            return None
+        if has_session_log:
+            return {"kind": "close_and_log"}
+        return {"kind": "close"}
+
+    def _apply_document_close_plan(self, doc: _DocumentState, plan: dict) -> bool:
+        if doc is None:
+            return True
+
+        kind = str((plan or {}).get("kind", "close"))
+        output_path = str((plan or {}).get("output_path", "") or "").strip()
+
+        try:
+            if kind == "write_close_copy":
+                if not output_path:
+                    raise ValueError("Missing output path for closing copy.")
+                self._write_swc_file(output_path, doc.df)
+                self._append_log(f"Changed SWC copy saved to: {output_path}", "INFO")
+                self._finalize_morphology_session(doc, show_popup=False, source_override=output_path)
+            elif kind == "close_and_log":
+                self._finalize_morphology_session(doc, show_popup=False)
+        except Exception as e:  # noqa: BLE001
+            QMessageBox.critical(
+                self,
+                "Close Failed",
+                f"Could not finish closing {doc.filename or 'SWC'}.\n\n{e}",
+            )
+            self._append_log(f"Close failed for {doc.filename or 'SWC'}: {e}", "ERROR")
+            return False
+
+        self._clear_recovery_copy(doc)
+        return True
 
     # --------------------------------------------------------- Controls per feature
     def _is_simplification_preview(self, doc: _DocumentState | None) -> bool:
@@ -2641,7 +2744,7 @@ class SWCMainWindow(QMainWindow):
         doc.original_df = doc.df.copy()
         doc.fixed_issue_count = 0
         if not doc.is_preview:
-            self._write_recovery_copy(doc)
+            self._clear_recovery_copy(doc)
 
     # --------------------------------------------------- Drag & drop
     def dragEnterEvent(self, event: QDragEnterEvent):
@@ -2745,10 +2848,15 @@ class SWCMainWindow(QMainWindow):
         if isinstance(editor_widget, EditorTab):
             self._close_document_editor(editor_widget, from_detached_window=True)
 
+    def _request_detached_editor_close(self, editor: EditorTab) -> bool:
+        if self._closing_app:
+            return True
+        return self._close_document_editor(editor, from_detached_window=True)
+
     def _close_document_editor(self, editor: EditorTab, *, from_detached_window: bool):
         doc = self._documents.get(editor)
         if doc is None:
-            return
+            return True
 
         # If this source has a simplification preview tab, close preview first.
         preview_editor = self._simplify_preview_by_source.get(editor)
@@ -2770,16 +2878,21 @@ class SWCMainWindow(QMainWindow):
                 self._refresh_simplification_panel_state()
             elif self._active_tool == "geometry_editing":
                 self._set_control_tabs_for_feature("geometry_editing")
-            return
+            return True
         if self._is_validation_auto_label_preview(doc):
             self._remove_validation_auto_label_preview(editor, switch_to_source=False)
             self._append_log(f"Closed tab: {doc.filename}", "INFO")
             self._sync_from_active_document(auto_run_validation=False)
             self._refresh_canvas_surface()
-            return
+            return True
+
+        close_plan = self._plan_document_close(doc, app_closing=False)
+        if close_plan is None:
+            return False
+        if not self._apply_document_close_plan(doc, close_plan):
+            return False
 
         self._documents.pop(editor, None)
-        self._write_closed_copy_and_log(doc)
 
         if not from_detached_window:
             idx = self._canvas_tabs.indexOf(editor)
@@ -2802,6 +2915,7 @@ class SWCMainWindow(QMainWindow):
             self._refresh_simplification_panel_state()
         elif self._active_tool == "geometry_editing":
             self._set_control_tabs_for_feature("geometry_editing")
+        return True
     # --------------------------------------------------- Helpers
     def _append_log(self, text: str, level: str = "INFO"):
         stamp = datetime.now().strftime("%H:%M:%S")
@@ -4142,42 +4256,73 @@ class SWCMainWindow(QMainWindow):
             self._append_log("Redo.", "INFO")
 
     def closeEvent(self, event):
+        close_plans: list[tuple[_DocumentState, dict]] = []
         self._closing_app = True
-        try:
-            if hasattr(self, "_validation_tab"):
-                self._validation_tab.stop_worker(wait_ms=5000)
-            for doc in list(self._documents.values()):
-                self._write_closed_copy_and_log(doc)
-        finally:
-            super().closeEvent(event)
+
+        if hasattr(self, "_validation_tab"):
+            self._validation_tab.stop_worker(wait_ms=5000)
+
+        for doc in list(self._documents.values()):
+            close_plan = self._plan_document_close(doc, app_closing=True)
+            if close_plan is None:
+                self._closing_app = False
+                event.ignore()
+                return
+            close_plans.append((doc, close_plan))
+
+        for doc, close_plan in close_plans:
+            if not self._apply_document_close_plan(doc, close_plan):
+                self._closing_app = False
+                event.ignore()
+                return
+
+        super().closeEvent(event)
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
         self._set_current_file_label_text(self._filename)
 
     # ---------------- Help ----------------
+    def _show_help_text_dialog(self, title: str, text: str):
+        box = QMessageBox(self)
+        box.setWindowTitle(title)
+        box.setIcon(QMessageBox.Information)
+        box.setText(title)
+        box.setInformativeText(text.replace("\n", "<br>"))
+        box.exec()
+
     def _show_quick_manual(self):
         text = (
-            "Quick Manual:\n"
             "1) Top menu row: File/Edit/View/Window/Help dropdown menus.\n"
             "2) Tools bar: choose a tool, then choose its feature row under it.\n"
             "3) Issue Navigator and Inspector are dock windows (close, float, resize, move).\n"
             "4) You can open multiple SWC files as canvas tabs.\n"
             "5) Drag a canvas tab outside the tab bar to detach it into a floating window.\n"
-            "6) Closing a SWC tab/window auto-saves edited SWC copy and morphology log.\n"
+            "6) Closing a SWC tab/window always asks for confirmation; edited SWC copies are only written when you confirm the close-save dialog.\n"
             "7) Opening an SWC runs checks and populates the Issue Navigator automatically.\n"
             "8) Clicking an issue focuses the viewer and opens the related repair workflow.\n"
             "9) Bottom panel shows all logs and warnings."
         )
+        self._show_help_text_dialog("Quick Manual", text)
         self._append_log(text, "HELP")
 
     def _show_shortcuts(self):
         text = (
-            "Shortcuts:\n"
             "Ctrl+O: Open\n"
             "Ctrl+S: Save\n"
             "Ctrl+Shift+S: Save As\n"
             "Ctrl+Z: Undo\n"
             "Ctrl+Shift+Z: Redo"
         )
+        self._show_help_text_dialog("Shortcuts", text)
         self._append_log(text, "HELP")
+
+    def _show_about_dialog(self):
+        text = (
+            "SWC-Studio is an issue-driven workspace for inspecting, repairing, "
+            "and exporting neuron morphology files in SWC format.\n\n"
+            "It provides a shared desktop GUI, CLI, and Python backend so the "
+            "same validation and editing logic can be used interactively or in scripts."
+        )
+        self._show_help_text_dialog("About SWC-Studio", text)
+        self._append_log("Opened About dialog.", "INFO")
