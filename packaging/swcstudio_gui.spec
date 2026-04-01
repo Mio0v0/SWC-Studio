@@ -1,11 +1,16 @@
 # -*- mode: python ; coding: utf-8 -*-
 
+from importlib.metadata import PackageNotFoundError, version as pkg_version
 from pathlib import Path
 
 from PyInstaller.utils.hooks import collect_data_files, collect_submodules, copy_metadata
 
 ROOT_DIR = Path.cwd()
 ENTRYPOINT = ROOT_DIR / "run_gui.py"
+try:
+    APP_VERSION = pkg_version("swcstudio")
+except PackageNotFoundError:
+    APP_VERSION = "0.1.0"
 
 datas = collect_data_files(
     "swcstudio",
@@ -78,4 +83,10 @@ app = BUNDLE(
     name="SWC-Studio.app",
     icon=str(ICON_PATH) if ICON_PATH.exists() else None,
     bundle_identifier="io.github.mio0v0.swcstudio",
+    info_plist={
+        "CFBundleShortVersionString": APP_VERSION,
+        "CFBundleVersion": APP_VERSION,
+        "CFBundleDisplayName": "SWC-Studio",
+        "CFBundleName": "SWC-Studio",
+    },
 )
