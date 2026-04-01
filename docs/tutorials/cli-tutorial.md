@@ -34,9 +34,9 @@ swcstudio check ./data/single-soma.swc
 
 This command prints the same combined issue list the GUI uses when a file is opened. It is a good first pass when you want a fast overview before running targeted commands.
 
-![Placeholder for CLI check output](../_static/tutorial-cli-placeholder.svg)
+![CLI check command output](../_static/tutorial-cli-step2-1.png)
 
-*Placeholder image: replace with a terminal screenshot showing `swcstudio check` output.*
+*Step 2-1: Run `swcstudio check ./data/single-soma.swc` to inspect the GUI-style issue summary from the terminal.*
 
 ## Step 3: Run Structured Validation
 
@@ -87,9 +87,9 @@ swcstudio auto-label ./data/single-soma.swc --write
 swcstudio connect ./data/single-soma.swc --start-id 10 --end-id 22 --write
 ```
 
-![Placeholder for CLI repair command output](../_static/tutorial-cli-placeholder.svg)
+![CLI manual label edit command output](../_static/tutorial-cli-step4-1.png)
 
-*Placeholder image: replace with a terminal screenshot showing one repair command and its result.*
+*Step 4-1: Run `swcstudio set-type ./data/single-soma.swc --node-id 14169 --new-type 3 --write` to change one node label and write the updated SWC plus its log.*
 
 ## Step 5: Run a Batch Workflow
 
@@ -143,9 +143,13 @@ Typical outputs include:
 - auto-typing output folders
 - cleaned or edited SWC files inside the output folder
 
-![Placeholder for CLI output folder or report file](../_static/tutorial-cli-placeholder.svg)
+![CLI output folder after running a command](../_static/tutorial-cli-step6-1.png)
 
-*Placeholder image: replace with a screenshot of generated reports or output folders.*
+*Step 6-1: Open the output folder to review the generated SWC result and related report files.*
+
+![CLI operation log file](../_static/tutorial-cli-step6-2.png)
+
+*Step 6-2: Open the operation log file for the previous command to review the recorded change summary and node table.*
 
 ## What You Learned
 

@@ -26,9 +26,13 @@ Launch the application and open a morphology file from the File menu.
 
 At this point, the central canvas should show the loaded reconstruction, while the side panels expose issue, file, and inspector information for the active document.
 
-![Placeholder for GUI main window after opening an SWC](../_static/tutorial-gui-placeholder.svg)
+![File menu used to open an SWC file](../_static/tutorial-gui-step1-1.png)
 
-*Placeholder image: replace with a screenshot of the main application window after loading one SWC file.*
+*Step 1-1: Open the `File` menu and choose the option to load an SWC file.*
+
+![GUI after opening one SWC file](../_static/tutorial-gui-step1-2.png)
+
+*Step 1-2: The SWC file is loaded into the canvas and the side panels are populated for the active document.*
 
 ## Step 2: Run Validation
 
@@ -47,9 +51,9 @@ Look for:
 The GUI is designed around an issue-driven repair loop. Run validation first, then let the issue list guide the next tool you use.
 ```
 
-![Placeholder for validation results and issue list](../_static/tutorial-gui-placeholder.svg)
+![Validation report and issue list in the GUI](../_static/tutorial-gui-step2-1.png)
 
-*Placeholder image: replace with a screenshot of the Validation view and Issue Navigator.*
+*Step 2-1: Review the validation report and issue list before starting repairs.*
 
 ## Step 3: Review the Issue Navigator
 
@@ -79,9 +83,9 @@ Common patterns:
 3. Use radii editing tools to correct suspicious radius values.
 4. Use geometry editing to connect, disconnect, move, insert, or remove nodes when structural repair is required.
 
-![Placeholder for inspector controls during repair](../_static/tutorial-gui-placeholder.svg)
+![Auto radii cleaning running in the GUI](../_static/tutorial-gui-step4-1.png)
 
-*Placeholder image: replace with a screenshot of the Inspector panel while applying a repair.*
+*Step 4-1: Run automatic radii cleaning from the matching repair tool in the Inspector area.*
 
 ## Step 5: Rerun Validation
 
@@ -102,9 +106,9 @@ Once the file is in a usable state, save the updated SWC or close the tab to tri
 
 The GUI can also write session logs and output files into the project’s report/output structure.
 
-![Placeholder for save flow or output folder result](../_static/tutorial-gui-placeholder.svg)
+![Saving the changed SWC file in the GUI](../_static/tutorial-gui-step6-1.png)
 
-*Placeholder image: replace with a screenshot of the save dialog, session log, or generated output folder.*
+*Step 6-1: Save the changed SWC file so the updated result and matching log are written into the output folder.*
 
 ## What You Learned
 
