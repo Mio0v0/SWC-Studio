@@ -75,7 +75,7 @@
     },
     "fixed_point": {
       "enabled": true,
-      "max_passes": 20,
+      "max_passes": 32,
       "min_effective_delta": 0.005
     },
     "replacement": {

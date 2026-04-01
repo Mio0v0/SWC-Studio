@@ -62,15 +62,52 @@ def parse_swc_text_preserve_tokens(text: str) -> pd.DataFrame:
 def write_swc_to_bytes_preserve_tokens(df: pd.DataFrame) -> bytes:
     buf = io.StringIO()
     has_tok = all(c in df.columns for c in ["x_str","y_str","z_str","radius_str","id_str","parent_str"])
+
+    def _same_int_value(token, value) -> bool:
+        try:
+            return int(float(token)) == int(value)
+        except Exception:
+            return False
+
+    def _same_float_value(token, value) -> bool:
+        try:
+            return float(token) == float(value)
+        except Exception:
+            return False
+
     for _, row in df.iterrows():
-        id_out = row["id_str"] if has_tok and isinstance(row["id_str"], str) else str(int(row["id"]))
-        parent_out = row["parent_str"] if has_tok and isinstance(row["parent_str"], str) else str(int(row["parent"]))
+        id_out = (
+            row["id_str"]
+            if has_tok and isinstance(row["id_str"], str) and _same_int_value(row["id_str"], row["id"])
+            else str(int(row["id"]))
+        )
+        parent_out = (
+            row["parent_str"]
+            if has_tok and isinstance(row["parent_str"], str) and _same_int_value(row["parent_str"], row["parent"])
+            else str(int(row["parent"]))
+        )
         type_out = str(int(row["type"]))
 
-        x_out = row["x_str"] if has_tok and isinstance(row["x_str"], str) else f"{row['x']}"
-        y_out = row["y_str"] if has_tok and isinstance(row["y_str"], str) else f"{row['y']}"
-        z_out = row["z_str"] if has_tok and isinstance(row["z_str"], str) else f"{row['z']}"
-        radius_out = row["radius_str"] if has_tok and isinstance(row["radius_str"], str) else f"{row['radius']}"
+        x_out = (
+            row["x_str"]
+            if has_tok and isinstance(row["x_str"], str) and _same_float_value(row["x_str"], row["x"])
+            else f"{row['x']}"
+        )
+        y_out = (
+            row["y_str"]
+            if has_tok and isinstance(row["y_str"], str) and _same_float_value(row["y_str"], row["y"])
+            else f"{row['y']}"
+        )
+        z_out = (
+            row["z_str"]
+            if has_tok and isinstance(row["z_str"], str) and _same_float_value(row["z_str"], row["z"])
+            else f"{row['z']}"
+        )
+        radius_out = (
+            row["radius_str"]
+            if has_tok and isinstance(row["radius_str"], str) and _same_float_value(row["radius_str"], row["radius"])
+            else f"{row['radius']}"
+        )
 
         buf.write(f"{id_out} {type_out} {x_out} {y_out} {z_out} {radius_out} {parent_out}\n")
     return buf.getvalue().encode("utf-8")

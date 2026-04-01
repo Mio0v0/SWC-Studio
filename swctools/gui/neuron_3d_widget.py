@@ -156,13 +156,17 @@ class Neuron3DWidget(QWidget):
     def load_swc(self, df: pd.DataFrame, filename: str = ""):
         self._df = df.copy()
         self._rebuild_node_cache()
+        self._issue_markers_data = []
         self._issue_marker_signature = ()
+        self._selectable_node_ids = None
         self._draw()
 
     def refresh(self, df: pd.DataFrame):
         self._df = df.copy()
         self._rebuild_node_cache()
+        self._issue_markers_data = []
         self._issue_marker_signature = ()
+        self._selectable_node_ids = None
         self._draw()
 
     def set_render_mode(self, mode_id: int):

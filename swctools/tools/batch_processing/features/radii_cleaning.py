@@ -66,7 +66,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
         },
         "fixed_point": {
             "enabled": True,
-            "max_passes": 20,
+            "max_passes": 32,
             "min_effective_delta": 0.005,
         },
         "replacement": {

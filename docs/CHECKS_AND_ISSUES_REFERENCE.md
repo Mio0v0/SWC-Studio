@@ -175,6 +175,7 @@ Interpretation:
 
 - Issue title: `Invalid soma radius found`
 - Source: `NeuroM`
+- Default severity: `critical`
 - How checked:
   - calls NeuroM `has_nonzero_soma_radius`
 - Params:
@@ -232,7 +233,7 @@ Interpretation:
   - `max_radius = 20.0`
 - Param source: JSON
 - JSON override: yes
-- Related tool: `validation`
+- Related tool: `auto_radii`
 - Default enabled: no
 
 ### Length And Geometry

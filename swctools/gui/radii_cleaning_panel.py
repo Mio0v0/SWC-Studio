@@ -13,12 +13,14 @@ import pyqtgraph as pg
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
+    QApplication,
     QComboBox,
     QDialog,
     QFileDialog,
     QHBoxLayout,
     QLabel,
     QPlainTextEdit,
+    QProgressDialog,
     QPushButton,
     QVBoxLayout,
     QWidget,
@@ -128,6 +130,24 @@ class RadiiCleaningPanel(QWidget):
         self._stats_dirty = False
         self._build_ui()
 
+    def _run_with_busy_dialog(self, title: str, label_text: str, fn):
+        dialog = QProgressDialog(label_text, "", 0, 0, self)
+        dialog.setWindowTitle(title)
+        dialog.setWindowModality(Qt.ApplicationModal)
+        dialog.setCancelButton(None)
+        dialog.setMinimumDuration(0)
+        dialog.setAutoClose(False)
+        dialog.setAutoReset(False)
+        dialog.setValue(0)
+        dialog.show()
+        QApplication.processEvents()
+        try:
+            return fn()
+        finally:
+            dialog.close()
+            dialog.deleteLater()
+            QApplication.processEvents()
+
     def _build_ui(self):
         root = QVBoxLayout(self)
         root.setContentsMargins(8, 8, 8, 8)
@@ -233,10 +253,10 @@ class RadiiCleaningPanel(QWidget):
             "}"
         )
         if self._allow_loaded_swc_run:
-            self._status.setPlainText("Radii cleaning ready.")
+            self._status.setVisible(False)
         else:
             self._status.setPlainText("Select a folder to inspect combined per-type distributions before cleaning.")
-        root.addWidget(self._status, stretch=1)
+            root.addWidget(self._status, stretch=1)
 
     def _style_combo(self, combo: QComboBox):
         combo.setStyleSheet(
@@ -290,7 +310,8 @@ class RadiiCleaningPanel(QWidget):
             self._refresh_stats_from_loaded_swc()
 
     def _set_status(self, text: str):
-        self._status.setPlainText(text)
+        if self._status.isVisible():
+            self._status.setPlainText(text)
         self.log_message.emit(text)
 
     def _on_edit_cfg(self):
@@ -308,8 +329,16 @@ class RadiiCleaningPanel(QWidget):
             return
         cfg_overrides = self._build_run_config_overrides()
         try:
-            cfg = merge_config(get_radii_cleaning_config(), cfg_overrides)
-            result = clean_radii_dataframe(self._loaded_df, rules=dict(cfg.get("rules", {})))
+            def _run_clean():
+                cfg = merge_config(get_radii_cleaning_config(), cfg_overrides)
+                result = clean_radii_dataframe(self._loaded_df, rules=dict(cfg.get("rules", {})))
+                return cfg, result
+
+            cfg, result = self._run_with_busy_dialog(
+                "Auto Radii Cleaning",
+                "Processing radii cleaning for the current SWC...\nPlease wait.",
+                _run_clean,
+            )
             out = {
                 "changes": int(result.get("total_changes", 0)),
                 "change_details": list(result.get("change_details", [])),
@@ -364,7 +393,11 @@ class RadiiCleaningPanel(QWidget):
     def _run_path(self, path: str):
         cfg_overrides = self._build_run_config_overrides()
         try:
-            out = clean_path(path, config_overrides=cfg_overrides)
+            out = self._run_with_busy_dialog(
+                "Radii Cleaning",
+                "Processing radii cleaning...\nPlease wait.",
+                lambda: clean_path(path, config_overrides=cfg_overrides),
+            )
         except Exception as e:  # noqa: BLE001
             self._set_status(f"Radii cleaning failed:\n{e}")
             return

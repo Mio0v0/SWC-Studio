@@ -62,7 +62,7 @@ DEFAULT_RULES: dict[str, Any] = {
     },
     "fixed_point": {
         "enabled": True,
-        "max_passes": 20,
+        "max_passes": 32,
         "min_effective_delta": 0.005,
     },
     "replacement": {
@@ -80,6 +80,17 @@ def _clamp(v: float, lo: float, hi: float) -> float:
     if hi < lo:
         lo, hi = hi, lo
     return max(lo, min(hi, v))
+
+
+def _small_median(values: list[float]) -> float | None:
+    if not values:
+        return None
+    vals = sorted(float(v) for v in values)
+    n = len(vals)
+    mid = n // 2
+    if n % 2:
+        return vals[mid]
+    return 0.5 * (vals[mid - 1] + vals[mid])
 
 
 def _deep_merge(base: dict[str, Any], overrides: dict[str, Any] | None) -> dict[str, Any]:
@@ -488,7 +499,7 @@ def _local_median_pass(
                 for n in (left_nodes + right_nodes)
                 if _is_valid_radius(float(radii[n]))
             ]
-            local_median = float(np.median(win_vals)) if win_vals else None
+            local_median = _small_median(win_vals)
 
             flagged: list[str] = []
             if not math.isfinite(cur):
@@ -767,9 +778,6 @@ def _clean_radii_single_pass(
         radii[soma_mask] = original[soma_mask]
 
     out["radius"] = radii
-    if "radius_str" in out.columns:
-        for i in range(len(out)):
-            out.at[out.index[i], "radius_str"] = str(float(radii[i]))
 
     change_details: list[dict[str, Any]] = []
     for i in range(len(radii)):
@@ -814,6 +822,16 @@ def clean_radii_dataframe(df: pd.DataFrame, *, rules: dict[str, Any] | None = No
     passes = 0
     static = _prepare_static_radii_context(current)
 
+    def _visible_change_count(step_result: dict[str, Any]) -> int:
+        count = 0
+        for row in list(step_result.get("change_details", []) or []):
+            try:
+                if abs(float(row.get("new_radius", 0.0)) - float(row.get("old_radius", 0.0))) > max(1e-12, min_effective_delta):
+                    count += 1
+            except Exception:
+                continue
+        return count
+
     for _ in range(max_passes):
         passes += 1
         step = _clean_radii_single_pass(current, cfg, static=static)
@@ -829,18 +847,6 @@ def clean_radii_dataframe(df: pd.DataFrame, *, rules: dict[str, Any] | None = No
         if int(step.get("total_changes", 0)) <= 0:
             current = next_df
             break
-        step_max_delta = 0.0
-        for row in list(step.get("change_details", []) or []):
-            try:
-                step_max_delta = max(
-                    step_max_delta,
-                    abs(float(row.get("new_radius", 0.0)) - float(row.get("old_radius", 0.0))),
-                )
-            except Exception:
-                continue
-        if step_max_delta <= min_effective_delta:
-            current = next_df
-            break
         if np.array_equal(
             np.asarray(current["radius"], dtype=float),
             np.asarray(next_df["radius"], dtype=float),
@@ -848,6 +854,8 @@ def clean_radii_dataframe(df: pd.DataFrame, *, rules: dict[str, Any] | None = No
             current = next_df
             break
         current = next_df
+        if _visible_change_count(step) <= 0:
+            break
 
     out = current.copy()
     old_lookup = {

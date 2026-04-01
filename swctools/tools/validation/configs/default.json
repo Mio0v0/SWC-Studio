@@ -77,7 +77,7 @@
     "no_single_child_chains": {"enabled": true, "severity": "warning", "params": {}},
     "soma_radius_nonzero": {
       "enabled": true,
-      "severity": "warning",
+      "severity": "error",
       "params": {
         "threshold": 0.0
       }

@@ -81,6 +81,7 @@ from swctools.core.reporting import (
     simplification_log_path_for_file,
     write_text_report,
 )
+from swctools.core.swc_io import parse_swc_text_preserve_tokens, write_swc_to_bytes_preserve_tokens
 from swctools.core.validation_engine import consolidate_complex_somas_array
 from swctools.tools.morphology_editing.features.simplification import simplify_dataframe
 from swctools.tools.validation.features.auto_typing import (
@@ -520,7 +521,6 @@ class SWCMainWindow(QMainWindow):
             ("Visualization", "visualization"),
             ("Morphology Editing", "morphology_editing"),
             ("Geometry Editing", "geometry_editing"),
-            ("Atlas Registration", "atlas_registration"),
             ("Analysis", "analysis"),
         ]
 
@@ -834,7 +834,6 @@ class SWCMainWindow(QMainWindow):
             "morphology_editing": ["Manual Label Editing", "Auto Label Editing", "Manual Radii Editing", "Auto Radii Editing", "Simplification"],
             "dendrogram": ["Manual Label Editing", "Auto Label Editing", "Manual Radii Editing", "Auto Radii Editing", "Simplification"],
             "geometry_editing": ["Geometry Editing"],
-            "atlas_registration": ["Registration"],
             "analysis": ["Summary"],
         }
         return list(mapping.get(key, []))
@@ -2076,6 +2075,7 @@ class SWCMainWindow(QMainWindow):
             return
         total_changes = int(payload.get("changes", 0))
         passes_used = int(payload.get("passes", 0))
+        new_df_final = new_df.loc[:, SWC_COLS].copy()
         change_details = list(payload.get("change_details", []) or [])
         change_rows: list[dict] = []
         for row in change_details:
@@ -2094,7 +2094,7 @@ class SWCMainWindow(QMainWindow):
             )
         self._apply_document_dataframe(
             doc,
-            new_df.loc[:, SWC_COLS].copy(),
+            new_df_final,
             event_title="Auto Radii Editing",
             event_summary=f"Applied automatic radii cleaning to current SWC; passes={passes_used}; radius_changes={total_changes}.",
             event_details=[],
@@ -2426,7 +2426,7 @@ class SWCMainWindow(QMainWindow):
         elif key == "geometry_editing":
             self._control_tabs.addTab(self._wrap_control_widget(self._geometry_panel), "Geometry Editing")
             current_idx = 0
-        elif key in ("atlas_registration", "analysis"):
+        elif key == "analysis":
             current_idx = -1
         else:
             # default: visualization
@@ -2522,19 +2522,6 @@ class SWCMainWindow(QMainWindow):
             self._feature_label.setText("Active feature: Geometry Editing")
             self._append_log("Feature switched: Geometry Editing", "INFO")
             return
-        if key == "atlas_registration":
-            self._active_tool = "atlas_registration"
-            self._sync_tool_tab_selection()
-            self._set_control_tabs_for_feature("atlas_registration")
-            self._control_tabs.setVisible(self._control_tabs.count() > 0)
-            self._control_dock.show()
-            self._precheck_dock.hide()
-            self._auto_guide_dock.hide()
-            self._apply_editor_modes()
-            self._refresh_canvas_surface()
-            self._feature_label.setText("Active feature: Atlas Registration")
-            self._append_log("Feature switched: Atlas Registration (placeholder)", "INFO")
-            return
         if key == "analysis":
             self._active_tool = "analysis"
             self._sync_tool_tab_selection()
@@ -2593,7 +2580,7 @@ class SWCMainWindow(QMainWindow):
 
     def _load_swc(self, path: str):
         try:
-            df = pd.read_csv(path, sep=r"\s+", comment="#", names=SWC_COLS)
+            df = parse_swc_text_preserve_tokens(Path(path).read_text(encoding="utf-8", errors="ignore"))
             if df.empty:
                 self._append_log(f"Empty file: {path} contains no data rows.", "WARN")
                 return
@@ -2605,7 +2592,7 @@ class SWCMainWindow(QMainWindow):
             editor = EditorTab()
             self._connect_editor_signals(editor)
             controls = editor.take_dendrogram_controls_panel()
-            editor.load_swc(df, filename)
+            editor.load_swc(df.loc[:, SWC_COLS].copy(), filename)
 
             doc = _DocumentState(
                 editor=editor,
@@ -2633,7 +2620,7 @@ class SWCMainWindow(QMainWindow):
                 f"Loaded {filename}: nodes={len(df)}, roots={n_roots}, soma={n_soma}",
                 "INFO",
             )
-            self.swc_loaded.emit(df, filename)
+            self.swc_loaded.emit(df.loc[:, SWC_COLS].copy(), filename)
         except Exception as e:
             self._append_log(f"Error loading SWC: {e}", "ERROR")
 
@@ -2698,17 +2685,10 @@ class SWCMainWindow(QMainWindow):
     def _write_swc_file(self, path: str, df: pd.DataFrame):
         out_path = Path(path)
         out_path.parent.mkdir(parents=True, exist_ok=True)
-        lines = ["# id type x y z radius parent"]
-        for _, row in df.iterrows():
-            lines.append(
-                f"{int(row['id'])} {int(row['type'])} "
-                f"{row['x']:.4f} {row['y']:.4f} {row['z']:.4f} "
-                f"{row['radius']:.4f} {int(row['parent'])}"
-            )
-        payload = "\n".join(lines) + "\n"
+        payload = write_swc_to_bytes_preserve_tokens(df)
         fd, tmp_path = tempfile.mkstemp(prefix=f".{out_path.stem}_", suffix=".tmp", dir=str(out_path.parent))
         try:
-            with os.fdopen(fd, "w", encoding="utf-8") as f:
+            with os.fdopen(fd, "wb") as f:
                 f.write(payload)
                 f.flush()
                 os.fsync(f.fileno())
@@ -3047,9 +3027,19 @@ class SWCMainWindow(QMainWindow):
                 for row_id, row_type in zip(doc.df["id"].tolist(), doc.df["type"].tolist())
                 if pd.notna(row_id) and pd.notna(row_type)
             }
+            soma_node_ids = [
+                int(row_id)
+                for row_id, row_type in zip(doc.df["id"].tolist(), doc.df["type"].tolist())
+                if pd.notna(row_id) and pd.notna(row_type) and int(row_type) == 1
+            ]
             filtered_base_issues: list[dict] = []
             for item in base_issues:
                 issue = dict(item)
+                if str(issue.get("source_key", "")).strip() == "soma_radius_nonzero" and not list(issue.get("node_ids", []) or []):
+                    issue["node_ids"] = list(soma_node_ids)
+                    payload = dict(issue.get("source_payload", {}) or {})
+                    payload["failing_node_ids"] = list(soma_node_ids)
+                    issue["source_payload"] = payload
                 if str(issue.get("source_key", "")).strip() == "no_dangling_branches":
                     original_node_ids = [int(v) for v in issue.get("node_ids", [])]
                     kept_node_ids = [node_id for node_id in original_node_ids if type_by_id.get(int(node_id), -999) != 1]
@@ -3726,10 +3716,11 @@ class SWCMainWindow(QMainWindow):
                 )
             ctx.update(
                 {
-                    "auto_fix_available": True,
-                    "auto_fix_label": "Apply Suggested Labels",
+                    "custom_primary_label": "Auto Label Editing",
+                    "custom_primary_action": "open_auto_label_popup",
+                    "hide_apply_button": True,
                     "problem_detail": f"{len(changes)} nodes have likely incorrect neurite labels.",
-                    "suggested_solution": "Apply the suggested labels automatically, or inspect the same nodes in Morphology Editing.",
+                    "suggested_solution": "Review the suggested relabeling in Auto Label Editing and apply it from the tool if it looks correct.",
                     "detail_lines": [
                         f"Total affected nodes: {len(changes)}",
                         f"Affected node IDs: {', '.join(str(int(item.get('node_id', -1))) for item in changes[:25])}",
@@ -3795,6 +3786,11 @@ class SWCMainWindow(QMainWindow):
         if resolved_issue_id:
             doc.pending_resolved_issue_ids.add(str(resolved_issue_id))
             doc.issue_status_overrides.pop(str(resolved_issue_id), None)
+        doc.validation_report = None
+        self._issue_panel.clear_issues("Running validation and issue detectors...")
+        self._set_issue_status([])
+        doc.editor.set_issue_markers([])
+        doc.editor.clear_selection()
         self._validation_tab.load_swc(doc.df, doc.filename, file_path=doc.file_path, auto_run=False)
         self._validation_tab.run_validation()
 
