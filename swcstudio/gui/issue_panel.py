@@ -60,6 +60,7 @@ class _BlockingIssueDelegate(QStyledItemDelegate):
         )
         painter.restore()
 
+
 class IssuePanelWidget(QWidget):
     """Searchable grouped issue list with selection callbacks."""
 
@@ -182,7 +183,7 @@ class IssuePanelWidget(QWidget):
             status = str(issue.get("status", "")).strip().lower()
             item = QTreeWidgetItem([str(issue.get("title", "Issue"))])
             item.setData(0, Qt.UserRole, dict(issue))
-            item.setToolTip(0, str(issue.get("description", "")))
+            item.setToolTip(0, "")
             item.setForeground(0, self.palette().text())
             source_key = str(issue.get("source_key", "")).strip()
             title = str(issue.get("title", "Issue")).strip() or "Issue"
