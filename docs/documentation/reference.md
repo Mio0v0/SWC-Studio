@@ -9,7 +9,6 @@ Reference pages collect the stable command, API, and module-level material.
 API / Library Documentation <../API_DOCUMENTATION>
 Python API Reference <../PYTHON_API_REFERENCE>
 Module Reference <../MODULE_REFERENCE>
-Docs Overview <../README>
 ```
 
 ## Library Surface
@@ -21,6 +20,10 @@ Docs Overview <../README>
 - [Python API Reference](../PYTHON_API_REFERENCE.rst) contains generated API details.
 - [Module Reference](../MODULE_REFERENCE.rst) contains generated module-level reference pages.
 
-## Repository Docs Overview
+## Site Navigation
 
-- [Docs Overview](../README.md) remains available as a source-level overview page.
+Use the website navigation as the primary entrypoint for the documentation:
+
+- `Documentation` for user guides and references
+- `Tutorials` for walkthroughs
+- `About` for the project overview

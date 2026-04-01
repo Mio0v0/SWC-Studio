@@ -58,7 +58,7 @@ source_suffix = {
 
 master_doc = "index"
 language = "en"
-exclude_patterns = ["_build", "Thumbs.db", ".DS_Store"]
+exclude_patterns = ["_build", "Thumbs.db", ".DS_Store", "README.md"]
 
 # Keep docs folder tidy: only include optional paths when present.
 templates_path = ["_templates"] if os.path.isdir(os.path.join(DOCS_DIR, "_templates")) else []
@@ -66,6 +66,8 @@ html_static_path = ["_static"] if os.path.isdir(os.path.join(DOCS_DIR, "_static"
 
 html_theme = "pydata_sphinx_theme"
 html_title = f"SWC-Studio v{release}"
+html_copy_source = False
+html_show_sourcelink = False
 html_theme_options = {
     "header_links_before_dropdown": 10,
     "navbar_align": "content",
