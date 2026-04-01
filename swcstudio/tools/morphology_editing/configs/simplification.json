@@ -1,0 +1,17 @@
+{
+  "enabled": true,
+  "feature": "simplification",
+  "flags": {
+    "keep_bifurcations": true,
+    "keep_roots": true,
+    "keep_tips": true
+  },
+  "method": "default",
+  "output": {
+    "suffix": "_simplified"
+  },
+  "thresholds": {
+    "epsilon": 2.0,
+    "radius_tolerance": 0.5
+  }
+}

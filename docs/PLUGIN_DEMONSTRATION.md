@@ -22,8 +22,8 @@ Inside `register_plugin`, bind your function to a feature key and method name:
 ```python
 def register_plugin(registrar):
     registrar.register_method(
-        "atlas_registration.registration",  # feature key in SWC-Studio
-        "brainglobe",                       # method name users select
+        "analysis.summary",                 # feature key in SWC-Studio
+        "lab_summary",                      # method name users select
         my_callable,                        # Python callable
     )
 ```
@@ -32,7 +32,7 @@ def register_plugin(registrar):
 
 Recommended starting point:
 
-- Copy: `examples/plugins/brainglobe_adapter_template.py`
+- Copy: `examples/plugins/summary_plugin_template.py`
 - New file: `examples/plugins/my_lab_plugin.py`
 
 The new file is your plugin module name (`my_lab_plugin`).
@@ -87,13 +87,13 @@ set PYTHONPATH=%CD%\examples\plugins
 ### 3) Load plugin
 
 ```bash
-swctools plugins load my_lab_plugin
+swcstudio plugins load my_lab_plugin
 ```
 
 ### 4) Verify plugin manifest loaded
 
 ```bash
-swctools plugins list-loaded
+swcstudio plugins list-loaded
 ```
 
 You should see your `plugin_id`.
@@ -101,7 +101,7 @@ You should see your `plugin_id`.
 ### 5) Verify method registration under target feature
 
 ```bash
-swctools plugins list --feature-key atlas_registration.registration
+swcstudio plugins list --feature-key analysis.summary
 ```
 
 You should see your method name in `plugin_methods`.
@@ -111,45 +111,34 @@ You should see your method name in `plugin_methods`.
 Example:
 
 ```bash
-swctools atlas register ./data --config-json '{"method":"brainglobe","bg_command":".venv/bin/brainreg --help","append_input_path":false,"append_atlas_name":false}'
-```
-
-Windows path examples for `bg_command`:
-
-PowerShell:
-
-```powershell
-swctools atlas register .\data --config-json '{"method":"brainglobe","bg_command":".venv\\Scripts\\brainreg.exe --help","append_input_path":false,"append_atlas_name":false}'
-```
-
-cmd:
-
-```bat
-swctools atlas register .\data --config-json "{\"method\":\"brainglobe\",\"bg_command\":\".venv\\Scripts\\brainreg.exe --help\",\"append_input_path\":false,\"append_atlas_name\":false}"
+python - <<'PY'
+from swcstudio.api import analysis_summary_file
+print(analysis_summary_file("./data/single-soma.swc", config_overrides={"method": "lab_summary"}))
+PY
 ```
 
 The `method` value must exactly match the name used in `register_method(...)`.
 
 ## Persistent Plugin Loading (Recommended)
 
-`swctools plugins load ...` is process-scoped. To auto-load every run:
+`swcstudio plugins load ...` is process-scoped. To auto-load every run:
 
 macOS/Linux:
 
 ```bash
-export SWCTOOLS_PLUGINS="my_lab_plugin"
+export SWCSTUDIO_PLUGINS="my_lab_plugin"
 ```
 
 Windows PowerShell:
 
 ```powershell
-$env:SWCTOOLS_PLUGINS = "my_lab_plugin"
+$env:SWCSTUDIO_PLUGINS = "my_lab_plugin"
 ```
 
 Windows cmd:
 
 ```bat
-set SWCTOOLS_PLUGINS=my_lab_plugin
+set SWCSTUDIO_PLUGINS=my_lab_plugin
 ```
 
 ## Common Errors and Fixes
@@ -165,11 +154,6 @@ set SWCTOOLS_PLUGINS=my_lab_plugin
 - Fix: compare:
   - `register_method(<feature_key>, <method_name>, ...)`
   - CLI `--config-json '{"method":"<method_name>"}'`
-
-### External command fails (for wrappers like BrainGlobe CLI)
-
-- Cause: command not available in current env.
-- Fix: run command directly first, then use that exact path in config (`.venv/bin/brainreg --help` on macOS/Linux, `.venv\\Scripts\\brainreg.exe --help` on Windows).
 
 ## Notes for GUI Users
 

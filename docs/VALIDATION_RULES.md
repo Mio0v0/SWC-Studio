@@ -1,100 +1,65 @@
-# Validation System and Rules
+# Validation System And Rules
 
-This project uses one shared validation backend for GUI and CLI.
+This page explains the validation backend at a high level.
 
-## Architecture
+For the full per-check matrix, issue titles, params, and related tools, use:
 
-Validation components:
+- [Checks And Issues Reference](CHECKS_AND_ISSUES_REFERENCE.md)
 
-- engine: `swctools.core.validation_engine`
-- registry: `swctools.core.validation_registry`
-- result models: `swctools.core.validation_results`
-- check catalogs and friendly labels: `swctools.core.validation_catalog`
-- wrappers/entrypoints: `swctools.tools.validation.features.run_checks`
+## Shared Backend
 
-Both GUI and CLI call this same pipeline:
+GUI and CLI both use the same validation stack:
 
-1. load config (`default.json`)
-2. build pre-check summary
+- engine: `swcstudio.core.validation_engine`
+- registry: `swcstudio.core.validation_registry`
+- result models: `swcstudio.core.validation_results`
+- labels and categories: `swcstudio.core.validation_catalog`
+- feature wrapper: `swcstudio.tools.validation.features.run_checks`
+
+Common flow:
+
+1. load validation config
+2. build the pre-check summary
 3. run enabled checks
-4. return structured `ValidationReport`
-5. render in UI/terminal and optionally export report
+4. return a structured `ValidationReport`
+5. render results in GUI, CLI, or reports
 
-## Config file
+## Main Config
 
-Main validation config:
+Validation config lives in:
 
-- `swctools/tools/validation/configs/default.json`
+- `swcstudio/tools/validation/configs/default.json`
 
-Per-check structure follows:
+Per-check shape:
 
 ```json
 {
   "checks": {
     "has_soma": {
       "enabled": true,
-      "severity": "warning",
+      "severity": "error",
       "params": {}
     }
   }
 }
 ```
 
-Notes:
+Meaning:
 
-- `enabled`: run/skip check
-- `severity`: if failed, classify as `warning` or `fail`
-- `params`: check-specific thresholds/options
+- `enabled`
+  - run or skip the check
+- `severity`
+  - how a failing check is classified in the report
+- `params`
+  - check-specific thresholds or options
 
-## Rule categories and friendly labels
+## Output Model
 
-Validation rules are grouped into these categories:
+Each check returns a `CheckResult` with fields such as:
 
-## Structural presence
-
-- Soma present
-- Axon present
-- Basal dendrite present
-- Apical dendrite present
-
-## Radius and size
-
-- All neurite radii are positive
-- Soma radius is positive
-- No extremely narrow sections
-- No extremely narrow branch starts
-- No oversized terminal ends
-
-## Length and geometry
-
-- All section lengths are positive
-- All segment lengths are positive
-- No geometric backtracking
-- No flattened neurites
-- No duplicate 3D points
-
-## Topology
-
-- No dangling branches
-- No single-child chains
-- Contains unifurcation
-- Contains multifurcation
-
-## Index consistency
-
-- No section index gaps
-- No root index gaps
-
-These labels/rules are centralized in:
-
-- `swctools/core/validation_catalog.py`
-
-## Output model
-
-Each check returns a `CheckResult` with structured fields:
-
-- `key`, `label`
-- `passed`, `status` (`pass`, `warning`, `fail`)
+- `key`
+- `label`
+- `status`
 - `message`
 - `failing_node_ids`
 - `failing_section_ids`
@@ -102,29 +67,15 @@ Each check returns a `CheckResult` with structured fields:
 - `params_used`
 - `thresholds_used`
 
-Full run returns `ValidationReport` containing:
+A full run returns a `ValidationReport` with:
 
-- `precheck` list
-- `results` list
-- `summary` counts
+- `precheck`
+- `results`
+- `summary`
 
-## CLI behavior
+## GUI And CLI Consistency
 
-For `validation run` and `batch validate`, CLI prints:
+Validation stays consistent across interfaces because both call the same backend and return the same result model.
 
-1. pre-check summary (rule guide)
-2. grouped result summary
-3. detailed findings for warnings/fails
-
-## GUI behavior
-
-Validation panels show:
-
-- Rule Guide (manual button)
-- results table (status + label)
-- detail view per failed/warn row
-- export/download report controls
-
-## Why GUI and CLI stay consistent
-
-Because both call `run_validation_text(...)` through tool wrappers, there is only one source of validation logic and one result format.
+Use the CLI when you want batchable text output.
+Use the GUI when you want issue navigation, highlighting, and repair routing.

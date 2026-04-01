@@ -10,7 +10,7 @@ Build a reproducible macOS `.app` bundle from the same source tree, with packagi
 
 These files are part of the reproducible build setup and should stay in git:
 
-- `packaging/swctools_gui.spec`
+- `packaging/swcstudio_gui.spec`
 - `packaging/build_macos.sh`
 - `packaging/README.md`
 - `pyproject.toml`

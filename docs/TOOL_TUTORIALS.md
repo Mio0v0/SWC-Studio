@@ -2,9 +2,13 @@
 
 This page walks through each top-level tool with practical workflows.
 
-OS note: replace `./data/...` with `.\data\...` on Windows. If `swctools` is not on PATH, use module mode (`python -m swctools.cli.cli ...` on macOS/Linux, `py -m swctools.cli.cli ...` on Windows).
+OS note: replace `./data/...` with `.\data\...` on Windows. If `swcstudio` is not on PATH, use module mode (`python -m swcstudio.cli.cli ...` on macOS/Linux, `py -m swcstudio.cli.cli ...` on Windows).
 
 ## Tool -> Feature map
+
+## 0) Issue Check
+
+- GUI-style issue list (`check`)
 
 ## 1) Batch Processing
 
@@ -12,6 +16,8 @@ OS note: replace `./data/...` with `.\data\...` on Windows. If `swctools` is not
 - SWC Splitter (`batch split`)
 - Auto Typing (`batch auto-typing`)
 - Radii Cleaning (`batch radii-clean`)
+- Simplification (`batch simplify`)
+- Index Clean (`batch index-clean`)
 
 ## 2) Validation
 
@@ -19,6 +25,7 @@ OS note: replace `./data/...` with `.\data\...` on Windows. If `swctools` is not
 - Run Checks (`validation run`)
 - Auto Fix (`validation auto-fix`)
 - Radii Cleaning (`validation radii-clean`)
+- Index Clean (`validation index-clean`)
 
 ## 3) Visualization
 
@@ -27,24 +34,41 @@ OS note: replace `./data/...` with `.\data\...` on Windows. If `swctools` is not
 ## 4) Morphology Editing
 
 - Dendrogram Edit (`morphology dendrogram-edit`)
-- Smart Decimation (`morphology smart-decimation`)
+- Manual Radii (`morphology set-radius`)
 
-## 5) Atlas Registration
+## 5) Geometry Editing
 
-- Register (`atlas register`) placeholder, plugin-ready
-
-## 6) Analysis
-
-- Summary (`analysis summary`) basic metrics
+- Simplification (`geometry simplify`)
+- Move Node (`geometry move-node`)
+- Move Subtree (`geometry move-subtree`)
+- Connect (`geometry connect`)
+- Disconnect (`geometry disconnect`)
+- Delete Node / Subtree (`geometry delete-node`, `geometry delete-subtree`)
+- Insert Node (`geometry insert`)
 
 ---
+
+## Issue Check Tutorial
+
+Print the same combined issue list the GUI builds when a file is opened:
+
+```bash
+swcstudio check ./data/single-soma.swc
+```
+
+What it includes:
+
+- validation issues
+- suspicious radii
+- likely wrong labels
+- simplification suggestion
 
 ## Batch Processing Tutorials
 
 ### A. Batch Validation on a folder
 
 ```bash
-swctools batch validate ./data
+swcstudio batch validate ./data
 ```
 
 What it does:
@@ -57,13 +81,13 @@ What it does:
 Show guide only:
 
 ```bash
-swctools batch validate rule-guide
+swcstudio batch validate rule-guide
 ```
 
 ### B. Split all multi-tree SWC files
 
 ```bash
-swctools batch split ./data
+swcstudio batch split ./data
 ```
 
 Output pattern (default):
@@ -75,7 +99,7 @@ Output pattern (default):
 ### C. Batch Auto Typing
 
 ```bash
-swctools batch auto-typing ./data --soma --axon --basal
+swcstudio batch auto-typing ./data --soma --axon --basal
 ```
 
 Behavior:
@@ -87,13 +111,25 @@ Behavior:
 ### D. Batch Radii Cleaning
 
 ```bash
-swctools batch radii-clean ./data --threshold-mode percentile --percentile-min 1 --percentile-max 99.5
+swcstudio batch radii-clean ./data
 ```
 
-or absolute mode:
+Behavior:
+
+- uses the shared path-aware radii-cleaning backend
+- reads defaults from `swcstudio/tools/batch_processing/configs/radii_cleaning.json`
+- supports temporary JSON overrides through `--config-json`
+
+### E. Batch Simplification
 
 ```bash
-swctools batch radii-clean ./data --threshold-mode absolute --abs-min 0.05 --abs-max 30
+swcstudio batch simplify ./data
+```
+
+### F. Batch Index Clean
+
+```bash
+swcstudio batch index-clean ./data
 ```
 
 ---
@@ -103,31 +139,37 @@ swctools batch radii-clean ./data --threshold-mode absolute --abs-min 0.05 --abs
 ### A. Show Validation Rule Guide
 
 ```bash
-swctools validation rule-guide
+swcstudio validation rule-guide
 ```
 
 ### B. Validate one SWC
 
 ```bash
-swctools validation run ./data/single-soma.swc
+swcstudio validation run ./data/single-soma.swc
 ```
 
 ### C. Auto-fix one SWC
 
 ```bash
-swctools validation auto-fix ./data/single-soma.swc --write
+swcstudio validation auto-fix ./data/single-soma.swc --write
 ```
 
 Use custom output path:
 
 ```bash
-swctools validation auto-fix ./data/single-soma.swc --write --out ./data/single-soma_fixed.swc
+swcstudio validation auto-fix ./data/single-soma.swc --write --out ./data/single-soma_fixed.swc
 ```
 
 ### D. Validation Radii Cleaning
 
 ```bash
-swctools validation radii-clean ./data/single-soma.swc --preserve-soma-radii
+swcstudio validation radii-clean ./data/single-soma.swc
+```
+
+### E. Validation Index Clean
+
+```bash
+swcstudio validation index-clean ./data/single-soma.swc --write
 ```
 
 ---
@@ -137,7 +179,7 @@ swctools validation radii-clean ./data/single-soma.swc --preserve-soma-radii
 Build mesh payload summary from one SWC:
 
 ```bash
-swctools visualization mesh-editing ./data/single-soma.swc --include-edges
+swcstudio visualization mesh-editing ./data/single-soma.swc --include-edges
 ```
 
 Used mainly as backend payload for GUI rendering workflows.
@@ -149,45 +191,53 @@ Used mainly as backend payload for GUI rendering workflows.
 ### A. Dendrogram subtree reassignment
 
 ```bash
-swctools morphology dendrogram-edit ./data/single-soma.swc --node-id 42 --new-type 3 --write
+swcstudio morphology dendrogram-edit ./data/single-soma.swc --node-id 42 --new-type 3 --write
 ```
 
-### B. Smart Decimation (RDP)
+### B. Manual Radius Edit
 
 ```bash
-swctools morphology smart-decimation ./data/single-soma.swc --write
+swcstudio morphology set-radius ./data/single-soma.swc --node-id 42 --radius 0.75 --write
 ```
-
-Prints rule guide before processing and writes simplification log.
 
 ---
 
-## Atlas Registration and Analysis
+## Geometry Editing Tutorials
 
-### Atlas registration (plugin-ready)
-
-```bash
-swctools atlas register ./data/single-soma.swc --atlas allen_mouse_25um
-```
-
-Default implementation is placeholder. Register plugins to provide real atlas workflows.
-
-### Analysis summary
+### A. Simplification
 
 ```bash
-swctools analysis summary ./data/single-soma.swc
+swcstudio geometry simplify ./data/single-soma.swc --write
 ```
 
----
+Prints the simplification rule guide before processing and writes a simplification log.
+
+### B. Connect two nodes
+
+```bash
+swcstudio geometry connect ./data/single-soma.swc --start-id 10 --end-id 22 --write
+```
+
+### C. Disconnect a path
+
+```bash
+swcstudio geometry disconnect ./data/single-soma.swc --start-id 10 --end-id 22 --write
+```
+
+### D. Move a subtree
+
+```bash
+swcstudio geometry move-subtree ./data/single-soma.swc --root-id 40 --x 100 --y 120 --z 5 --write
+```
 
 ## Config override pattern
 
 Most commands support inline temporary overrides:
 
 ```bash
-swctools validation run ./data/single-soma.swc --config-json '{"checks":{"has_soma":{"enabled":true,"severity":"warning","params":{}}}}'
+swcstudio validation run ./data/single-soma.swc --config-json '{"checks":{"has_soma":{"enabled":true,"severity":"warning","params":{}}}}'
 ```
 
 Persistent defaults live in:
 
-- `swctools/tools/<tool>/configs/*.json`
+- `swcstudio/tools/<tool>/configs/*.json`

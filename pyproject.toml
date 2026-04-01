@@ -3,7 +3,7 @@ requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "swctools"
+name = "swcstudio"
 version = "0.1.0"
 description = "Modular SWC processing toolkit with shared core for CLI and GUI"
 readme = "README.md"
@@ -42,8 +42,8 @@ all = [
 ]
 
 [project.scripts]
-swctools = "swctools.cli.cli:main"
-swctools-gui = "swctools.gui.main:main"
+swcstudio = "swcstudio.cli.cli:main"
+swcstudio-gui = "swcstudio.gui.main:main"
 
 [tool.setuptools.packages.find]
-include = ["swctools*"]
+include = ["swcstudio*"]

@@ -1,6 +1,6 @@
 # GUI Workflow Guide
 
-This page explains how the GUI is structured and how panels interact.
+This page explains the current GUI structure and the intended issue-driven repair workflow.
 
 ## Layout model
 
@@ -8,8 +8,8 @@ The GUI uses a studio-style layout with shared backend logic:
 
 - top in-app bar: file/edit/view/window/help menus + tool and feature selectors
 - center canvas: active SWC visualization/editor tabs
-- left panel: Data Explorer (SWC tree, node info, segment info, edit log)
-- right panel: Control Center (tool-dependent controls)
+- left panel: Issue Navigator / SWC File / Segment Info
+- right panel: Inspector (issue detail on top, active tool controls below)
 - bottom panel: log output/events
 
 The center canvas is the dominant workspace and updates based on current tool/feature.
@@ -22,34 +22,39 @@ Top-level tools:
 - Validation
 - Visualization
 - Morphology Editing
-- Atlas Registration
-- Analysis
+- Geometry Editing
 
 When a tool is active, feature buttons are shown for that tool.
-The selected feature controls what appears in Control Center.
+The selected feature controls what appears in the lower Inspector area.
 
 ### Feature mapping in GUI
 
-- Batch Processing: Split, Validation, Auto Label, Radii Cleaning
-- Validation: Validation, Auto Label, Radii Cleaning
+- Batch Processing: Split, Validation, Auto Label Editing, Radii Cleaning, Simplification, Index Clean
+- Validation: Validation, Index Clean
 - Visualization: View Controls
-- Morphology Editing: Label Editing, Simplification
-- Atlas Registration: Registration (placeholder)
-- Analysis: Summary (placeholder)
+- Morphology Editing: Manual Label Editing, Auto Label Editing, Manual Radii Editing, Auto Radii Editing
+- Geometry Editing: Geometry Editing, Simplification
 
 ## Document/canvas behavior
 
 - Multiple SWC files can be open in separate canvas tabs.
-- Preview outputs (for some operations) open as temporary comparison tabs.
 - Closing a changed tab triggers save/discard flow and session logging.
 
 ## Recommended GUI usage sequence
 
-1. **Open file** from menu.
-2. Inspect structure in Data Explorer.
-3. Switch to **Validation** tool and run checks.
-4. Use **Morphology Editing** and **Radii Cleaning** as needed.
-5. Review status/log panel and save outputs.
+1. Open an SWC file from the File menu.
+2. Run **Validation** and review the Issue Navigator on the left.
+3. Click an issue to focus the affected nodes and jump to the matching repair feature.
+4. Fix the issue in the suggested feature, such as **Index Clean**, **Manual Label Editing**, **Auto Label Editing**, **Manual Radii Editing**, **Auto Radii Editing**, or **Geometry Editing**.
+5. Rerun validation and continue until the issue list is cleared or reduced to acceptable warnings.
+6. Save the cleaned SWC or close the tab to write the session log and saved copy into the file output folder.
+
+This is the intended desktop workflow:
+
+- validation surfaces structural and annotation problems
+- the Issue Navigator shows what needs attention
+- the app directs you to the corresponding fix tool
+- once the issues are resolved, the SWC is ready for downstream work
 
 ## Validation in GUI
 
@@ -57,35 +62,44 @@ Validation panel supports:
 
 - Rule Guide button (manual display; no forced popup)
 - Run Validation
+- Index Clean as a separate Validation feature
 - results table with status/label
 - report export controls
 
-Validation uses the same backend as CLI (`swctools.tools.validation` + core engine).
+Validation uses the same backend as CLI (`swcstudio.tools.validation` + core engine).
+
+For the full check and issue matrix, use:
+
+- [Checks And Issues Reference](CHECKS_AND_ISSUES_REFERENCE.md)
 
 ## Auto Typing in GUI
 
-- Batch mode: folder-level auto-labeling
-- Validation mode: single-file auto-labeling
+- Batch mode: folder-level auto label editing
+- Validation mode: single-file auto label editing
 - JSON editor for rule parameters
 - shared backend logic (same as CLI/API)
+- branch-consistent labeling from the soma boundary
+- one primary axon winner and one primary apical winner when enabled
+- primary subtree inheritance, so a labeled subtree keeps one neurite class downstream
+- far-from-soma penalty against unlikely basal assignments
 
-## Radii Cleaning in GUI
+## Radii Editing in GUI
 
 - shared backend for Batch + Validation + CLI
-- supports file/folder usage depending on panel context
-- thresholds configurable via JSON
+- `Manual Radii Editing` supports one-node edits with type-level statistics
+- `Auto Radii Editing` supports distribution-based cleanup
+- behavior configurable via `radii_cleaning.json`
 - histogram/statistics visualization for currently loaded file
 
 ## Simplification in GUI
 
-- RDP-based Smart Decimation controls in Morphology Editing
-- process creates a simplified preview/result path
-- action bar supports apply/redo/cancel behavior
-- outputs include simplification log with node reduction stats and parameters
+- RDP-based simplification lives in `Geometry Editing -> Simplification`
+- `Run` applies directly to the current file
+- updates are recorded in the same session log format as the other editing tools
 
 ## Logs and status
 
 - transient status: status bar and bottom log
-- persistent logs: text report files written by backend reporting layer
+- persistent logs: text report files written by the shared reporting layer
 
 See [LOGS_AND_REPORTS](LOGS_AND_REPORTS.md) for full report naming conventions.

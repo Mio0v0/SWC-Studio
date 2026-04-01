@@ -34,7 +34,7 @@ Methods are registered to a feature key + method name.
 Example:
 
 ```python
-registrar.register_method("atlas_registration.registration", "brainglobe", my_func)
+registrar.register_method("analysis.summary", "lab_summary", my_func)
 ```
 
 If selected method exists as plugin method, it overrides same-name builtin method at runtime.
@@ -53,25 +53,25 @@ When replacing a method, return the same output shape expected by caller.
 
 ## 4. Loading behavior
 
-- `swctools plugins load <module>` is process-local.
-- `SWCTOOLS_PLUGINS` enables autoload each new process.
+- `swcstudio plugins load <module>` is process-local.
+- `SWCSTUDIO_PLUGINS` enables autoload each new process.
 
 macOS/Linux:
 
 ```bash
-export SWCTOOLS_PLUGINS="my_lab_plugins.plugin_a,my_lab_plugins.plugin_b"
+export SWCSTUDIO_PLUGINS="my_lab_plugins.plugin_a,my_lab_plugins.plugin_b"
 ```
 
 Windows PowerShell:
 
 ```powershell
-$env:SWCTOOLS_PLUGINS = "my_lab_plugins.plugin_a,my_lab_plugins.plugin_b"
+$env:SWCSTUDIO_PLUGINS = "my_lab_plugins.plugin_a,my_lab_plugins.plugin_b"
 ```
 
 Windows cmd:
 
 ```bat
-set SWCTOOLS_PLUGINS=my_lab_plugins.plugin_a,my_lab_plugins.plugin_b
+set SWCSTUDIO_PLUGINS=my_lab_plugins.plugin_a,my_lab_plugins.plugin_b
 ```
 
 ## 5. Safety recommendations
@@ -91,17 +91,17 @@ set SWCTOOLS_PLUGINS=my_lab_plugins.plugin_a,my_lab_plugins.plugin_b
 ## 7. Testing checklist
 
 1. module import works in target venv
-2. `swctools plugins load ...` succeeds
-3. `swctools plugins list --feature-key ...` shows method
+2. `swcstudio plugins load ...` succeeds
+3. `swcstudio plugins list --feature-key ...` shows method
 4. command using `--config-json {"method":"..."}` executes
 5. output/report files are generated correctly
 
 ## 8. Thin-wrapper pattern
 
-For third-party tools (example: BrainGlobe CLI wrappers):
+For third-party tools or in-house libraries:
 
-- plugin method accepts swctools inputs
+- plugin method accepts swcstudio inputs
 - plugin method calls external command/library
-- plugin method maps output back into swctools result payload
+- plugin method maps output back into swcstudio result payload
 
 This pattern avoids rewriting third-party algorithms while still integrating into SWC-Studio workflows.

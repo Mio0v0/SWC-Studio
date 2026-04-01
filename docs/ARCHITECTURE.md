@@ -9,7 +9,7 @@ This project follows a shared-core architecture:
 ## Directory structure
 
 ```text
-swctools/
+swcstudio/
   api.py
   core/
   tools/
@@ -17,7 +17,7 @@ swctools/
     validation/
     visualization/
     morphology_editing/
-    atlas_registration/
+    geometry_editing/  (planned CLI/tool wrappers; core logic already shared)
     analysis/
   plugins/
   cli/
@@ -26,7 +26,7 @@ swctools/
 
 ## Layer responsibilities
 
-## `swctools/core`
+## `swcstudio/core`
 
 Shared infrastructure and algorithm foundations:
 
@@ -37,7 +37,7 @@ Shared infrastructure and algorithm foundations:
 - report formatting/writing
 - config merge/load/save
 
-## `swctools/tools`
+## `swcstudio/tools`
 
 Feature wrappers grouped by tool.
 
@@ -48,7 +48,7 @@ Each feature module typically provides:
 - builtin method registration (`register_builtin_method`)
 - public entrypoint(s) used by CLI/GUI/API
 
-## `swctools/plugins`
+## `swcstudio/plugins`
 
 Method registry + plugin loader contract.
 
@@ -56,7 +56,7 @@ Method registry + plugin loader contract.
 - external plugins register methods by feature key
 - manifest includes versioned `api_version`
 
-## `swctools/cli`
+## `swcstudio/cli`
 
 Thin argparse-based front-end.
 
@@ -65,7 +65,7 @@ Thin argparse-based front-end.
 - calls shared tool feature functions
 - prints structured result summaries
 
-## `swctools/gui`
+## `swcstudio/gui`
 
 Qt desktop interface.
 
@@ -77,7 +77,7 @@ Qt desktop interface.
 
 Feature config files:
 
-- `swctools/tools/<tool>/configs/<feature>.json`
+- `swcstudio/tools/<tool>/configs/<feature>.json`
 
 JSON stores:
 
@@ -98,7 +98,10 @@ Examples:
 - `batch_processing.auto_typing`
 - `validation.run_checks`
 - `morphology_editing.simplification`
-- `atlas_registration.registration`
+- `validation.index_clean`
+- `batch_processing.index_clean`
+- `batch_processing.simplification`
+- `analysis.summary`
 
 A plugin can register one or more methods under these keys and select them through config/CLI.
 

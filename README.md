@@ -1,12 +1,16 @@
 # SWC-Studio
 
-`SWC-Studio` is a modular SWC morphology toolkit (Python package: `swctools`) with:
+`SWC-Studio` is a desktop and command-line workbench for working with neuron morphology files in SWC format. At a high level, it is meant to help researchers inspect reconstructions, find structural or annotation problems, repair them, and run repeatable morphology-processing workflows from the same shared backend.
 
-- a shared Python backend (`swctools/core` + `swctools/tools`)
-- a CLI (`swctools`)
-- a desktop GUI (`swctools-gui`)
+`SWC-Studio` is a modular SWC morphology toolkit (Python package: `swcstudio`) with:
+
+- a shared Python backend (`swcstudio/core` + `swcstudio/tools`)
+- a CLI (`swcstudio`)
+- a desktop GUI (`swcstudio-gui`)
 
 CLI and GUI call the same feature backend functions.
+
+There are two main ways to use `SWC-Studio`. If you want the full Python workflow, you can create a virtual environment and install it with `pip`, which gives you the shared library, CLI, and GUI together. If you just want to use it as desktop software, you can download a packaged executable `.zip` release, extract it, and run the desktop application directly without setting up a Python environment.
 
 ## What This Project Does
 
@@ -16,25 +20,66 @@ Top-level tool areas:
 2. Validation
 3. Visualization
 4. Morphology Editing
-5. Atlas Registration (placeholder)
-6. Analysis (placeholder)
+5. Geometry Editing
 
 Core workflows currently include:
 
 - SWC split by soma-root trees
+- Batch simplification
+- Batch index clean
 - Rule-based auto typing
 - Single-file and batch validation
+- Validation index clean
 - Radius outlier cleaning
+- Manual single-node radius editing
 - Dendrogram subtree type reassignment
-- Smart Decimation (RDP-based simplification)
+- Simplification (graph-aware RDP)
+- Geometry editing operations for move/connect/disconnect/delete/insert
+
+Current auto-labeling is directed-path and subtree-consistent:
+
+- primary soma-child subtrees are scored as axon, basal, or apical
+- one primary axon winner and one primary apical winner can be enforced
+- labels inherit root-to-leaf within a classified primary subtree
+- path persistence, terminal taper, branch structure, and +Z alignment are used in the scores
+- distant branches are penalized as basal candidates
+
+Current radii cleaning is three-pass and path-aware:
+
+- pass 1: local median outlier repair on a 5-node neighborhood
+- pass 2: monotonic taper enforcement away from the soma with a small slack
+- pass 3: Savitzky-Golay-style local polynomial smoothing
+- axons can keep a configurable biological minimum floor
+
+## Recommended App Workflow
+
+`SWC-Studio` is built around an issue-driven repair workflow for one SWC at a time:
+
+1. Open an SWC file in the GUI.
+2. Run Validation and review the Issue Navigator on the left.
+3. Click an issue to focus the affected nodes and jump to the most relevant fix tool.
+4. Fix the issue in the suggested feature, such as Validation, Index Clean, Manual Label Editing, Auto Label Editing, Manual Radii Editing, Auto Radii Editing, or Geometry Editing.
+5. Rerun validation and continue until the important issues are resolved.
+6. Save the cleaned SWC for batch processing, export, or further editing.
+
+The intended app flow is:
+
+- issues are surfaced in the navigator
+- each issue directs you to the corresponding repair tool
+- fixes are applied on the current SWC
+- once the issue list is resolved or reduced to acceptable warnings, the SWC is ready for export or downstream workflows
 
 ## Documentation
 
 Short docs (Markdown):
 
-- [CLI Reference](docs/CLI_REFERENCE.md): command reference and options
-- [API / Library Documentation](docs/API_DOCUMENTATION.md): Python API surface
-- [Plugin Demonstration](docs/PLUGIN_DEMONSTRATION.md): lab handoff plugin workflow
+- [Docs Overview](docs/README.md): reading order and page ownership
+- [Getting Started](docs/GETTING_STARTED.md): install, run, first steps
+- [GUI Workflow Guide](docs/GUI_WORKFLOW.md): current GUI layout and issue-driven flow
+- [CLI Reference](docs/CLI_REFERENCE.md): current command surface
+- [Checks And Issues Reference](docs/CHECKS_AND_ISSUES_REFERENCE.md): canonical checks, issues, and algorithms
+- [Logs And Reports](docs/LOGS_AND_REPORTS.md): report names, session logs, and output folders
+- [API / Library Documentation](docs/API_DOCUMENTATION.md): Python integration surface
 
 Comprehensive docs site (Sphinx source):
 
@@ -71,7 +116,9 @@ pip install -e ".[gui]"
 Windows PowerShell (GUI + CLI, stricter setup):
 
 ```powershell
-py -3.11 -m venv .venv
+Requires Python 3.10 or newer.
+
+py -3 -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install --upgrade pip setuptools wheel
 pip install --no-cache-dir -e ".[gui]"
@@ -80,7 +127,9 @@ pip install --no-cache-dir -e ".[gui]"
 Windows cmd (GUI + CLI, stricter setup):
 
 ```bat
-py -3.11 -m venv .venv
+Requires Python 3.10 or newer.
+
+py -3 -m venv .venv
 .venv\Scripts\activate.bat
 python -m pip install --upgrade pip setuptools wheel
 pip install --no-cache-dir -e ".[gui]"
@@ -108,27 +157,27 @@ Build dependencies for packaging are defined in `pyproject.toml` under the `buil
 CLI (all OS):
 
 ```bash
-swctools --help
+swcstudio --help
 ```
 
-If `swctools` is not on PATH, use module mode:
+If `swcstudio` is not on PATH, use module mode:
 
 macOS/Linux:
 
 ```bash
-python -m swctools.cli.cli --help
+python -m swcstudio.cli.cli --help
 ```
 
 Windows (PowerShell/cmd):
 
 ```powershell
-py -m swctools.cli.cli --help
+py -m swcstudio.cli.cli --help
 ```
 
 GUI (all OS):
 
 ```bash
-swctools-gui
+swcstudio-gui
 ```
 
 Fallback module mode:
@@ -136,13 +185,13 @@ Fallback module mode:
 macOS/Linux:
 
 ```bash
-python -m swctools.gui.main
+python -m swcstudio.gui.main
 ```
 
 Windows (PowerShell/cmd):
 
 ```powershell
-py -m swctools.gui.main
+py -m swcstudio.gui.main
 ```
 
 ## Quick CLI Examples
@@ -150,44 +199,56 @@ py -m swctools.gui.main
 macOS/Linux:
 
 ```bash
-swctools batch split ./data
-swctools batch validate ./data
-swctools batch auto-typing ./data --soma --axon --basal
-swctools batch radii-clean ./data
+swcstudio batch split ./data
+swcstudio batch validate ./data
+swcstudio batch auto-typing ./data --soma --axon --basal
+swcstudio batch radii-clean ./data
+swcstudio batch simplify ./data
+swcstudio batch index-clean ./data
 
-swctools validation rule-guide
-swctools validation run ./data/single-soma.swc
-swctools validation auto-fix ./data/single-soma.swc --write
+swcstudio check ./data/single-soma.swc
+swcstudio validation rule-guide
+swcstudio validation run ./data/single-soma.swc
+swcstudio validation auto-fix ./data/single-soma.swc --write
+swcstudio validation index-clean ./data/single-soma.swc --write
 
-swctools morphology smart-decimation ./data/single-soma.swc --write
+swcstudio morphology set-radius ./data/single-soma.swc --node-id 42 --radius 0.75 --write
+swcstudio geometry simplify ./data/single-soma.swc --write
+swcstudio geometry connect ./data/single-soma.swc --start-id 10 --end-id 22 --write
 
-swctools plugins load my_lab_plugins.brainglobe_adapter
-swctools plugins list-loaded
+swcstudio plugins load my_lab_plugins.summary_plugin
+swcstudio plugins list-loaded
 ```
 
 Windows (PowerShell/cmd):
 
 ```powershell
-swctools batch split .\data
-swctools batch validate .\data
-swctools batch auto-typing .\data --soma --axon --basal
-swctools batch radii-clean .\data
+swcstudio batch split .\data
+swcstudio batch validate .\data
+swcstudio batch auto-typing .\data --soma --axon --basal
+swcstudio batch radii-clean .\data
+swcstudio batch simplify .\data
+swcstudio batch index-clean .\data
 
-swctools validation rule-guide
-swctools validation run .\data\single-soma.swc
-swctools validation auto-fix .\data\single-soma.swc --write
+swcstudio check .\data\single-soma.swc
+swcstudio validation rule-guide
+swcstudio validation run .\data\single-soma.swc
+swcstudio validation auto-fix .\data\single-soma.swc --write
+swcstudio validation index-clean .\data\single-soma.swc --write
 
-swctools morphology smart-decimation .\data\single-soma.swc --write
+swcstudio morphology set-radius .\data\single-soma.swc --node-id 42 --radius 0.75 --write
+swcstudio geometry simplify .\data\single-soma.swc --write
+swcstudio geometry connect .\data\single-soma.swc --start-id 10 --end-id 22 --write
 
-swctools plugins load my_lab_plugins.brainglobe_adapter
-swctools plugins list-loaded
+swcstudio plugins load my_lab_plugins.summary_plugin
+swcstudio plugins list-loaded
 ```
 
 ## macOS Packaging
 
 Reproducible macOS GUI packaging files are tracked in:
 
-- `packaging/swctools_gui.spec`
+- `packaging/swcstudio_gui.spec`
 - `packaging/build_macos.sh`
 - `packaging/README.md`
 
@@ -221,23 +282,23 @@ See also:
 
 ## Architecture (High-Level)
 
-- `swctools/core`: shared data models, IO, validation/rules, reporting
-- `swctools/tools`: tool/feature backends (actual behavior)
-- `swctools/plugins`: registry for builtin + user override methods
-- `swctools/cli`: terminal interface layer
-- `swctools/gui`: Qt interface layer
+- `swcstudio/core`: shared data models, IO, validation/rules, reporting
+- `swcstudio/tools`: tool/feature backends (actual behavior)
+- `swcstudio/plugins`: registry for builtin + user override methods
+- `swcstudio/cli`: terminal interface layer
+- `swcstudio/gui`: Qt interface layer
 
 ## Config
 
 Feature config JSON lives at:
 
-- `swctools/tools/<tool>/configs/<feature>.json`
+- `swcstudio/tools/<tool>/configs/<feature>.json`
 
 Examples:
 
-- `swctools/tools/validation/configs/default.json`
-- `swctools/tools/batch_processing/configs/radii_cleaning.json`
-- `swctools/tools/morphology_editing/configs/simplification.json`
+- `swcstudio/tools/validation/configs/default.json`
+- `swcstudio/tools/batch_processing/configs/radii_cleaning.json`
+- `swcstudio/tools/morphology_editing/configs/simplification.json`
 
 ## Notes
 
@@ -251,7 +312,7 @@ This project is released under the MIT License. See `LICENSE`.
 
 ## Plugin Contract (For Many External Plugins)
 
-`swctools` supports plugin modules through a small versioned contract:
+`swcstudio` supports plugin modules through a small versioned contract:
 
 1. `PLUGIN_MANIFEST` (or `get_plugin_manifest()`) must provide:
    - `plugin_id`, `name`, `version`, `api_version`
@@ -261,31 +322,31 @@ This project is released under the MIT License. See `LICENSE`.
    - `PLUGIN_METHODS` dictionary/list
 3. Plugin methods register against existing feature keys, e.g.:
    - `batch_processing.auto_typing`
-   - `atlas_registration.registration`
+   - `analysis.summary`
 
-This lets you integrate external libraries (like BrainGlobe adapters) without
-rewriting their internal algorithms.
+This lets you integrate external libraries or lab-specific methods without
+rewriting the app’s interface layer.
 
 For automatic plugin loading in CLI sessions:
 
 macOS/Linux:
 
 ```bash
-export SWCTOOLS_PLUGINS="my_lab_plugins.brainglobe_adapter,my_lab_plugins.custom_methods"
+export SWCSTUDIO_PLUGINS="my_lab_plugins.summary_plugin,my_lab_plugins.custom_methods"
 ```
 
 Windows PowerShell:
 
 ```powershell
-$env:SWCTOOLS_PLUGINS = "my_lab_plugins.brainglobe_adapter,my_lab_plugins.custom_methods"
+$env:SWCSTUDIO_PLUGINS = "my_lab_plugins.summary_plugin,my_lab_plugins.custom_methods"
 ```
 
 Windows cmd:
 
 ```bat
-set SWCTOOLS_PLUGINS=my_lab_plugins.brainglobe_adapter,my_lab_plugins.custom_methods
+set SWCSTUDIO_PLUGINS=my_lab_plugins.summary_plugin,my_lab_plugins.custom_methods
 ```
 
 Starter template:
 
-- `examples/plugins/brainglobe_adapter_template.py`
+- `examples/plugins/summary_plugin_template.py`

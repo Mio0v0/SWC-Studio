@@ -1,0 +1,147 @@
+{
+  "enabled": true,
+  "feature": "auto_typing",
+  "method": "default",
+  "options": {
+    "apic": false,
+    "axon": true,
+    "basal": true,
+    "soma": true
+  },
+  "rules": {
+    "assign_missing": {
+      "min_gain": -0.06,
+      "min_score": 0.58
+    },
+    "branch_score_weights": {
+      "apical": {
+        "branch": 0.1,
+        "path": 0.12,
+        "prior": 0.14,
+        "radius": 0.12,
+        "root_path": 0.16,
+        "symmetry": 0.04,
+        "taper": 0.06,
+        "up": 0.2,
+        "z": 0.2
+      },
+      "axon": {
+        "branch": 0.04,
+        "path": 0.14,
+        "persistence": 0.16,
+        "prior": 0.04,
+        "radial": 0.12,
+        "radius": 0.12,
+        "root_path": 0.18,
+        "root_radial": 0.12,
+        "symmetry": 0.04,
+        "taper": 0.08,
+        "up": 0.02
+      },
+      "basal": {
+        "branch": 0.16,
+        "path": 0.08,
+        "persistence": 0.08,
+        "prior": 0.08,
+        "radius": 0.14,
+        "root_path": 0.2,
+        "root_radial": 0.12,
+        "symmetry": 0.08,
+        "taper": 0.1,
+        "up": 0.12,
+        "z": 0.12
+      }
+    },
+    "class_labels": {
+      "1": "soma",
+      "2": "axon",
+      "3": "basal",
+      "4": "apical"
+    },
+    "ml_base_weight": 0.72,
+    "ml_blend": 0.28,
+    "notes": "This JSON controls the auto-labeling behavior (weights, thresholds, and options). It now scores soma-child directed paths, enforces hard subtree inheritance, limits the morphology to one primary axon and one primary apical trunk, and uses persistence / taper / up-direction / branch-symmetry cues before topology refinement.",
+    "constraints": {
+      "inherit_primary_subtree": true,
+      "single_axon": true,
+      "single_apical": true,
+      "axon_primary_min_score": 0.42,
+      "apical_primary_min_score": 0.42,
+      "far_basal_distance_um": 500.0,
+      "far_basal_penalty": 0.22,
+      "thin_axon_max_base_radius_um": 1.0,
+      "thin_axon_bonus": 0.1
+    },
+    "feature_windows": {
+      "terminal_window_nodes": 3
+    },
+    "propagation_weights": {
+      "branch_prior": 0.3,
+      "children": 0.2,
+      "iterations": 4,
+      "parent": 0.35,
+      "self": 0.35
+    },
+    "radius": {
+      "copy_parent_if_zero": true
+    },
+    "seed_prior_threshold": 0.55,
+    "segmenting": {
+      "max_chunk_path": 180.0
+    },
+    "refinement": {
+      "child_weight": 0.18,
+      "island_flip_margin": 0.14,
+      "island_max_path": 36.0,
+      "island_relative_max": 0.35,
+      "iterations": 2,
+      "parent_weight": 0.14
+    },
+    "smoothing": {
+      "continuity_margin": 0.02,
+      "flip_margin": 0.1,
+      "maj_fraction": 0.67
+    },
+    "soma_child_prior": {
+      "branch_boost": 0.16,
+      "branch_weight": 0.38,
+      "propagation_weight": 0.3,
+      "score_weights": {
+        "apical": {
+          "branch": 0.1,
+          "path": 0.14,
+          "prior": 0.16,
+          "radius": 0.12,
+          "size": 0.12,
+          "symmetry": 0.04,
+          "taper": 0.06,
+          "up": 0.22,
+          "z": 0.22
+        },
+        "axon": {
+          "branch": 0.08,
+          "path": 0.2,
+          "persistence": 0.14,
+          "prior": 0.12,
+          "radial": 0.18,
+          "radius": 0.1,
+          "size": 0.18,
+          "symmetry": 0.04,
+          "taper": 0.06
+        },
+        "basal": {
+          "branch": 0.12,
+          "path": 0.2,
+          "persistence": 0.06,
+          "prior": 0.16,
+          "radial": 0.18,
+          "radius": 0.14,
+          "symmetry": 0.1,
+          "taper": 0.08,
+          "up": 0.1,
+          "z": 0.1
+        }
+      }
+    }
+  }
+}
