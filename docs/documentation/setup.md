@@ -12,9 +12,11 @@ Getting Started <../GETTING_STARTED>
 ## Installation
 
 - [Getting Started](../GETTING_STARTED.md) covers both release-download setup and source installation.
-- Direct downloads:
-  - [SWC-Studio v0.1.0 for macOS](https://github.com/Mio0v0/SWC-Studio/releases/download/v0.1.0/SWC-Studio.v0.1.0.macOS.zip)
-  - [SWC-Studio v0.1.0 for Windows](https://github.com/Mio0v0/SWC-Studio/releases/download/v0.1.0/SWC-Studio.v0.1.0.Windows.zip)
+
+Direct downloads:
+
+- macOS: [SWC-Studio v0.1.0 for macOS](https://github.com/Mio0v0/SWC-Studio/releases/download/v0.1.0/SWC-Studio.v0.1.0.macOS.zip)
+- Windows: [SWC-Studio v0.1.0 for Windows](https://github.com/Mio0v0/SWC-Studio/releases/download/v0.1.0/SWC-Studio.v0.1.0.Windows.zip)
 
 ## First Run
 
