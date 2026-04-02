@@ -130,6 +130,21 @@ html[data-theme="light"] body {
   line-height: 1.72;
 }
 
+.bd-article-container a,
+.bd-article-container a.reference.internal,
+.bd-article-container a.reference.external {
+  color: var(--pst-color-link);
+  text-decoration: underline;
+  text-underline-offset: 0.12em;
+  text-decoration-thickness: 0.08em;
+}
+
+.bd-article-container a:hover,
+.bd-article-container a.reference.internal:hover,
+.bd-article-container a.reference.external:hover {
+  color: var(--pst-color-link-hover);
+}
+
 .bd-content .sd-card,
 .bd-content .admonition,
 .highlight {
