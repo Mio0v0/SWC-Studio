@@ -9,9 +9,11 @@ There are two supported ways to get started:
 - download a packaged executable from the GitHub Releases page
 - install from source if you want the Python package, CLI, or a development setup
 
-GitHub Releases:
+Packaged downloads:
 
-- [https://github.com/Mio0v0/SWC-Studio/releases](https://github.com/Mio0v0/SWC-Studio/releases)
+- macOS: [SWC-Studio v0.1.0 for macOS](https://github.com/Mio0v0/SWC-Studio/releases/download/v0.1.0/SWC-Studio.v0.1.0.macOS.zip)
+- Windows: [SWC-Studio v0.1.0 for Windows](https://github.com/Mio0v0/SWC-Studio/releases/download/v0.1.0/SWC-Studio.v0.1.0.Windows.zip)
+- all releases: [https://github.com/Mio0v0/SWC-Studio/releases](https://github.com/Mio0v0/SWC-Studio/releases)
 
 We recommend installing `SWC-Studio` into a virtual environment managed by `venv`, `conda`, or `mamba`.
 
