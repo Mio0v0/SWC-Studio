@@ -37,11 +37,31 @@ Option 1: download a packaged executable from the GitHub Releases page and run t
 - Windows: [SWC-Studio v0.1.0 for Windows](https://github.com/Mio0v0/SWC-Studio/releases/download/v0.1.0/SWC-Studio.v0.1.0.Windows.zip)
 - Download the zip for your platform, extract it, and launch the included application
 
-Option 2: install from source:
+Option 2: install from source.
+
+macOS/Linux:
 
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
+pip install -e ".[gui]"
+swcstudio-gui
+```
+
+Windows PowerShell:
+
+```powershell
+py -m venv .venv
+.\.venv\Scripts\Activate.ps1
+pip install -e ".[gui]"
+swcstudio-gui
+```
+
+Windows cmd:
+
+```bat
+py -m venv .venv
+.venv\Scripts\activate.bat
 pip install -e ".[gui]"
 swcstudio-gui
 ```
