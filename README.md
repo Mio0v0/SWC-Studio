@@ -16,7 +16,7 @@ Both the CLI and GUI use the same core feature logic.
 
 ## Documentation
 
-Canonical project documentation lives on the docs website:
+Project documentation lives on the docs website:
 
 - Live docs: [https://mio0v0.github.io/SWC-Studio/](https://mio0v0.github.io/SWC-Studio/)
 - All releases: [https://github.com/Mio0v0/SWC-Studio/releases](https://github.com/Mio0v0/SWC-Studio/releases)
