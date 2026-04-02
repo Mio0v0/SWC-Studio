@@ -1,8 +1,17 @@
 # Getting Started
 
-This guide gets a first-time user from clone to usable CLI, GUI, and local docs.
+This guide gets a first-time user to a working SWC-Studio install, whether they want to run a packaged executable or install from source.
 
 ## Installing SWC-Studio
+
+There are two supported ways to get started:
+
+- download a packaged executable from the GitHub Releases page
+- install from source if you want the Python package, CLI, or a development setup
+
+GitHub Releases:
+
+- [https://github.com/Mio0v0/SWC-Studio/releases](https://github.com/Mio0v0/SWC-Studio/releases)
 
 We recommend installing `SWC-Studio` into a virtual environment managed by `venv`, `conda`, or `mamba`.
 
@@ -18,14 +27,27 @@ Recommended version:
 
 Using an isolated environment helps avoid dependency conflicts with other Python projects and makes it easier to reproduce CLI, GUI, and docs behavior on another machine.
 
-## 1. Clone and enter project
+## 1. Download a packaged executable or clone the repository
+
+### Option A: use a packaged executable
+
+1. Open the GitHub Releases page.
+2. Download the zip for your platform.
+3. Extract the zip.
+4. Launch the included application directly.
+
+Use this path if you only want to run SWC-Studio and do not need a Python environment.
+
+### Option B: install from source
+
+Clone and enter the project:
 
 ```bash
 git clone <your-repo-url>
 cd <repo-folder-name>
 ```
 
-## 2. Create environment and install
+## 2. Create environment and install from source
 
 If you are creating a new conda environment, specify the Python version during creation:
 
@@ -73,6 +95,10 @@ python -m pip install -e .
 
 ## 3. Verify installation
 
+If you are using the packaged executable, open the application from the extracted release folder and confirm it starts correctly.
+
+If you installed from source, verify the CLI and GUI commands:
+
 ```bash
 swcstudio --help
 swcstudio-gui --help
@@ -119,6 +145,13 @@ where swcstudio
 ```
 
 ## 4. Run the application
+
+Packaged executable:
+
+- extract the downloaded release zip
+- open the included application
+
+Source install:
 
 CLI examples (macOS/Linux path style):
 

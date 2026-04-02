@@ -11,10 +11,10 @@ Getting Started <../GETTING_STARTED>
 
 ## Installation
 
-- [Getting Started](../GETTING_STARTED.md) covers environment creation, package installation, and command verification.
+- [Getting Started](../GETTING_STARTED.md) covers both release-download setup and source installation.
 
 ## First Run
 
-- use the CLI to confirm the install
+- if using a release zip, extract it and open the included application
+- if using a source install, use the CLI to confirm the install
 - open the GUI to verify the desktop app starts correctly
-- build the docs locally if you need an offline copy
