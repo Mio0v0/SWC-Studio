@@ -68,8 +68,20 @@ swcstudio-gui
 
 CLI help:
 
+macOS/Linux:
+
 ```bash
 swcstudio --help
+# fallback:
+python -m swcstudio.cli.cli --help
+```
+
+Windows PowerShell or cmd:
+
+```powershell
+swcstudio --help
+# fallback:
+py -m swcstudio.cli.cli --help
 ```
 
 ## Core Capabilities
