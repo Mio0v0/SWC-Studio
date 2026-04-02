@@ -11,7 +11,7 @@ Getting Started <../GETTING_STARTED>
 
 ## Installation
 
-- [Getting Started](../GETTING_STARTED.md) covers both release-download setup and source installation.
+- <a href="../GETTING_STARTED.html">Getting Started</a> covers both release-download setup and source installation.
 
 ## First Run
 
