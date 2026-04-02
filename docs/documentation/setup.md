@@ -11,7 +11,7 @@ Getting Started <../GETTING_STARTED>
 
 ## Installation
 
-- [Getting Started](../GETTING_STARTED.md) covers both release-download setup and source installation.
+- Getting Started covers both release-download setup and source installation.
 
 Direct downloads:
 
