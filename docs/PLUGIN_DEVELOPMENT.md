@@ -34,7 +34,7 @@ Methods are registered to a feature key + method name.
 Example:
 
 ```python
-registrar.register_method("analysis.summary", "lab_summary", my_func)
+registrar.register_method("batch_processing.auto_typing", "lab_summary", my_func)
 ```
 
 If selected method exists as plugin method, it overrides same-name builtin method at runtime.

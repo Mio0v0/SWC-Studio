@@ -101,7 +101,7 @@ Examples:
 - `validation.index_clean`
 - `batch_processing.index_clean`
 - `batch_processing.simplification`
-- `analysis.summary`
+- `batch_processing.auto_typing`
 
 A plugin can register one or more methods under these keys and select them through config/CLI.
 

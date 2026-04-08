@@ -78,12 +78,6 @@ Morphology Editing
 .. automodule:: swcstudio.tools.morphology_editing.features.simplification
    :members:
 
-Analysis
-^^^^^^^^
-
-.. automodule:: swcstudio.tools.analysis.features.summary
-   :members:
-
 Plugin System Internals
 -----------------------
 

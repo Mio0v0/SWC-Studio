@@ -22,7 +22,7 @@ Inside `register_plugin`, bind your function to a feature key and method name:
 ```python
 def register_plugin(registrar):
     registrar.register_method(
-        "analysis.summary",                 # feature key in SWC-Studio
+        "batch_processing.auto_typing",     # feature key in SWC-Studio
         "lab_summary",                      # method name users select
         my_callable,                        # Python callable
     )
@@ -32,7 +32,7 @@ def register_plugin(registrar):
 
 Recommended starting point:
 
-- Copy: `examples/plugins/summary_plugin_template.py`
+- Create: `examples/plugins/my_lab_plugin.py`
 - New file: `examples/plugins/my_lab_plugin.py`
 
 The new file is your plugin module name (`my_lab_plugin`).
@@ -101,19 +101,21 @@ You should see your `plugin_id`.
 ### 5) Verify method registration under target feature
 
 ```bash
-swcstudio plugins list --feature-key analysis.summary
+swcstudio plugins list --feature-key batch_processing.auto_typing
 ```
 
 You should see your method name in `plugin_methods`.
 
-### 6) Run feature through plugin method
+### 6) Run feature through plugin method selection
 
-Example:
+Example library call:
 
 ```bash
 python - <<'PY'
-from swcstudio.api import analysis_summary_file
-print(analysis_summary_file("./data/single-soma.swc", config_overrides={"method": "lab_summary"}))
+from swcstudio.api import RuleBatchOptions, batch_auto_typing
+
+opts = RuleBatchOptions(soma=True, axon=True, apic=False, basal=True, rad=False, zip_output=False)
+print(batch_auto_typing("./data", options=opts, config_overrides={"method": "lab_summary"}))
 PY
 ```
 

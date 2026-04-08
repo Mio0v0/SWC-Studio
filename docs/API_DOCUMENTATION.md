@@ -144,14 +144,6 @@ These functions expose the shared geometry-editing core used by the app:
 - `geometry_insert_node_between(df, start_id, end_id, x, y, z, radius=None, type_id=None)`
 - `geometry_reindex_dataframe_with_map(df)`
 
-### Analysis
-
-#### `analysis_summary_file(path, *, config_overrides=None) -> dict`
-
-Basic morphology statistics.
-
-This remains available as a library/plugin target even though `Analysis` is no longer a user-facing GUI or CLI tool.
-
 ### Plugins
 
 #### `load_plugin_module(module_name, *, force_reload=False) -> dict`
@@ -267,12 +259,6 @@ These are callable if you want per-feature direct imports.
   - `simplify_file(...)`
   - shared simplification backend used by the current Geometry Editing tool
 
-## Analysis (Library / Plugin Only)
-
-- `swcstudio.tools.analysis.features.summary`
-  - `analyze_text(...)`
-  - `analyze_file(...)`
-
 ## 3) Validation Engine and Models
 
 Module: `swcstudio.tools.validation`
@@ -340,13 +326,9 @@ PLUGIN_MANIFEST = {
     "name": "Custom Summary Plugin",
     "version": "0.1.0",
     "api_version": "1",
-    "capabilities": ["analysis", "custom_metrics"],
+    "capabilities": ["batch_processing", "custom_methods"],
 }
 ```
-
-Starter template in this repo:
-
-- `examples/plugins/summary_plugin_template.py`
 
 ## Config Files
 

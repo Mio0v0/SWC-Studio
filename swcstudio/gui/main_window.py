@@ -290,17 +290,6 @@ class SWCMainWindow(QMainWindow):
         file_layout.addWidget(self._info_label, stretch=0)
         file_layout.addWidget(self._table_widget, stretch=1)
 
-        self._segment_label = QLabel(
-            "Segment Info\n\nLoad an SWC file and select nodes in dendrogram mode."
-        )
-        self._segment_label.setWordWrap(True)
-        self._segment_label.setStyleSheet("font-size: 13px; color: #555; padding: 8px;")
-        seg_panel = QWidget()
-        seg_layout = QVBoxLayout(seg_panel)
-        seg_layout.setContentsMargins(6, 6, 6, 6)
-        seg_layout.addWidget(self._segment_label)
-        seg_layout.addStretch()
-
         self._edit_log_text = QPlainTextEdit()
         self._edit_log_text.setReadOnly(True)
         self._edit_log_text.setStyleSheet(
@@ -313,7 +302,6 @@ class SWCMainWindow(QMainWindow):
 
         self._data_tabs.addTab(self._issue_panel, "Issues")
         self._data_tabs.addTab(file_panel, "SWC File")
-        self._data_tabs.addTab(seg_panel, "Segment Info")
         self._control_tabs = QTabWidget()
         self._control_tabs.setMinimumWidth(0)
         self._control_tabs.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Expanding)
@@ -537,13 +525,15 @@ class SWCMainWindow(QMainWindow):
         bold_font = self.font()
         bold_font.setBold(True)
         bold_fm = QFontMetrics(bold_font)
+        tool_btn_min_height = max(self.fontMetrics().height() + 18, 36)
         self._tool_menu_buttons: dict[str, QPushButton] = {}
         for label, key in tool_defs:
             btn = QPushButton(label)
             btn.setObjectName("toolMenuItem")
             btn.setCheckable(True)
             btn.setFlat(True)
-            btn.setMinimumWidth(max(normal_fm.horizontalAdvance(label), bold_fm.horizontalAdvance(label)) + 34)
+            btn.setMinimumWidth(max(normal_fm.horizontalAdvance(label), bold_fm.horizontalAdvance(label)) + 46)
+            btn.setMinimumHeight(tool_btn_min_height)
             btn.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
             btn.setCursor(Qt.PointingHandCursor)
             btn.clicked.connect(lambda _=False, k=key: self._activate_feature(k))
@@ -857,12 +847,14 @@ class SWCMainWindow(QMainWindow):
         bold_font = self.font()
         bold_font.setBold(True)
         bold_fm = QFontMetrics(bold_font)
-        max_feature_w = max(max(normal_fm.horizontalAdvance(lb), bold_fm.horizontalAdvance(lb)) for lb in labels) + 36
+        feature_btn_min_height = max(self.fontMetrics().height() + 18, 38)
+        max_feature_w = max(max(normal_fm.horizontalAdvance(lb), bold_fm.horizontalAdvance(lb)) for lb in labels) + 52
         for label in labels:
             btn = QPushButton(label)
             btn.setObjectName("featureBtn")
             btn.setCheckable(True)
             btn.setMinimumWidth(max_feature_w)
+            btn.setMinimumHeight(feature_btn_min_height)
             btn.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
             btn.clicked.connect(lambda _=False, lb=label: self._on_top_feature_button_clicked(lb))
             self._feature_row.addWidget(btn)

@@ -234,7 +234,7 @@ class DendrogramWidget(QWidget):
         view_group = QGroupBox("View")
         view_layout = QVBoxLayout(view_group)
 
-        self._compress_cb = QCheckBox("Compress x-axis (√)")
+        self._compress_cb = QCheckBox("Use compact horizontal spacing")
         self._compress_cb.setChecked(True)
         self._compress_cb.stateChanged.connect(self._on_compress_toggle)
         view_layout.addWidget(self._compress_cb)
