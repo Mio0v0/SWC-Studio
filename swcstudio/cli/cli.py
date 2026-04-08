@@ -14,18 +14,6 @@ from pathlib import Path
 from swcstudio.core.auto_typing import RuleBatchOptions
 from swcstudio.core.auto_typing_catalog import format_auto_typing_guide_text
 from swcstudio.core.config import merge_config
-from swcstudio.core.geometry_editing import (
-    delete_node as geometry_delete_node,
-    delete_subtree as geometry_delete_subtree,
-    disconnect_branch as geometry_disconnect_branch,
-    insert_node_between as geometry_insert_node_between,
-    label_for_type,
-    move_node_absolute as geometry_move_node_absolute,
-    move_subtree_absolute as geometry_move_subtree_absolute,
-    path_between_nodes,
-    reconnect_branch as geometry_reconnect_branch,
-    subtree_node_ids,
-)
 from swcstudio.core.swc_io import parse_swc_text_preserve_tokens, write_swc_to_bytes_preserve_tokens
 from swcstudio.core.issues import build_issue_list
 from swcstudio.plugins import (
@@ -41,6 +29,18 @@ from swcstudio.tools.batch_processing.features.index_clean import run_folder as 
 from swcstudio.tools.batch_processing.features.radii_cleaning import clean_path as batch_clean_radii_path
 from swcstudio.tools.batch_processing.features.simplification import run_folder as batch_simplify_folder
 from swcstudio.tools.batch_processing.features.swc_splitter import split_folder
+from swcstudio.tools.geometry_editing.features.operations import (
+    delete_node as geometry_delete_node,
+    delete_subtree as geometry_delete_subtree,
+    disconnect_branch as geometry_disconnect_branch,
+    insert_node_between as geometry_insert_node_between,
+    label_for_type,
+    move_node_absolute as geometry_move_node_absolute,
+    move_subtree_absolute as geometry_move_subtree_absolute,
+    path_between_nodes,
+    reconnect_branch as geometry_reconnect_branch,
+    subtree_node_ids,
+)
 from swcstudio.tools.morphology_editing.features.dendrogram_editing import (
     reassign_subtree_types_in_file,
 )
@@ -73,6 +73,56 @@ from swcstudio.core.reporting import (
 
 def _print_json(payload) -> None:
     print(json.dumps(payload, indent=2, sort_keys=True, default=str))
+
+
+def _summarize_batch_radii_output(out: dict) -> dict:
+    mode = str(out.get("mode", ""))
+    if mode == "file":
+        summary = {
+            k: v
+            for k, v in out.items()
+            if k not in {"dataframe", "bytes", "config_used", "change_details", "change_lines"}
+        }
+        summary["change_count"] = int(out.get("change_count", len(list(out.get("change_details", []) or []))))
+        return summary
+
+    if mode == "folder":
+        per_file_summary = []
+        for row in list(out.get("per_file", []) or []):
+            per_file_summary.append(
+                {
+                    "file": row.get("file"),
+                    "radius_changes": int(row.get("radius_changes", 0)),
+                    "change_count": int(row.get("change_count", 0)),
+                    "out_file": row.get("out_file"),
+                }
+            )
+        summary = {
+            k: v
+            for k, v in out.items()
+            if k not in {"config_used", "per_file"}
+        }
+        summary["per_file"] = per_file_summary
+        return summary
+
+    return {
+        k: v
+        for k, v in out.items()
+        if k not in {"dataframe", "bytes", "config_used", "change_details", "change_lines"}
+    }
+
+
+def _summarize_dendrogram_edit_output(out: dict) -> dict:
+    changed_node_ids = list(out.get("changed_node_ids", []) or [])
+    summary = {
+        k: v
+        for k, v in out.items()
+        if k not in {"bytes", "dataframe", "changed_node_ids"}
+    }
+    summary["changed_node_count"] = len(changed_node_ids)
+    if changed_node_ids:
+        summary["changed_node_id_preview"] = changed_node_ids[:10]
+    return summary
 
 
 def _feature_json_arg(sp: argparse.ArgumentParser) -> None:
@@ -296,19 +346,12 @@ def _write_geometry_output(
     input_path: Path,
     df,
     *,
-    out_path: str = "",
-    write_output: bool = False,
     operation_name: str,
-) -> str | None:
-    output_path: Path | None = None
-    if write_output:
-        output_path = (
-            resolve_requested_output_path_for_file(input_path, out_path)
-            if out_path
-            else operation_output_path_for_file(input_path, operation_name)
-        )
-        output_path.write_bytes(write_swc_to_bytes_preserve_tokens(df))
-    return str(output_path) if output_path else None
+) -> str:
+    output_path = operation_output_path_for_file(input_path, operation_name)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_bytes(write_swc_to_bytes_preserve_tokens(df))
+    return str(output_path)
 
 
 def _write_cli_operation_report(
@@ -322,6 +365,7 @@ def _write_cli_operation_report(
     new_df=None,
     id_map: dict[int, int] | None = None,
     change_rows: list[dict] | None = None,
+    output_dir: str | Path | None = None,
 ) -> str:
     return write_operation_report_for_file(
         source_path,
@@ -333,6 +377,7 @@ def _write_cli_operation_report(
         new_df=new_df,
         id_map=id_map,
         change_rows=change_rows,
+        output_dir=output_dir,
     )
 
 
@@ -395,8 +440,6 @@ def build_parser() -> argparse.ArgumentParser:
 
     val_auto_fix = val_sub.add_parser("auto-fix", help="Validate and sanitize one SWC file")
     val_auto_fix.add_argument("file", type=Path)
-    val_auto_fix.add_argument("--write", action="store_true", default=False)
-    val_auto_fix.add_argument("--out", default="", help="Output file path (used with --write)")
     _feature_json_arg(val_auto_fix)
 
     val_guide = val_sub.add_parser("rule-guide", help="Show validation rule guide (no file required)")
@@ -412,8 +455,6 @@ def build_parser() -> argparse.ArgumentParser:
     val_auto_label.add_argument("--axon", action="store_true", default=False)
     val_auto_label.add_argument("--apic", action="store_true", default=False)
     val_auto_label.add_argument("--basal", action="store_true", default=False)
-    val_auto_label.add_argument("--write", action="store_true", default=False)
-    val_auto_label.add_argument("--out", default="", help="Output file path (used with --write)")
     _feature_json_arg(val_auto_label)
 
     val_radii = val_sub.add_parser("radii-clean", help="Radii cleaning on a file or folder")
@@ -422,8 +463,6 @@ def build_parser() -> argparse.ArgumentParser:
 
     val_index = val_sub.add_parser("index-clean", help="Reorder and reindex one SWC file")
     val_index.add_argument("file", type=Path)
-    val_index.add_argument("--write", action="store_true", default=False)
-    val_index.add_argument("--out", default="", help="Output file path (used with --write)")
     _feature_json_arg(val_index)
 
     # ------------------------------ visualization
@@ -443,24 +482,18 @@ def build_parser() -> argparse.ArgumentParser:
     morph_d.add_argument("file", type=Path)
     morph_d.add_argument("--node-id", required=True, type=int)
     morph_d.add_argument("--new-type", required=True, type=int)
-    morph_d.add_argument("--write", action="store_true", default=False)
-    morph_d.add_argument("--out", default="", help="Output file path (used with --write)")
     _feature_json_arg(morph_d)
 
     morph_radius = morph_sub.add_parser("set-radius", help="Set one node radius in a file")
     morph_radius.add_argument("file", type=Path)
     morph_radius.add_argument("--node-id", required=True, type=int)
     morph_radius.add_argument("--radius", required=True, type=float)
-    morph_radius.add_argument("--write", action="store_true", default=False)
-    morph_radius.add_argument("--out", default="", help="Output file path (used with --write)")
     _feature_json_arg(morph_radius)
 
     morph_type = morph_sub.add_parser("set-type", help="Set one node type in a file")
     morph_type.add_argument("file", type=Path)
     morph_type.add_argument("--node-id", required=True, type=int)
     morph_type.add_argument("--new-type", required=True, type=int)
-    morph_type.add_argument("--write", action="store_true", default=False)
-    morph_type.add_argument("--out", default="", help="Output file path (used with --write)")
     _feature_json_arg(morph_type)
 
     # ------------------------------ geometry
@@ -469,8 +502,6 @@ def build_parser() -> argparse.ArgumentParser:
 
     geom_simplify = geom_sub.add_parser("simplify", help="Graph-aware SWC simplification")
     geom_simplify.add_argument("file", type=Path)
-    geom_simplify.add_argument("--write", action="store_true", default=False)
-    geom_simplify.add_argument("--out", default="", help="Output file path (used with --write)")
     _feature_json_arg(geom_simplify)
 
     geom_move_node = geom_sub.add_parser("move-node", help="Move one node to absolute XYZ")
@@ -479,45 +510,27 @@ def build_parser() -> argparse.ArgumentParser:
     geom_move_node.add_argument("--x", required=True, type=float)
     geom_move_node.add_argument("--y", required=True, type=float)
     geom_move_node.add_argument("--z", required=True, type=float)
-    geom_move_node.add_argument("--write", action="store_true", default=False)
-    geom_move_node.add_argument("--out", default="", help="Output file path (used with --write)")
-
     geom_move_subtree = geom_sub.add_parser("move-subtree", help="Move a subtree by setting its root to absolute XYZ")
     geom_move_subtree.add_argument("file", type=Path)
     geom_move_subtree.add_argument("--root-id", required=True, type=int)
     geom_move_subtree.add_argument("--x", required=True, type=float)
     geom_move_subtree.add_argument("--y", required=True, type=float)
     geom_move_subtree.add_argument("--z", required=True, type=float)
-    geom_move_subtree.add_argument("--write", action="store_true", default=False)
-    geom_move_subtree.add_argument("--out", default="", help="Output file path (used with --write)")
-
     geom_connect = geom_sub.add_parser("connect", help="Set end-node parent to start-node")
     geom_connect.add_argument("file", type=Path)
     geom_connect.add_argument("--start-id", required=True, type=int)
     geom_connect.add_argument("--end-id", required=True, type=int)
-    geom_connect.add_argument("--write", action="store_true", default=False)
-    geom_connect.add_argument("--out", default="", help="Output file path (used with --write)")
-
     geom_disconnect = geom_sub.add_parser("disconnect", help="Disconnect all edges along the path between start and end")
     geom_disconnect.add_argument("file", type=Path)
     geom_disconnect.add_argument("--start-id", required=True, type=int)
     geom_disconnect.add_argument("--end-id", required=True, type=int)
-    geom_disconnect.add_argument("--write", action="store_true", default=False)
-    geom_disconnect.add_argument("--out", default="", help="Output file path (used with --write)")
-
     geom_delete = geom_sub.add_parser("delete-node", help="Delete one node")
     geom_delete.add_argument("file", type=Path)
     geom_delete.add_argument("--node-id", required=True, type=int)
     geom_delete.add_argument("--reconnect-children", action="store_true", default=False)
-    geom_delete.add_argument("--write", action="store_true", default=False)
-    geom_delete.add_argument("--out", default="", help="Output file path (used with --write)")
-
     geom_delete_sub = geom_sub.add_parser("delete-subtree", help="Delete one subtree")
     geom_delete_sub.add_argument("file", type=Path)
     geom_delete_sub.add_argument("--root-id", required=True, type=int)
-    geom_delete_sub.add_argument("--write", action="store_true", default=False)
-    geom_delete_sub.add_argument("--out", default="", help="Output file path (used with --write)")
-
     geom_insert = geom_sub.add_parser("insert", help="Insert a node after start and optionally before end")
     geom_insert.add_argument("file", type=Path)
     geom_insert.add_argument("--start-id", required=True, type=int)
@@ -527,9 +540,6 @@ def build_parser() -> argparse.ArgumentParser:
     geom_insert.add_argument("--z", required=True, type=float)
     geom_insert.add_argument("--radius", type=float, default=None)
     geom_insert.add_argument("--type-id", type=int, default=None)
-    geom_insert.add_argument("--write", action="store_true", default=False)
-    geom_insert.add_argument("--out", default="", help="Output file path (used with --write)")
-
     # ------------------------------ plugins
     plugins = sub.add_parser("plugins", help="Plugin manager and registry inspection")
     plugins_sub = plugins.add_subparsers(dest="feature")
@@ -716,7 +726,7 @@ def main(argv: list[str] | None = None) -> int:
                 str(args.target),
                 config_overrides=_parse_config_overrides(args.config_json),
             )
-            _print_json(out)
+            _print_json(_summarize_batch_radii_output(out))
             if out.get("log_path"):
                 print(f"\nReport file: {out.get('log_path')}")
             return 0
@@ -818,8 +828,8 @@ def main(argv: list[str] | None = None) -> int:
             old_df = parse_swc_text_preserve_tokens(Path(args.file).read_text(encoding="utf-8", errors="ignore"))
             out = auto_fix_file(
                 str(args.file),
-                out_path=(args.out or None),
-                write_output=bool(args.write),
+                out_path=None,
+                write_output=True,
                 config_overrides=_parse_config_overrides(args.config_json),
             )
             report = out.get("report", {})
@@ -840,7 +850,7 @@ def main(argv: list[str] | None = None) -> int:
                     summary="Validated and sanitized one SWC file.",
                     details=[
                         f"Input: {args.file}",
-                        f"Output: {out.get('output_path') or '(not written)'}",
+                        f"Output: {out.get('output_path') or ''}",
                         f"Result count: {len(list(out.get('rows', []) or []))}",
                     ],
                     old_df=old_df,
@@ -881,8 +891,8 @@ def main(argv: list[str] | None = None) -> int:
                 str(args.file),
                 options=opts,
                 config_overrides=_parse_config_overrides(args.config_json),
-                output_path=(args.out or None),
-                write_output=bool(args.write),
+                output_path=None,
+                write_output=True,
                 write_log=False,
             )
             out_counts = dict(out.get("out_type_counts", {}) or {})
@@ -914,8 +924,8 @@ def main(argv: list[str] | None = None) -> int:
             old_df = parse_swc_text_preserve_tokens(Path(args.file).read_text(encoding="utf-8", errors="ignore"))
             out = validation_index_clean_file(
                 str(args.file),
-                out_path=(args.out or None),
-                write_output=bool(args.write),
+                out_path=None,
+                write_output=True,
                 write_report=False,
                 config_overrides=_parse_config_overrides(args.config_json),
             )
@@ -963,8 +973,8 @@ def main(argv: list[str] | None = None) -> int:
                 str(args.file),
                 node_id=int(args.node_id),
                 new_type=int(args.new_type),
-                out_path=(args.out or None),
-                write_output=bool(args.write),
+                out_path=None,
+                write_output=True,
                 config_overrides=_parse_config_overrides(args.config_json),
             )
             out["operation_log_path"] = _write_cli_operation_report(
@@ -973,10 +983,10 @@ def main(argv: list[str] | None = None) -> int:
                 title="Manual Label Edit",
                 summary="Applied labeling edits in Morphology Editing.",
                 details=[],
-                old_df=old_df,
-                new_df=out.get("dataframe"),
+                    old_df=old_df,
+                    new_df=out.get("dataframe"),
             )
-            out_print = {k: v for k, v in out.items() if k not in {"bytes", "dataframe"}}
+            out_print = _summarize_dendrogram_edit_output(out)
             _print_json(out_print)
             if out.get("operation_log_path"):
                 print(f"\nOperation report: {out.get('operation_log_path')}")
@@ -988,8 +998,8 @@ def main(argv: list[str] | None = None) -> int:
                 str(args.file),
                 node_id=int(args.node_id),
                 radius=float(args.radius),
-                out_path=(args.out or None),
-                write_output=bool(args.write),
+                out_path=None,
+                write_output=True,
                 config_overrides=_parse_config_overrides(args.config_json),
             )
             out["operation_log_path"] = _write_cli_operation_report(
@@ -1016,8 +1026,8 @@ def main(argv: list[str] | None = None) -> int:
                 str(args.file),
                 node_id=int(args.node_id),
                 new_type=int(args.new_type),
-                out_path=(args.out or None),
-                write_output=bool(args.write),
+                out_path=None,
+                write_output=True,
                 config_overrides=_parse_config_overrides(args.config_json),
             )
             out["operation_log_path"] = _write_cli_operation_report(
@@ -1044,8 +1054,8 @@ def main(argv: list[str] | None = None) -> int:
                 _print_simplification_rule_guide(cfg_effective)
                 out = simplify_morphology_file(
                     str(args.file),
-                    out_path=(args.out or None),
-                    write_output=bool(args.write),
+                    out_path=None,
+                    write_output=True,
                     write_report=False,
                     config_overrides=cfg_overrides,
                 )
@@ -1094,8 +1104,6 @@ def main(argv: list[str] | None = None) -> int:
                 output_path = _write_geometry_output(
                     file_path,
                     out_df,
-                    out_path=args.out,
-                    write_output=bool(args.write),
                     operation_name="geometry_move_node",
                 )
                 operation_log_path = _write_cli_operation_report(
@@ -1110,6 +1118,7 @@ def main(argv: list[str] | None = None) -> int:
                     ],
                     old_df=df,
                     new_df=out_df,
+                    output_dir=Path(output_path).parent,
                 )
                 _print_json({"operation": "move-node", "node_id": int(args.node_id), "output_path": output_path, "operation_log_path": operation_log_path})
                 return 0
@@ -1119,8 +1128,6 @@ def main(argv: list[str] | None = None) -> int:
                 output_path = _write_geometry_output(
                     file_path,
                     out_df,
-                    out_path=args.out,
-                    write_output=bool(args.write),
                     operation_name="geometry_move_subtree",
                 )
                 operation_log_path = _write_cli_operation_report(
@@ -1135,6 +1142,7 @@ def main(argv: list[str] | None = None) -> int:
                     ],
                     old_df=df,
                     new_df=out_df,
+                    output_dir=Path(output_path).parent,
                 )
                 _print_json({"operation": "move-subtree", "root_id": int(args.root_id), "output_path": output_path, "operation_log_path": operation_log_path})
                 return 0
@@ -1146,8 +1154,6 @@ def main(argv: list[str] | None = None) -> int:
                 output_path = _write_geometry_output(
                     file_path,
                     out_df,
-                    out_path=args.out,
-                    write_output=bool(args.write),
                     operation_name="geometry_connect",
                 )
                 operation_log_path = _write_cli_operation_report(
@@ -1164,6 +1170,7 @@ def main(argv: list[str] | None = None) -> int:
                     ],
                     old_df=df,
                     new_df=out_df,
+                    output_dir=Path(output_path).parent,
                 )
                 _print_json({
                     "operation": "connect",
@@ -1199,8 +1206,6 @@ def main(argv: list[str] | None = None) -> int:
                 output_path = _write_geometry_output(
                     file_path,
                     out_df,
-                    out_path=args.out,
-                    write_output=bool(args.write),
                     operation_name="geometry_disconnect",
                 )
                 operation_log_path = _write_cli_operation_report(
@@ -1219,6 +1224,7 @@ def main(argv: list[str] | None = None) -> int:
                     ],
                     old_df=df,
                     new_df=out_df,
+                    output_dir=Path(output_path).parent,
                 )
                 _print_json({
                     "operation": "disconnect",
@@ -1236,8 +1242,6 @@ def main(argv: list[str] | None = None) -> int:
                 output_path = _write_geometry_output(
                     file_path,
                     out_df,
-                    out_path=args.out,
-                    write_output=bool(args.write),
                     operation_name="geometry_delete_node",
                 )
                 operation_log_path = _write_cli_operation_report(
@@ -1254,6 +1258,7 @@ def main(argv: list[str] | None = None) -> int:
                     ],
                     old_df=df,
                     new_df=out_df,
+                    output_dir=Path(output_path).parent,
                 )
                 _print_json({
                     "operation": "delete-node",
@@ -1270,8 +1275,6 @@ def main(argv: list[str] | None = None) -> int:
                 output_path = _write_geometry_output(
                     file_path,
                     out_df,
-                    out_path=args.out,
-                    write_output=bool(args.write),
                     operation_name="geometry_delete_subtree",
                 )
                 operation_log_path = _write_cli_operation_report(
@@ -1286,6 +1289,7 @@ def main(argv: list[str] | None = None) -> int:
                     ],
                     old_df=df,
                     new_df=out_df,
+                    output_dir=Path(output_path).parent,
                 )
                 _print_json({
                     "operation": "delete-subtree",
@@ -1313,8 +1317,6 @@ def main(argv: list[str] | None = None) -> int:
                 output_path = _write_geometry_output(
                     file_path,
                     out_df,
-                    out_path=args.out,
-                    write_output=bool(args.write),
                     operation_name="geometry_insert",
                 )
                 operation_log_path = _write_cli_operation_report(
@@ -1340,6 +1342,7 @@ def main(argv: list[str] | None = None) -> int:
                     ],
                     old_df=df,
                     new_df=out_df,
+                    output_dir=Path(output_path).parent,
                 )
                 _print_json({
                     "operation": "insert",

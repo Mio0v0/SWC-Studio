@@ -61,7 +61,7 @@ So one SWC can raise:
 | `multiple_somas` | `Multiple somas found` | native | critical | Runs after temporary soma consolidation and fails if more than one soma anchor remains. | none | enabled/severity only | `Split` action |
 | `has_soma` | `Soma missing` | native | critical | Fails if no node has type `1`. | none | enabled/severity only | Manual Label Editing / Auto Label Editing |
 | `no_invalid_negative_types` | `Invalid negative types found` | native | critical | Fails if any node type is `< 0`. | none | enabled/severity only | Manual Label Editing |
-| `custom_types_defined` | `Custom types need definitions` | native | warning | Requires every used custom type (`>= 5`) to have a saved name and color. | none | enabled/severity only | Manual Label Editing |
+| `custom_types_defined` | `Custom types need definitions` | native | warning | Requires every used custom type (`>= 5`) to have a saved name and color. | none | enabled/severity only | `Define Custom Types` dialog |
 | `has_axon` | `Axon missing` | native | warning | Fails if no node has type `2`. | none | enabled/severity only | Manual Label Editing / Auto Label Editing |
 | `has_basal_dendrite` | `Basal dendrite missing` | native | warning | Fails if no node has type `3`. | none | enabled/severity only | Manual Label Editing / Auto Label Editing |
 | `has_apical_dendrite` | `Apical dendrite missing` | native | warning | Fails if no node has type `4`. | none | enabled/severity only | Manual Label Editing / Auto Label Editing |

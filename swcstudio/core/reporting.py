@@ -137,15 +137,18 @@ def resolve_requested_output_path_for_file(
 ) -> Path:
     src = Path(path)
     requested = Path(requested_output_path)
+    if requested.exists() and requested.is_dir():
+        return operation_output_path_for_file(src, "output", output_dir=requested)
     if requested.is_absolute():
         return requested
-    return output_dir_for_file(src) / requested.name
+    return requested
 
 
 def operation_report_path_for_file(
     path: str | Path,
     operation_name: str,
     *,
+    output_dir: str | Path | None = None,
     extension: str = ".txt",
     timestamp: str | None = None,
 ) -> Path:
@@ -153,7 +156,7 @@ def operation_report_path_for_file(
         path,
         operation_name,
         extension=extension,
-        output_dir=log_dir_for_file(path),
+        output_dir=output_dir if output_dir is not None else log_dir_for_file(path),
         timestamp=timestamp,
     )
 
@@ -846,12 +849,14 @@ def write_operation_report_for_file(
     id_map: dict[int, int] | None = None,
     change_rows: list[dict[str, Any]] | None = None,
     report_path: str | Path | None = None,
+    output_dir: str | Path | None = None,
     timestamp: str | None = None,
 ) -> str:
     src = Path(source_path)
     target = Path(report_path) if report_path is not None else operation_report_path_for_file(
         src,
         operation_name,
+        output_dir=output_dir,
         timestamp=timestamp,
     )
     text = format_operation_report_text(

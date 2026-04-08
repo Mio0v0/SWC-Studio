@@ -1,0 +1,32 @@
+SWC Session Report
+------------------
+Tool Version: SWC-Studio 0.1.0
+Source file: single-soma.swc
+Session started: 2026-04-08 16:03:36
+Session ended: 2026-04-08 16:03:36
+
+Label types:
+- 0: undefined
+- 1: soma
+- 2: axon
+- 3: basal dendrite
+- 4: apical dendrite
+
+Change Summary
+--------------
+Operation: Disconnect Branch
+Summary: Disconnected the path between 2 and 4.
+Affected nodes: 2
+- Start node ID: 2
+- End node ID: 4
+- Path nodes: 2, 3, 4
+- Disconnected child node IDs: 3, 4
+- Disconnected edges: 2 -> 3, 3 -> 4
+- New parent IDs on disconnected child nodes: -1
+- Node IDs preserved; no automatic renumbering.
++-----+----------+--------+-----------+-----------+
+| Seq | Time     | NodeID | OldParent | NewParent |
++-----+----------+--------+-----------+-----------+
+| 1   | 16:03:36 | 3      | 2         | -1        |
+| 2   | 16:03:36 | 4      | 3         | -1        |
++-----+----------+--------+-----------+-----------+

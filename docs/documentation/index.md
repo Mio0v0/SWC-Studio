@@ -1,6 +1,6 @@
-# Documentation
+# User Guide
 
-This is the main documentation hub for `SWC-Studio`.
+This section explains how to use `SWC-Studio` as it behaves today in the GUI, CLI, and shared backend.
 
 ```{toctree}
 :hidden:
@@ -9,38 +9,35 @@ This is the main documentation hub for `SWC-Studio`.
 setup
 workflows
 validation-and-repair
+custom-types-and-labels
 reports-and-outputs
-tutorials-and-guides
-integration-and-extension
-reference
 ```
 
 ## Start Here
 
-Begin with the setup and workflow pages if you are new to the project:
+If you are new to the project, read these pages first:
 
 - [Setup](setup.md)
 - [Workflows](workflows.md)
 - [Validation and Repair](validation-and-repair.md)
 
-## Core Usage
+## What the User Guide Covers
 
-The documentation is organized around the main ways people use the project:
+The guide is organized around the main user-facing behavior of the application:
 
-- installation and environment setup
-- GUI and CLI workflows
-- issue review, validation, and repair
-- output logs, reports, and saved artifacts
+- how files are loaded and inspected
+- how the issue-driven workflow works
+- how validation findings become repair suggestions
+- how custom labels persist across sessions
+- where outputs, saved copies, and logs are written
 
-## Tutorials and Guides
+## Current Workflow Model
 
-Focused walkthroughs and practical guides live under:
+`SWC-Studio` is not organized as separate GUI-only and CLI-only feature sets. The GUI and CLI call the same tool and core code paths, so the same validation logic, repair logic, and report builders are reused across interfaces.
 
-- [Tutorials and Guides](tutorials-and-guides.md)
+Use this section when you want to understand:
 
-## API and Extension
-
-Developer-facing material is grouped under:
-
-- [Integration and Extension](integration-and-extension.md)
-- [Reference](reference.md)
+- what happens when a file is opened in the GUI
+- how the issue list is built
+- which repair tools correspond to which issue categories
+- how CLI edit commands write outputs and logs

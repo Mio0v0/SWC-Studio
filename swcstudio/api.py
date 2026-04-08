@@ -36,6 +36,16 @@ from swcstudio.tools.batch_processing.features.radii_cleaning import (
 from swcstudio.tools.batch_processing.features.swc_splitter import (
     split_folder as batch_split_folder,
 )
+from swcstudio.tools.geometry_editing.features.operations import (
+    disconnect_branch as geometry_disconnect_branch,
+    delete_node as geometry_delete_node,
+    delete_subtree as geometry_delete_subtree,
+    insert_node_between as geometry_insert_node_between,
+    move_node_absolute as geometry_move_node_absolute,
+    move_subtree_absolute as geometry_move_subtree_absolute,
+    reconnect_branch as geometry_reconnect_branch,
+    reindex_dataframe_with_map as geometry_reindex_dataframe_with_map,
+)
 from swcstudio.tools.morphology_editing.features.dendrogram_editing import (
     reassign_subtree_types,
     reassign_subtree_types_in_file,
@@ -68,16 +78,6 @@ from swcstudio.tools.validation.features.run_checks import (
 from swcstudio.tools.visualization.features.mesh_editing import (
     build_mesh_from_file,
     build_mesh_from_text,
-)
-from swcstudio.core.geometry_editing import (
-    disconnect_branch as geometry_disconnect_branch,
-    delete_node as geometry_delete_node,
-    delete_subtree as geometry_delete_subtree,
-    insert_node_between as geometry_insert_node_between,
-    move_node_absolute as geometry_move_node_absolute,
-    move_subtree_absolute as geometry_move_subtree_absolute,
-    reconnect_branch as geometry_reconnect_branch,
-    reindex_dataframe_with_map as geometry_reindex_dataframe_with_map,
 )
 
 __all__ = [

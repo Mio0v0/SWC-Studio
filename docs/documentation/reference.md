@@ -1,29 +1,37 @@
 # Reference
 
-Reference pages collect the stable command, API, and module-level material.
+This section collects the stable command, API, rule, module, plugin, and architecture material.
 
 ```{toctree}
 :hidden:
 :maxdepth: 1
 
+CLI Reference <../CLI_REFERENCE>
+Checks And Issues Reference <../CHECKS_AND_ISSUES_REFERENCE>
+Validation Rules <../VALIDATION_RULES>
 API / Library Documentation <../API_DOCUMENTATION>
 Python API Reference <../PYTHON_API_REFERENCE>
 Module Reference <../MODULE_REFERENCE>
+Integration and Extension <integration-and-extension>
 ```
 
-## Library Surface
+## Command reference
 
-- [API / Library Documentation](../API_DOCUMENTATION.md) documents the Python integration surface.
+- [CLI Reference](../CLI_REFERENCE.md)
 
-## Generated References
+## Validation and issue reference
 
-- [Python API Reference](../PYTHON_API_REFERENCE.rst) contains generated API details.
-- [Module Reference](../MODULE_REFERENCE.rst) contains generated module-level reference pages.
+- [Checks And Issues Reference](../CHECKS_AND_ISSUES_REFERENCE.md)
+- [Validation Rules](../VALIDATION_RULES.md)
 
-## Site Navigation
+## Python and module reference
 
-Use the website navigation as the primary entrypoint for the documentation:
+- [API / Library Documentation](../API_DOCUMENTATION.md)
+- [Python API Reference](../PYTHON_API_REFERENCE.rst)
+- [Module Reference](../MODULE_REFERENCE.rst)
 
-- `Documentation` for user guides and references
-- `Tutorials` for walkthroughs
-- `About` for the project overview
+## Architecture and extension
+
+- [Integration and Extension](integration-and-extension.md)
+
+Use this section when you need exact parameters, extension hooks, package boundaries, or module-level details rather than guided workflow material.

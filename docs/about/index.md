@@ -4,23 +4,45 @@
 
 ## Overview
 
-`SWC-Studio` is designed for researchers and developers who need to inspect neuron reconstructions, identify structural or annotation problems, repair those problems, and run repeatable morphology-processing workflows from one shared backend.
+`SWC-Studio` is designed for researchers and developers who need to inspect neuronal reconstructions, identify structural or annotation problems, repair those problems, and run repeatable morphology-processing workflows from one shared backend.
 
-The project combines a desktop application, a command-line interface, and a Python package so the same core logic can support interactive review, scripted workflows, and larger integration work.
+The project combines:
+
+- a desktop GUI for issue-driven review and repair
+- a command-line interface for repeatable single-file and batch runs
+- a Python package for direct integration into scripts and downstream pipelines
 
 ## What the Project Includes
 
-`SWC-Studio` is organized around three connected interfaces:
+The codebase follows a four-layer structure:
 
-- a shared Python backend for parsing, validation, reporting, and processing
-- a CLI for repeatable batch jobs and single-file operations
-- a desktop GUI for issue-driven inspection and repair
+- `swcstudio/core`
+  - shared computational logic such as parsing, validation, issue construction, radii cleaning, auto labeling, geometry editing, simplification, configuration helpers, and reporting
+- `swcstudio/tools`
+  - task-oriented wrappers that expose those shared capabilities in domain-specific modules such as batch processing, validation, morphology editing, visualization, and geometry editing
+- `swcstudio/plugins`
+  - runtime extension hooks through the plugin contract
+- `swcstudio/cli` and `swcstudio/gui`
+  - interface wrappers that route user actions into the tool layer rather than implementing separate algorithmic behavior
 
-These interfaces use the same feature backend, which keeps behavior consistent across the app, terminal workflows, and library usage.
+This shared-core design is what keeps GUI, CLI, and Python behavior aligned.
 
-## Core Capabilities
+## Main Workflow Idea
 
-At a high level, the project supports five major tool areas:
+The GUI is built around an issue-driven repair loop:
+
+1. open an SWC file
+2. review the issue list
+3. let the selected issue route you to the matching repair tool
+4. apply a fix
+5. rerun validation
+6. save the updated file with logs
+
+The CLI and Python API expose the same underlying operations for scripted or batch use.
+
+## Core Capability Areas
+
+`SWC-Studio` currently organizes user-facing work into five tool areas:
 
 1. Batch Processing
 2. Validation
@@ -28,39 +50,24 @@ At a high level, the project supports five major tool areas:
 4. Morphology Editing
 5. Geometry Editing
 
-Current workflows include:
+Those tools cover:
 
-- splitting SWC files into soma-root trees
-- single-file and batch validation
-- rule-based auto typing
-- radii cleaning and outlier repair
+- issue checking and validation
 - index cleaning
-- simplification and geometry editing
-- manual editing for labels, radii, and topology-related fixes
-
-## Intended Workflow
-
-The main application flow is issue-driven.
-
-A typical session starts by opening one SWC file, running validation, clicking issues in the issue list, reviewing the detailed problem in the Inspector panel, letting the app route you to the related repair tool, and rerunning validation until the morphology is ready for export or downstream processing.
-
-This makes the GUI useful for focused repair work, while the CLI and Python interface support the same underlying operations in repeatable scripts and larger pipelines.
-
-## Who This Documentation Is For
-
-The documentation is written for three main audiences:
-
-- users running GUI or CLI workflows
-- developers extending features or understanding project structure
-- labs integrating the toolkit into broader Python or plugin-based workflows
+- manual and automatic label editing
+- manual and automatic radii editing
+- geometry editing
+- simplification
+- folder-level batch workflows
+- standardized logs and output folders
 
 ## Documentation Map
 
-The main documentation section is organized to help readers move from setup into practical use:
+The documentation is organized around the current application behavior:
 
-- `Setup` for installation and first run
-- `Workflows` for GUI and CLI usage
-- `Validation and Repair` for issue definitions and repair context
-- `Reports and Outputs` for generated artifacts and logs
-- `Tutorials and Guides` for focused walkthroughs
-- `Integration and Extension` and `Reference` for architecture, plugins, and API details
+- `User Guide`
+  - setup, issue-driven workflows, validation, custom types, outputs
+- `Tutorials`
+  - guided end-to-end examples for GUI and CLI usage
+- `Reference`
+  - command, rule, API, module, plugin, and architecture details

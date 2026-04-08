@@ -6,8 +6,9 @@ SWC-Studio Documentation
    :maxdepth: 2
 
    About <about/index>
-   Documentation <documentation/index>
+   User Guide <documentation/index>
    Tutorials <tutorials/index>
+   Reference <documentation/reference>
 
 .. raw:: html
 

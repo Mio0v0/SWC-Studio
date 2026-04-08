@@ -1,6 +1,6 @@
 # Integration and Extension
 
-This section collects developer-focused material for extending or integrating `SWC-Studio`.
+This page collects the developer-facing material for extending or integrating `SWC-Studio`.
 
 ```{toctree}
 :hidden:
@@ -11,14 +11,21 @@ Plugin Development <../PLUGIN_DEVELOPMENT>
 Architecture <../ARCHITECTURE>
 ```
 
-## Plugin Usage
+## Plugin usage
 
-- [Plugin Demonstration](../PLUGIN_DEMONSTRATION.md) shows the plugin model in practice.
+- [Plugin Demonstration](../PLUGIN_DEMONSTRATION.md)
 
-## Plugin Development
+## Plugin development
 
-- [Plugin Development](../PLUGIN_DEVELOPMENT.md) documents the extension workflow for new plugin packages.
+- [Plugin Development](../PLUGIN_DEVELOPMENT.md)
 
 ## Architecture
 
-- [Architecture](../ARCHITECTURE.md) explains how the shared backend is organized.
+- [Architecture](../ARCHITECTURE.md)
+
+The architecture document is especially important if you are adding features. Current design intent is:
+
+- algorithms live in `swcstudio/core`
+- task-facing wrappers live in `swcstudio/tools`
+- plugins extend tool behavior through the plugin layer
+- GUI and CLI remain thin interface wrappers over the tool layer

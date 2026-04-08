@@ -1,128 +1,114 @@
 # GUI Tutorial
 
-This tutorial walks through the main desktop workflow for reviewing one SWC file, identifying issues, applying repairs, and saving the updated result.
+This tutorial walks through the main desktop workflow for reviewing one SWC file, letting issues guide the repair process, and saving the result.
 
-## Before You Start
+## Before you start
 
 ```{note}
-You will need a working GUI install and at least one SWC file to open. If the GUI is not installed yet, follow [Getting Started](../GETTING_STARTED.md).
+You need a working GUI install and at least one SWC file. If needed, start with [Getting Started](../GETTING_STARTED.md).
 ```
 
-You can start the application with:
+Start the application:
 
 ```bash
 swcstudio-gui
 ```
 
-Module-mode fallback:
+## Step 1: Open a file
 
-```bash
-python -m swcstudio.gui.main
-```
+Open an SWC file from the `File` menu.
 
-## Step 1: Open the GUI and Load an SWC File
+After loading:
 
-Launch the application and open a morphology file from the File menu.
+- the file appears in the central workspace
+- the left-side `Issues` and `SWC File` panels are populated for the active document
+- validation is triggered automatically for a normal editable document when no prior validation report exists
 
-At this point, the central canvas should show the loaded reconstruction, while the side panels expose issue, file, and inspector information for the active document.
+## Step 2: Review the issue list
 
-![File menu used to open an SWC file](../_static/tutorial-gui-step1-1.png)
+The `Issues` panel is the center of the desktop workflow.
 
-*Step 1-1: Open the `File` menu and choose the option to load an SWC file.*
+It can include:
 
-![GUI after opening one SWC file](../_static/tutorial-gui-step1-2.png)
+- validation findings
+- blocked prerequisite summaries
+- suspicious radii suggestions
+- likely wrong-label suggestions
+- a simplification suggestion
 
-*Step 1-2: The SWC file is loaded into the canvas and the side panels are populated for the active document.*
+This means the panel acts as a guided repair queue, not only as a validation dump.
 
-## Step 2: Run Validation
+## Step 3: Select one issue
 
-Switch to the `Validation` tool and run validation on the currently loaded file.
+When you click an issue, the GUI:
 
-Validation is the recommended first action because it gives you a structured list of issues before you make edits.
+1. focuses the relevant nodes in the active document
+2. updates the inspector with the issue description and suggested solution
+3. routes the right-side controls to the matching repair tool when appropriate
 
-Look for:
+Examples:
 
-- structural problems in the tree
-- index and parent-child ordering issues
-- suspicious radii values
-- labeling inconsistencies
+- index issues route to `Validation -> Index Clean`
+- label issues route to `Morphology Editing`
+- radii issues route to radii editing controls
+- topology issues route to geometry editing
 
-```{note}
-The GUI is designed around an issue-driven repair loop. Run validation first, then let the issue list guide the next tool you use.
-```
+## Step 4: Apply a repair
 
-![Validation report and issue list in the GUI](../_static/tutorial-gui-step2-1.png)
+Use the routed tool to apply the fix.
 
-*Step 2-1: Review the validation report and issue list before starting repairs.*
+Common repair paths:
 
-## Step 3: Review the Issue Navigator
+- `Index Clean`
+- `Manual Label Editing`
+- `Auto Label Editing`
+- `Manual Radii Editing`
+- `Auto Radii Editing`
+- `Geometry Editing`
+- `Simplification`
 
-Use the left-side issue list to inspect the current file one issue at a time.
+## Step 5: Define custom types when needed
 
-When you select an issue, the application should:
+If your file uses custom SWC type IDs, define them from the dendrogram editing controls with `Add/Edit Types`.
 
-- focus the relevant nodes in the canvas
-- open the issue details in the Inspector panel
-- switch to the tool that best matches the repair automatically
+Each custom type can store:
 
-Typical follow-up tools include:
+- type ID
+- name
+- color
+- notes
 
-- `Index Clean` for ordering and indexing problems
-- `Manual Label Editing` or `Auto Label Editing` for neurite type issues
-- `Manual Radii Editing` or `Auto Radii Editing` for radius cleanup
-- `Geometry Editing` for topology and structure changes
+These definitions persist across restarts, so once they are saved they remain available the next time you open the app.
 
-## Step 4: Apply Repairs in the Matching Tool
+## Step 6: Rerun validation
 
-After selecting an issue, review the detailed problem shown in the Inspector and use the automatically selected repair tool to apply the appropriate fix.
+After a repair, rerun validation and review the refreshed issue list.
 
-Common patterns:
+This is the main loop:
 
-1. Use `Index Clean` to correct broken or non-sequential indexing.
-2. Use label editing tools to repair axon, basal, or apical assignments.
-3. Use radii editing tools to correct suspicious radius values.
-4. Use geometry editing to connect, disconnect, move, insert, or remove nodes when structural repair is required.
-
-![Auto radii cleaning running in the GUI](../_static/tutorial-gui-step4-1.png)
-
-*Step 4-1: Run automatic radii cleaning from the matching repair tool in the Inspector area.*
-
-## Step 5: Rerun Validation
-
-After making a change, rerun validation to confirm that the issue is resolved and to see whether follow-up issues remain.
-
-This feedback loop is the core of the desktop workflow:
-
-1. validate
-2. inspect the issue
-3. repair in the relevant feature
+1. inspect
+2. route
+3. repair
 4. validate again
 
 Continue until the important issues are resolved or reduced to acceptable warnings for your workflow.
 
-## Step 6: Save the Cleaned SWC
+## Step 7: Save and review outputs
 
-Once the file is in a usable state, save the updated SWC or close the tab to trigger the session save flow.
+Save the document or close the tab.
 
-The GUI can also write session logs and output files into the project’s report/output structure.
+The GUI writes:
 
-![Saving the changed SWC file in the GUI](../_static/tutorial-gui-step6-1.png)
+- a saved SWC copy
+- a session log
 
-*Step 6-1: Save the changed SWC file so the updated result and matching log are written into the output folder.*
+Both are written into the source file's `*_swc_studio_output` directory.
 
-## What You Learned
+The shared report layer can include custom label legends in those logs when custom type definitions exist.
 
-By the end of this tutorial, you should be able to:
-
-- open and inspect one SWC file in the GUI
-- run validation and interpret the issue list
-- use the Issue Navigator to open issue details in the Inspector
-- move between repair tools based on the active issue
-- rerun validation after edits
-- save the cleaned result and review generated outputs
-
-## Related Pages
+## Related pages
 
 - [GUI Workflow Guide](../GUI_WORKFLOW.md)
+- [Custom Types and Labels](../documentation/custom-types-and-labels.md)
 - [Checks And Issues Reference](../CHECKS_AND_ISSUES_REFERENCE.md)
 - [Logs And Reports](../LOGS_AND_REPORTS.md)

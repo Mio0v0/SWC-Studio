@@ -1,18 +1,24 @@
 # GUI Workflow Guide
 
-This page explains the current GUI structure and the intended issue-driven repair workflow.
+This page explains the current desktop workflow and layout.
 
 ## Layout model
 
 The GUI uses a studio-style layout with shared backend logic:
 
-- top in-app bar: file/edit/view/window/help menus + tool and feature selectors
-- center canvas: active SWC visualization/editor tabs
-- left panel: Issue Navigator / SWC File / Segment Info
-- right panel: Inspector (issue detail on top, active tool controls below)
-- bottom panel: log output/events
+- top bar
+  - menus, tool buttons, and feature buttons
+- center workspace
+  - open SWC document tabs and the main visualization/editor area
+- left panel
+  - `Issues`
+  - `SWC File`
+- right inspector
+  - issue details and active tool controls
+- bottom area
+  - transient status and event output
 
-The center canvas is the dominant workspace and updates based on current tool/feature.
+The center workspace stays focused on the active document. The side panels change as the selected issue or active tool changes.
 
 ## Tool and feature switching
 
@@ -24,83 +30,101 @@ Top-level tools:
 - Morphology Editing
 - Geometry Editing
 
-When a tool is active, feature buttons are shown for that tool.
-The selected feature controls what appears in the lower Inspector area.
+Current feature mapping:
 
-### Feature mapping in GUI
+- Batch Processing
+  - Split
+  - Validation
+  - Auto Label Editing
+  - Radii Cleaning
+  - Simplification
+  - Index Clean
+- Validation
+  - Validation
+  - Index Clean
+- Visualization
+  - View Controls
+- Morphology Editing
+  - Manual Label Editing
+  - Auto Label Editing
+  - Manual Radii Editing
+  - Auto Radii Editing
+- Geometry Editing
+  - Geometry Editing
+  - Simplification
 
-- Batch Processing: Split, Validation, Auto Label Editing, Radii Cleaning, Simplification, Index Clean
-- Validation: Validation, Index Clean
-- Visualization: View Controls
-- Morphology Editing: Manual Label Editing, Auto Label Editing, Manual Radii Editing, Auto Radii Editing
-- Geometry Editing: Geometry Editing, Simplification
+## What happens when a file is opened
 
-## Document/canvas behavior
+When you open an SWC file:
 
-- Multiple SWC files can be open in separate canvas tabs.
-- Closing a changed tab triggers save/discard flow and session logging.
+1. the file is loaded into a document tab
+2. the active tool panels are synchronized to that document
+3. validation is run automatically for a normal editable document when no validation report exists yet
+4. the resulting report is converted into the shared issue list
 
-## Recommended GUI usage sequence
+That automatic validation step is why the GUI can immediately present an issue-oriented workflow after a file is loaded.
 
-1. Open an SWC file from the File menu.
-2. Run **Validation** and review the Issue Navigator on the left.
-3. Click an issue to focus the affected nodes, open the issue details in the Inspector panel, and jump to the matching repair feature automatically.
-4. Fix the issue in the suggested feature, such as **Index Clean**, **Manual Label Editing**, **Auto Label Editing**, **Manual Radii Editing**, **Auto Radii Editing**, or **Geometry Editing**.
-5. Rerun validation and continue until the issue list is cleared or reduced to acceptable warnings.
-6. Save the cleaned SWC or close the tab to write the session log and saved copy into the file output folder.
+## Issue-driven repair flow
 
-This is the intended desktop workflow:
+The intended desktop loop is:
 
-- validation surfaces structural and annotation problems
-- the Issue Navigator shows what needs attention
-- clicking an issue opens its detailed problem summary in the Inspector
-- the app directs you to the corresponding fix tool automatically
-- once the issues are resolved, the SWC is ready for downstream work
+1. open an SWC file
+2. review the `Issues` panel
+3. click one issue
+4. inspect the problem and suggested action in the right inspector
+5. let the app route you to the matching repair tool
+6. apply the repair
+7. rerun validation
+8. save or close the document to write logs and outputs
 
-## Validation in GUI
+### What the issue list includes
 
-Validation panel supports:
+The issue list can include:
 
-- Rule Guide button (manual display; no forced popup)
-- Run Validation
-- Index Clean as a separate Validation feature
-- results table with status/label
-- report export controls
+- validation findings
+- blocked prerequisite summaries
+- suspicious radii suggestions
+- likely wrong-label suggestions
+- a simplification suggestion
 
-Validation uses the same backend as CLI (`swcstudio.tools.validation` + core engine).
+### How issue routing behaves
 
-For the full check and issue matrix, use:
+Typical routing behavior:
 
-- [Checks And Issues Reference](CHECKS_AND_ISSUES_REFERENCE.md)
+- index issues
+  - `Validation -> Index Clean`
+- label issues
+  - `Morphology Editing`
+- radii issues
+  - `Manual Radii Editing` or `Auto Radii Editing`
+- topology and geometry issues
+  - `Geometry Editing`
 
-## Auto Typing in GUI
+Some checks use popup-only actions. For example, if a file contains custom type IDs that are not yet defined, the GUI can open the custom type definition dialog rather than only switching tabs.
 
-- Batch mode: folder-level auto label editing
-- Validation mode: single-file auto label editing
-- JSON editor for rule parameters
-- shared backend logic (same as CLI/API)
-- branch-consistent labeling from the soma boundary
-- one primary axon winner and one primary apical winner when enabled
-- primary subtree inheritance, so a labeled subtree keeps one neurite class downstream
-- far-from-soma penalty against unlikely basal assignments
+## Custom types in the GUI
 
-## Radii Editing in GUI
+Custom types are managed from dendrogram editing with `Add/Edit Types`.
 
-- shared backend for Batch + Validation + CLI
-- `Manual Radii Editing` supports one-node edits with type-level statistics
-- `Auto Radii Editing` supports distribution-based cleanup
-- behavior configurable via `radii_cleaning.json`
-- histogram/statistics visualization for currently loaded file
+Users can define:
 
-## Simplification in GUI
+- type ID
+- name
+- color
+- notes
 
-- RDP-based simplification lives in `Geometry Editing -> Simplification`
-- `Run` applies directly to the current file
-- updates are recorded in the same session log format as the other editing tools
+These definitions are written to the persistent custom type registry, so they remain available after closing and reopening the application.
 
-## Logs and status
+See [Custom Types and Labels](documentation/custom-types-and-labels.md) for the exact storage behavior and log integration.
 
-- transient status: status bar and bottom log
-- persistent logs: text report files written by the shared reporting layer
+## Saving, logs, and outputs
 
-See [LOGS_AND_REPORTS](LOGS_AND_REPORTS.md) for full report naming conventions.
+The GUI writes outputs through the shared reporting layer.
+
+Important current behavior:
+
+- saved copies and session logs go into the source file's `*_swc_studio_output` directory
+- logs use the same shared formatting conventions as CLI operation reports
+- custom type legends can appear in generated logs when custom definitions exist
+
+See [Logs And Reports](LOGS_AND_REPORTS.md) for the naming conventions.

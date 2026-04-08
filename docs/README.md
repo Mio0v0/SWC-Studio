@@ -1,36 +1,59 @@
 # Docs Overview
 
-The published documentation site is organized into three top-level sections:
+The published HTML site is organized into four top-level sections:
 
 - `About`
-- `Documentation`
+- `User Guide`
 - `Tutorials`
+- `Reference`
 
-The main project material is grouped under `Documentation`.
+This structure is intentional:
+
+- `About` explains what the project is and how the architecture is organized.
+- `User Guide` explains the main workflows and output behavior.
+- `Tutorials` contains step-by-step walkthroughs.
+- `Reference` collects the stable command, API, rule, module, and extension material.
 
 ## Recommended reading order
 
-Start with these pages:
+If you are new to the project, start here:
 
-- [Getting Started](GETTING_STARTED.md)
-- [GUI Workflow Guide](GUI_WORKFLOW.md)
-- [CLI Reference](CLI_REFERENCE.md)
-- [Checks And Issues Reference](CHECKS_AND_ISSUES_REFERENCE.md)
-- [Logs And Reports](LOGS_AND_REPORTS.md)
+1. [Getting Started](GETTING_STARTED.md)
+2. [User Guide](documentation/index.md)
+3. [GUI Tutorial](tutorials/gui-tutorial.md)
+4. [CLI Tutorial](tutorials/cli-tutorial.md)
+5. [Logs And Reports](LOGS_AND_REPORTS.md)
 
-## Documentation structure
+## User Guide structure
+
+The `User Guide` section is organized around how the software is actually used:
 
 - `Setup`
-  - install, run, first verification
+  - installation, first run, verification
 - `Workflows`
-  - GUI and CLI operation
+  - GUI and CLI usage, issue-driven repair, tool routing
 - `Validation and Repair`
-  - issue definitions, rules, repair context
+  - what creates issues, how repairs are suggested, where the check details live
+- `Custom Types and Labels`
+  - persistent custom labels, dendrogram editing, saved metadata, log behavior
 - `Reports and Outputs`
-  - logs, reports, and saved outputs
-- `Tutorials and Guides`
-  - focused walkthroughs
-- `Integration and Extension`
-  - plugins and architecture
-- `Reference`
-  - API and generated module documentation
+  - output folders, session logs, operation logs, saved copies
+
+## Tutorials structure
+
+The `Tutorials` section contains guided workflows:
+
+- GUI walkthrough
+- CLI walkthrough
+- focused feature tutorials such as radii cleaning and simplification
+
+## Reference structure
+
+The `Reference` section collects:
+
+- CLI reference
+- validation rule and issue references
+- Python/API documentation
+- module reference
+- plugin development material
+- architecture notes

@@ -56,7 +56,7 @@ from swcstudio.core.issues import (
     issues_from_validation_report,
 )
 from swcstudio.core.custom_types import save_custom_type_definitions
-from swcstudio.core.geometry_editing import (
+from swcstudio.tools.geometry_editing.features.operations import (
     delete_node as geometry_delete_node,
     delete_subtree as geometry_delete_subtree,
     disconnect_branch,
@@ -67,6 +67,10 @@ from swcstudio.core.geometry_editing import (
     subtree_node_ids,
 )
 from swcstudio.core.radii_cleaning import radii_stats_by_type
+from swcstudio.core.auto_typing_results import (
+    auto_typing_result_to_dataframe as auto_label_result_to_dataframe,
+    merge_labeled_types_only as auto_label_merge_types_only,
+)
 from swcstudio.core.reporting import (
     auto_typing_log_path_for_file,
     correction_summary_log_path_for_file,
@@ -83,12 +87,7 @@ from swcstudio.core.reporting import (
 from swcstudio.core.swc_io import parse_swc_text_preserve_tokens, write_swc_to_bytes_preserve_tokens
 from swcstudio.core.validation_engine import consolidate_complex_somas_array
 from swcstudio.tools.morphology_editing.features.simplification import simplify_dataframe
-from swcstudio.tools.validation.features.auto_typing import (
-    RuleBatchOptions,
-    merge_types_only as auto_label_merge_types_only,
-    result_to_dataframe as auto_label_result_to_dataframe,
-    run_file as run_validation_auto_typing_file,
-)
+from swcstudio.tools.validation.features.auto_typing import RuleBatchOptions, run_file as run_validation_auto_typing_file
 
 
 @dataclass

@@ -1,10 +1,6 @@
 # Tutorials
 
-This section collects guided, task-focused walkthroughs for the main ways people use `SWC-Studio`.
-
-## Overview
-
-The tutorials are organized by interface so readers can choose the workflow that matches how they work:
+This section contains guided walkthroughs for the current GUI and CLI workflows.
 
 ```{toctree}
 :hidden:
@@ -12,25 +8,28 @@ The tutorials are organized by interface so readers can choose the workflow that
 
 gui-tutorial
 cli-tutorial
+../TOOL_TUTORIALS
+../RADII_CLEANING_TUTORIAL
+../SMART_DECIMATION_TUTORIAL
 ```
 
-## Tutorial Paths
+## Start here
+
+Use these pages when you want a step-by-step path rather than a reference page.
 
 - [GUI Tutorial](gui-tutorial.md)
-  - open an SWC file, run validation, inspect issues, apply repairs, and save results
+  - open a file, inspect issues, apply repairs, rerun validation, save results
 - [CLI Tutorial](cli-tutorial.md)
-  - run the core terminal commands for inspection, validation, cleanup, and batch workflows
+  - inspect one file, run validation, apply edits, and review saved outputs
 
-## Recommended Order
+## Focused feature tutorials
 
-If you are new to the project:
+- [CLI Task Guide](../TOOL_TUTORIALS.md)
+- [Radii Cleaning Tutorial](../RADII_CLEANING_TUTORIAL.md)
+- [Simplification Tutorial](../SMART_DECIMATION_TUTORIAL.md)
 
-1. Start with the [GUI Tutorial](gui-tutorial.md) to understand the issue-driven workflow.
-2. Continue with the [CLI Tutorial](cli-tutorial.md) to learn the command surface for repeatable runs.
+## Related reference material
 
-## Related Documentation
-
-- [Getting Started](../GETTING_STARTED.md)
-- [GUI Workflow Guide](../GUI_WORKFLOW.md)
 - [CLI Reference](../CLI_REFERENCE.md)
 - [Checks And Issues Reference](../CHECKS_AND_ISSUES_REFERENCE.md)
+- [Logs And Reports](../LOGS_AND_REPORTS.md)

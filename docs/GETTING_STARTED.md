@@ -1,57 +1,46 @@
 # Getting Started
 
-This guide gets a first-time user to a working SWC-Studio install, whether they want to run a packaged executable or install from source.
+This guide gets a new user to a working `SWC-Studio` install and a first successful run.
 
-## Installing SWC-Studio
+## Installation paths
 
-There are two supported ways to get started:
+There are two supported ways to start:
 
-- download a packaged executable from the GitHub Releases page
+- use a packaged desktop release from GitHub Releases
 - install from source if you want the Python package, CLI, or a development setup
 
-Packaged downloads:
+## Supported Python versions
 
-- macOS: [SWC-Studio v0.1.0 for macOS](https://github.com/Mio0v0/SWC-Studio/releases/download/v0.1.0/SWC-Studio.v0.1.0.macOS.zip)
-- Windows: [SWC-Studio v0.1.0 for Windows](https://github.com/Mio0v0/SWC-Studio/releases/download/v0.1.0/SWC-Studio.v0.1.0.Windows.zip)
-- all releases: [https://github.com/Mio0v0/SWC-Studio/releases](https://github.com/Mio0v0/SWC-Studio/releases)
-
-We recommend installing `SWC-Studio` into a virtual environment managed by `venv`, `conda`, or `mamba`.
-
-Supported Python versions for this project are:
+Source installs currently support:
 
 - Python 3.10
 - Python 3.11
 - Python 3.12
 
-Recommended version:
+Python 3.11 is the safest default for most users.
 
-- Python 3.11 is the safest default for most users
+## Packaged desktop release
 
-Using an isolated environment helps avoid dependency conflicts with other Python projects and makes it easier to reproduce CLI, GUI, and docs behavior on another machine.
+Use this path if you only need the desktop application:
 
-## 1. Download a packaged executable or clone the repository
+1. download the release archive for your platform
+2. extract it
+3. launch the included application
 
-### Option A: use a packaged executable
+Release page:
 
-1. Open the GitHub Releases page.
-2. Download the zip for your platform.
-3. Extract the zip.
-4. Launch the included application directly.
+- <https://github.com/Mio0v0/SWC-Studio/releases>
 
-Use this path if you only want to run SWC-Studio and do not need a Python environment.
+## Source install
 
-### Option B: install from source
-
-Clone and enter the project:
+Clone the repository:
 
 ```bash
 git clone <your-repo-url>
 cd <repo-folder-name>
 ```
 
-## 2. Create environment and install from source
-
-If you are creating a new conda environment, specify the Python version during creation:
+### Conda
 
 ```bash
 conda create -n swc-studio python=3.11 -y
@@ -60,9 +49,7 @@ python -m pip install --upgrade pip
 pip install -e ".[gui]"
 ```
 
-If you prefer `venv`, use one of the following:
-
-macOS/Linux (GUI + CLI):
+### venv on macOS or Linux
 
 ```bash
 python3 -m venv .venv
@@ -71,7 +58,7 @@ python -m pip install --upgrade pip
 pip install -e ".[gui]"
 ```
 
-Windows PowerShell (GUI + CLI):
+### venv on Windows PowerShell
 
 ```powershell
 py -m venv .venv
@@ -80,148 +67,84 @@ python -m pip install --upgrade pip
 pip install -e ".[gui]"
 ```
 
-Windows cmd (GUI + CLI):
-
-```bat
-py -m venv .venv
-.venv\Scripts\activate.bat
-python -m pip install --upgrade pip
-pip install -e ".[gui]"
-```
-
-CLI-only install (all OS, with venv active):
+### CLI-only install
 
 ```bash
 python -m pip install -e .
 ```
 
-## 3. Verify installation
+## Verify installation
 
-If you are using the packaged executable, open the application from the extracted release folder and confirm it starts correctly.
-
-If you installed from source, verify the CLI and GUI commands:
+For a source install:
 
 ```bash
 swcstudio --help
 swcstudio-gui --help
 ```
 
-If `swcstudio` command is not found, use module mode:
-
-macOS/Linux:
+If the console script is not on your path, use module mode:
 
 ```bash
 python -m swcstudio.cli.cli --help
-```
-
-Windows PowerShell/cmd:
-
-```powershell
-py -m swcstudio.cli.cli --help
-```
-
-If you need to verify active environment:
-
-macOS/Linux:
-
-```bash
-echo "$VIRTUAL_ENV"
-which python
-which swcstudio
-```
-
-Windows PowerShell:
-
-```powershell
-echo $env:VIRTUAL_ENV
-Get-Command python
-Get-Command swcstudio
-```
-
-Windows cmd:
-
-```bat
-echo %VIRTUAL_ENV%
-where python
-where swcstudio
-```
-
-## 4. Run the application
-
-Packaged executable:
-
-- extract the downloaded release zip
-- open the included application
-
-Source install:
-
-CLI examples (macOS/Linux path style):
-
-```bash
-swcstudio split ./data
-swcstudio check ./data/single-soma.swc
-swcstudio validate ./data/single-soma.swc
-swcstudio auto-label ./data/single-soma.swc --write
-swcstudio set-type ./data/single-soma.swc --node-id 14169 --new-type 3 --write
-swcstudio simplify ./data/single-soma.swc --write
-swcstudio connect ./data/single-soma.swc --start-id 10 --end-id 22 --write
-```
-
-CLI examples (Windows path style):
-
-```powershell
-swcstudio split .\data
-swcstudio check .\data\single-soma.swc
-swcstudio validate .\data\single-soma.swc
-swcstudio auto-label .\data\single-soma.swc --write
-swcstudio set-type .\data\single-soma.swc --node-id 14169 --new-type 3 --write
-swcstudio simplify .\data\single-soma.swc --write
-swcstudio connect .\data\single-soma.swc --start-id 10 --end-id 22 --write
-```
-
-GUI:
-
-```bash
-swcstudio-gui
-# or module mode:
 python -m swcstudio.gui.main
 ```
 
-Windows module-mode fallback:
+## First CLI checks
 
-```powershell
-py -m swcstudio.gui.main
+Start with a read-only inspection command:
+
+```bash
+swcstudio check ./data/single-soma.swc
+swcstudio validate ./data/single-soma.swc
 ```
 
-## 5. Core workflow (recommended)
+Then try an edit command:
 
-1. Open an SWC file.
-2. Run validation.
-3. Review warnings/failures.
-4. Apply editing operations (label edit, auto-labeling, radii edit, geometry edit, simplification).
-5. Save/export result and review generated report logs.
+```bash
+swcstudio auto-label ./data/single-soma.swc
+swcstudio set-type ./data/single-soma.swc --node-id 14169 --new-type 3
+swcstudio simplify ./data/single-soma.swc
+swcstudio connect ./data/single-soma.swc --start-id 10 --end-id 22
+```
 
-## 6. Where outputs and logs are written
+Single-file edit commands write both the updated SWC and the matching log into the source file's default output directory. No separate `--write` flag is required.
 
-Feature reports are generated by the shared backend reporting helpers.
+## First GUI checks
 
-Common examples:
+Launch the GUI:
 
-- CLI single-file output folder: `<input_folder>/<input_stem>_swc_studio_output/`
-- CLI single-file output/report: `<input_stem>_<full_operation_name>_<timestamp>.<ext>`
-- CLI batch output folder: `<input_folder>/<input_folder>_<full_operation_name>_<timestamp>/`
-- validation example: `<input_stem>_validation_run_<timestamp>.txt`
-- operation-report example: `<input_stem>_morphology_set_type_<timestamp>.txt`
-- simplification example: `<input_stem>_geometry_simplify_<timestamp>.swc`
-- batch split example: `<input_folder>/<input_folder>_batch_split_<timestamp>/`
-- GUI editing session:
-  - folder: `<input_folder>/<input_stem>_swc_studio_output/`
-  - session log: `<input_stem>_session_log_<timestamp>.txt`
-  - saved copy: `<input_stem>_closed_<timestamp>.swc`
+```bash
+swcstudio-gui
+```
 
-## 7. Troubleshooting quick list
+Then:
 
-- GUI fails to start: ensure `PySide6`, `pyqtgraph`, `vispy` are installed (`pip install -e ".[gui]"`).
-- command not found: activate venv and reinstall editable package.
-- plugin not loading: check `PYTHONPATH` and module import path.
-- validation or cleaning behavior unexpected: verify feature JSON config under `swcstudio/tools/*/configs`.
+1. open an SWC file
+2. review the automatically generated issue list
+3. select an issue and let the app route you to the matching repair tool
+4. save or close the file to write the session log and saved copy
+
+## Default outputs
+
+For a source file:
+
+- `<folder>/<stem>.swc`
+
+the default single-file output directory is:
+
+- `<folder>/<stem>_swc_studio_output/`
+
+Typical files written there include:
+
+- validation reports
+- edited SWC copies
+- per-operation logs
+- GUI session logs
+- GUI saved copies
+
+## Recommended next pages
+
+- [User Guide](documentation/index.md)
+- [GUI Workflow Guide](GUI_WORKFLOW.md)
+- [CLI Tutorial](tutorials/cli-tutorial.md)
+- [Logs And Reports](LOGS_AND_REPORTS.md)

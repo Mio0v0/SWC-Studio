@@ -15,7 +15,6 @@ from PySide6.QtGui import QBrush, QColor, QDesktopServices, QFont
 from PySide6.QtWidgets import QFileDialog, QHBoxLayout, QLabel, QPlainTextEdit, QPushButton, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget, QHeaderView, QSizePolicy
 
 from swcstudio.core.config import feature_config_path, load_feature_config
-from swcstudio.core.geometry_editing import reindex_dataframe_with_map
 from swcstudio.core.reporting import (
     format_validation_report_text,
     validation_log_path_for_file,
@@ -23,6 +22,7 @@ from swcstudio.core.reporting import (
 )
 from swcstudio.core.validation import _split_swc_by_soma_roots
 from swcstudio.core.validation_catalog import CHECK_CATALOG, CHECK_ORDER, display_label_for_result, group_rows_by_category
+from swcstudio.tools.geometry_editing.features.operations import reindex_dataframe_with_map
 from swcstudio.tools.validation.features.core import run_checks_text
 from swcstudio.gui.constants import SWC_COLS
 from swcstudio.gui.font_utils import bold_font

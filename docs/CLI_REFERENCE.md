@@ -1,12 +1,18 @@
 # CLI Reference
 
-This is the current command reference for the SWC-Studio CLI (`swcstudio`).
+This page documents the current public CLI surface for `swcstudio`.
 
 ## Install and Verify
 
 ```bash
 pip install -e .
 swcstudio --help
+```
+
+If the script entrypoint is not on your path, use module mode:
+
+```bash
+python -m swcstudio.cli.cli --help
 ```
 
 ## Command Shape
@@ -40,39 +46,44 @@ Public direct commands:
 - `insert`
 - `plugins`
 
-The direct command form is the intended public interface.
-
-Some `--help` usage lines still show the internal grouped route such as `validation`, `morphology`, or `geometry`. That is expected: the direct command is normalized into the shared backend parser before execution.
-
-## OS Notes
-
-- Command names and flags are the same on macOS/Linux/Windows.
-- Path style differs: macOS/Linux `./data/file.swc`, Windows `.\data\file.swc`.
-- If script entrypoints are not on PATH, use module mode:
-  - macOS/Linux: `python -m swcstudio.cli.cli ...`
-  - Windows: `py -m swcstudio.cli.cli ...`
-- Shell line continuation differs:
-  - macOS/Linux: `\`
-  - PowerShell: `` ` ``
-  - Windows cmd: `^`
+The direct command form is the intended public interface. Internal grouped routes such as `validation`, `morphology`, or `geometry` still exist, but the direct form is the one to document and use.
 
 ## Common Option: `--config-json`
 
-Most feature commands accept JSON, but quote style differs by shell:
+Most feature commands accept `--config-json` for one-run config overrides.
 
-macOS/Linux or PowerShell:
+Example:
 
 ```bash
---config-json '{"some":"override"}'
+swcstudio radii-clean ./data/single-soma.swc --config-json '{"rules":{"max_passes":8}}'
 ```
 
-Windows cmd:
+This must be a JSON object and is merged into the feature config for that run.
 
-```bat
---config-json "{\"some\":\"override\"}"
-```
+## Output Behavior for Single-File Edits
 
-This must be a JSON object and is merged into feature config for that run.
+Single-file edit commands now always write both:
+
+- a processed SWC copy
+- an operation log
+
+Default location:
+
+- `<input_folder>/<stem>_swc_studio_output/`
+
+This applies to:
+
+- `auto-fix`
+- `auto-label`
+- `radii-clean` when the target is one file
+- `index-clean` when the target is one file
+- `simplify` when the target is one file
+- `dendrogram-edit`
+- `set-type`
+- `set-radius`
+- all geometry edit commands
+
+No extra `--write` flag is needed.
 
 ## `check`
 
@@ -82,12 +93,8 @@ This must be a JSON object and is merged into feature config for that run.
 - Includes:
   - validation issues
   - suspicious radii issues
-  - likely wrong labels
-  - simplification suggestion
-
-Options:
-
-- `--config-json JSON`
+  - likely wrong-label issues
+  - a simplification suggestion when available
 
 Example:
 
@@ -97,25 +104,17 @@ swcstudio check ./data/single-soma.swc
 
 ## Direct Commands
 
-The CLI accepts direct top-level commands.
-
 For commands like `validate`, `radii-clean`, `simplify`, and `index-clean`:
 
 - if the target is an SWC file, SWC-Studio runs the single-file workflow
 - if the target is a folder, SWC-Studio runs the batch workflow
 
-Legacy grouped forms such as `swcstudio validation run ...` still work, but the direct form is the preferred public interface.
-
 ### `swcstudio validate <target>`
 
 - Purpose: run validation on one SWC file or all SWC files in a folder
-- Special behavior: if `target` is literal `rule-guide`, prints rules only
+- Special behavior: if `target` is the literal `rule-guide`, prints the validation guide only
 
-Options:
-
-- `--config-json JSON`
-
-Example:
+Examples:
 
 ```bash
 swcstudio validate ./data
@@ -125,11 +124,7 @@ swcstudio validate rule-guide
 
 ### `swcstudio split <folder>`
 
-- Purpose: split SWC files by soma-root trees
-
-Options:
-
-- `--config-json JSON`
+- Purpose: split SWC files by disconnected soma-root trees
 
 Example:
 
@@ -139,9 +134,8 @@ swcstudio split ./data
 
 ### `swcstudio auto-typing <folder>`
 
-- Purpose: rule-based auto-labeling for SWCs in folder
-- CLI prints auto-typing rule guide before processing
-- current method uses branch-consistent subtree inheritance with single-axon / single-apical primary selection rules
+- Purpose: rule-based auto-labeling for SWCs in one folder
+- Prints the auto-typing guide before processing
 
 Flags:
 
@@ -149,7 +143,6 @@ Flags:
 - `--axon`
 - `--apic`
 - `--basal`
-- `--config-json JSON`
 
 Example:
 
@@ -160,19 +153,10 @@ swcstudio auto-typing ./data --soma --axon --basal
 ### `swcstudio radii-clean <target>`
 
 - Purpose: clean abnormal radii on a file or folder using the shared radii-clean backend
-- For a file target, writes the cleaned SWC and one GUI-style operation report into the output folder
-- For a folder target, runs the batch workflow
+- File target: writes the cleaned SWC and one operation report
+- Folder target: runs the batch radii-clean workflow
 
-Arguments:
-
-- `target`: file path or directory path
-
-Options:
-
-- soma radii are always preserved during radii cleaning
-- `--config-json JSON`
-
-Example:
+Examples:
 
 ```bash
 swcstudio radii-clean ./data/single-soma.swc
@@ -182,71 +166,49 @@ swcstudio radii-clean ./data
 ### `swcstudio simplify <target>`
 
 - Purpose: run simplification on one SWC file or every SWC file in a folder
-- For a file target, use `--write` to save the simplified SWC and one GUI-style operation report
-- For a folder target, runs the batch workflow
+- File target: runs `geometry simplify`
+- Folder target: runs batch simplification
 
-Options:
-
-- file target only: `--write`
-- file target only: `--out PATH`
-- `--config-json JSON`
-
-Example:
+Examples:
 
 ```bash
-swcstudio simplify ./data/single-soma.swc --write
+swcstudio simplify ./data/single-soma.swc
 swcstudio simplify ./data
 ```
 
 ### `swcstudio index-clean <target>`
 
 - Purpose: reorder and reindex one SWC file or every SWC file in a folder so parents come before children and IDs become continuous
-- For a file target, use `--write` to save the cleaned SWC and one GUI-style operation report
-- For a folder target, runs the batch workflow
+- File target: runs the single-file index-clean workflow
+- Folder target: runs batch index clean
 
-Options:
-
-- file target only: `--write`
-- file target only: `--out PATH`
-- `--config-json JSON`
-
-Example:
+Examples:
 
 ```bash
-swcstudio index-clean ./data/single-soma.swc --write
+swcstudio index-clean ./data/single-soma.swc
 swcstudio index-clean ./data
 ```
 
 ### `swcstudio rule-guide`
 
-- Purpose: print validation pre-check/rule guide only
+- Purpose: print the validation pre-check and rule guide only
 
-Options:
-
-- `--config-json JSON`
+## Single-File Repair Commands
 
 ### `swcstudio auto-fix <file>`
 
-- Purpose: sanitize + revalidate one file
-- When `--write` is used, also writes a GUI-style operation report with a node-change table
-
-Options:
-
-- `--write`
-- `--out PATH`
-- `--config-json JSON`
+- Purpose: sanitize and revalidate one file
 
 Example:
 
 ```bash
-swcstudio auto-fix ./data/single-soma.swc --write
+swcstudio auto-fix ./data/single-soma.swc
 ```
 
 ### `swcstudio auto-label <file>`
 
-- Purpose: apply the same single-file auto label workflow used by the GUI Auto Label Editing panel
+- Purpose: apply the same single-file auto-label workflow used by the GUI Auto Label Editing panel
 - Changes only node types; geometry, parent IDs, and radii are preserved
-- When `--write` is used, also writes a GUI-style operation report with a node-change table
 
 Flags:
 
@@ -254,225 +216,127 @@ Flags:
 - `--axon`
 - `--apic`
 - `--basal`
-- `--write`
-- `--out PATH`
-- `--config-json JSON`
 
 Example:
 
 ```bash
-swcstudio auto-label ./data/single-soma.swc --write
+swcstudio auto-label ./data/single-soma.swc
 ```
 
-### `swcstudio mesh-editing <file>`
+### `swcstudio dendrogram-edit <file>`
 
-- Purpose: build reusable mesh payload summary
+- Purpose: reassign one subtree to a new node type
 
-Options:
+Flags:
 
-- `--include-edges`
-- `--config-json JSON`
-
-### `swcstudio dendrogram-edit <file> --node-id N --new-type T`
-
-- Purpose: reassign subtree node types
-- This is a subtree edit, not a single-node type edit
-- When `--write` is used, also writes a GUI-style operation report with a node-change table
-
-Options:
-
-- `--node-id INT` (required)
-- `--new-type INT` (required)
-- `--write`
-- `--out PATH`
-- `--config-json JSON`
+- `--node-id`
+- `--new-type`
 
 Example:
 
 ```bash
-swcstudio dendrogram-edit ./data/single-soma.swc --node-id 42 --new-type 3 --write
+swcstudio dendrogram-edit ./data/single-soma.swc --node-id 42 --new-type 3
 ```
 
-### `swcstudio set-type <file> --node-id N --new-type T`
+### `swcstudio set-type <file>`
 
-- Purpose: change one node type only
-- Uses the same single-node type edit behavior as GUI Manual Label Editing
-- When `--write` is used, also writes a GUI-style operation report with a node-change table
+- Purpose: set one node type directly
 
-Options:
+Flags:
 
-- `--node-id INT` (required)
-- `--new-type INT` (required)
-- `--write`
-- `--out PATH`
-- `--config-json JSON`
+- `--node-id`
+- `--new-type`
 
 Example:
 
 ```bash
-swcstudio set-type ./data/single-soma.swc --node-id 14169 --new-type 3 --write
+swcstudio set-type ./data/single-soma.swc --node-id 14169 --new-type 3
 ```
 
-### `swcstudio set-radius <file> --node-id N --radius R`
+### `swcstudio set-radius <file>`
 
 - Purpose: set one node radius directly
-- Uses the same single-node radius edit behavior as GUI Manual Radii Editing
-- When `--write` is used, also writes a GUI-style operation report with a node-change table
 
-Options:
+Flags:
 
-- `--node-id INT` (required)
-- `--radius FLOAT` (required)
-- `--write`
-- `--out PATH`
-- `--config-json JSON`
+- `--node-id`
+- `--radius`
 
 Example:
 
 ```bash
-swcstudio set-radius ./data/single-soma.swc --node-id 42 --radius 0.75 --write
+swcstudio set-radius ./data/single-soma.swc --node-id 42 --radius 0.75
 ```
 
-### `swcstudio move-node <file> --node-id N --x X --y Y --z Z`
+## Geometry Commands
 
-- Purpose: move one node to absolute coordinates
-- When `--write` is used, also writes a GUI-style operation report with a node-change table
+### `move-node`
 
-### `swcstudio move-subtree <file> --root-id N --x X --y Y --z Z`
+Move one node to an absolute XYZ position.
 
-- Purpose: move a whole subtree by setting the subtree root to absolute coordinates
-- When `--write` is used, also writes a GUI-style operation report with a node-change table
+```bash
+swcstudio move-node ./data/single-soma.swc --node-id 42 --x 100 --y 120 --z 5
+```
 
-### `swcstudio connect <file> --start-id A --end-id B`
+### `move-subtree`
 
-- Purpose: connect nodes by setting `parent(end) = start`
-- When `--write` is used, also writes a GUI-style operation report with a node-change table
+Move a subtree by setting its root node to an absolute XYZ position.
 
-### `swcstudio disconnect <file> --start-id A --end-id B`
+```bash
+swcstudio move-subtree ./data/single-soma.swc --root-id 40 --x 100 --y 120 --z 5
+```
 
-- Purpose: disconnect every parent-child edge along the path between start and end
-- When `--write` is used, also writes a GUI-style operation report with a node-change table
+### `connect`
 
-### `swcstudio delete-node <file> --node-id N`
+Set the end node parent to the start node.
 
-- Purpose: delete one node
-- When `--write` is used, also writes a GUI-style operation report with a node-change table
+```bash
+swcstudio connect ./data/single-soma.swc --start-id 10 --end-id 22
+```
 
-Options:
+### `disconnect`
 
-- `--reconnect-children`
-- `--write`
-- `--out PATH`
+Disconnect all parent-child edges along the path between two nodes.
 
-### `swcstudio delete-subtree <file> --root-id N`
+```bash
+swcstudio disconnect ./data/single-soma.swc --start-id 10 --end-id 22
+```
 
-- Purpose: delete one subtree
-- When `--write` is used, also writes a GUI-style operation report with a node-change table
+### `delete-node`
 
-### `swcstudio insert <file> --start-id A [--end-id B] --x X --y Y --z Z`
+Delete one node. Use `--reconnect-children` when the node has children and you want them reattached to the deleted node’s parent.
 
-- Purpose: insert a new node after start and optionally before end
-- When `--write` is used, also writes a GUI-style operation report with a node-change table
+```bash
+swcstudio delete-node ./data/single-soma.swc --node-id 1180
+swcstudio delete-node ./data/single-soma.swc --node-id 13 --reconnect-children
+```
 
-Options:
+### `delete-subtree`
 
-- `--radius FLOAT`
-- `--type-id INT`
-- `--write`
-- `--out PATH`
+Delete a full subtree rooted at one node.
 
-## `plugins`
+```bash
+swcstudio delete-subtree ./data/single-soma.swc --root-id 40
+```
+
+### `insert`
+
+Insert one node after `start-id` and optionally before `end-id`.
+
+```bash
+swcstudio insert ./data/single-soma.swc --start-id 10 --end-id 22 --x 100 --y 120 --z 5
+```
+
+## Plugins
 
 ### `swcstudio plugins list`
 
-- Purpose: list builtin/plugin methods in registry
-
-Options:
-
-- `--feature-key TOOL.FEATURE`
-
-Example:
-
-```bash
-swcstudio plugins list
-swcstudio plugins list --feature-key batch_processing.auto_typing
-```
-
-### `swcstudio plugins load <module>`
-
-- Purpose: load an external plugin module by Python import path
-- Contract expected:
-  - `PLUGIN_MANIFEST` dict (or `get_plugin_manifest()`)
-  - `register_plugin(registrar)` OR `PLUGIN_METHODS`
-- Scope: current CLI process only (use `SWCSTUDIO_PLUGINS` for autoload in each run)
-
-Example:
-
-```bash
-swcstudio plugins load my_lab_plugins.summary_plugin
-```
+List builtin and plugin-provided feature methods.
 
 ### `swcstudio plugins list-loaded`
 
-- Purpose: list loaded plugin manifests (`plugin_id`, version, capabilities, API version)
+List currently loaded plugin manifests.
 
-Example:
+### `swcstudio plugins load <module>`
 
-```bash
-swcstudio plugins list-loaded
-```
-
-### Environment Autoload
-
-Plugins can autoload on every CLI run via `SWCSTUDIO_PLUGINS`:
-
-macOS/Linux:
-
-```bash
-export SWCSTUDIO_PLUGINS="my_lab_plugins.summary_plugin,my_lab_plugins.custom_auto_typing"
-```
-
-Windows PowerShell:
-
-```powershell
-$env:SWCSTUDIO_PLUGINS = "my_lab_plugins.summary_plugin,my_lab_plugins.custom_auto_typing"
-```
-
-Windows cmd:
-
-```bat
-set SWCSTUDIO_PLUGINS=my_lab_plugins.summary_plugin,my_lab_plugins.custom_auto_typing
-```
-
-## Output and Reports
-
-Most commands print terminal output and, where applicable, also write report files.
-
-Default generated names use the same structure:
-
-- single-file output/report folder: `<input_folder>/<original_stem>_swc_studio_output/`
-- single-file output/report name: `<original_stem>_<full_operation_name>_<timestamp>.<ext>`
-- batch output folder: `<input_folder>/<input_folder>_<full_operation_name>_<timestamp>/`
-- batch report: `<input_folder>_<full_operation_name>_<timestamp>.txt`
-
-Examples:
-
-- `data/single-soma_swc_studio_output/single-soma_validation_run_20260401_132905.txt`
-- `data/single-soma_swc_studio_output/single-soma_validation_index_clean_20260401_132905.swc`
-- `data/single-soma_swc_studio_output/single-soma_geometry_simplify_20260401_132905.swc`
-- `data_batch_split_20260401_132905/`
-
-Current report behavior:
-
-- `check` prints to the terminal and does not write a report file
-- `validate <file>` writes one validation report
-- single-file editing commands such as `auto-fix`, `auto-label`, `radii-clean`, `index-clean`, `simplify`, `set-type`, `set-radius`, `dendrogram-edit`, and geometry edits write one GUI-style operation report per run
-- batch commands write one batch report and, where applicable, a batch output folder
-
-Single-file edit commands no longer write duplicate legacy text reports alongside the operation report.
-
-## Exit Codes
-
-- `0`: success
-- `1`: usage error / parse error
-- `2`: runtime error
+Load one plugin module by import path.

@@ -32,7 +32,7 @@ from PySide6.QtWidgets import (
     QSizePolicy,
 )
 
-from swcstudio.core.geometry_editing import (
+from swcstudio.tools.geometry_editing.features.operations import (
     GeometrySelection,
     make_selection,
 )

@@ -1,0 +1,23 @@
+SWC Session Report
+------------------
+Tool Version: SWC-Studio 0.1.0
+Source file: single-soma.swc
+Session started: 2026-04-08 16:07:18
+Session ended: 2026-04-08 16:07:18
+
+Label types:
+- 0: undefined
+- 1: soma
+- 2: axon
+- 3: basal dendrite
+- 4: apical dendrite
+
+Change Summary
+--------------
+Operation: Move Node
+Summary: Moved node 2 to absolute coordinates.
+Affected nodes: 0
+- Node ID: 2
+- New XYZ: (9382.5, 2781.6, 8958.9)
+- Output: /Users/tuo/Desktop/SWC-Studio/data/single-soma_swc_studio_output/single-soma_geometry_move_node_20260408_160717.swc
+No node-level parameter changes recorded.

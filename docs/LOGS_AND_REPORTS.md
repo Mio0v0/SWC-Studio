@@ -1,6 +1,6 @@
 # Logs and Reports
 
-The project has a shared report layer so CLI and GUI produce consistent text logs.
+`SWC-Studio` uses a shared reporting layer so GUI and CLI logs follow the same conventions.
 
 Core module:
 
@@ -8,13 +8,13 @@ Core module:
 
 ## Why this matters
 
-- one report format per feature
-- same content in CLI and GUI runs
-- easier audit trail for lab workflows
+- one report style across interfaces
+- predictable output folders
+- easier audit trails for lab workflows
 
-## Report builders
+## Main report helpers
 
-Main helper functions:
+Examples of the shared builders:
 
 - `format_validation_report_text`
 - `format_batch_validation_report_text`
@@ -26,62 +26,77 @@ Main helper functions:
 - `format_operation_report_text`
 - `write_text_report`
 
-## Default report naming
+## Default naming
 
-CLI default naming uses one pattern:
+Single-file outputs use:
 
-- single-file output/report folder: `<input_folder>/<original_stem>_swc_studio_output/`
-- single-file output or report name: `<original_stem>_<full_operation_name>_<timestamp>.<ext>`
-- batch output folder: `<input_folder>/<input_folder>_<full_operation_name>_<timestamp>/`
-- batch report: `<input_folder>_<full_operation_name>_<timestamp>.txt`
+- output folder
+  - `<input_folder>/<stem>_swc_studio_output/`
+- output or report file
+  - `<stem>_<operation_name>_<timestamp>.<ext>`
 
-Examples:
+Batch outputs use:
 
-- validation report: `<input_folder>/<stem>_swc_studio_output/<stem>_validation_run_<timestamp>.txt`
-- validation index clean output: `<input_folder>/<stem>_swc_studio_output/<stem>_validation_index_clean_<timestamp>.swc`
-- geometry simplify output: `<input_folder>/<stem>_swc_studio_output/<stem>_geometry_simplify_<timestamp>.swc`
-- geometry simplify report: `<input_folder>/<stem>_swc_studio_output/<stem>_geometry_simplify_<timestamp>.txt`
-- manual label operation report: `<input_folder>/<stem>_swc_studio_output/<stem>_morphology_set_type_<timestamp>.txt`
-- auto label operation report: `<input_folder>/<stem>_swc_studio_output/<stem>_validation_auto_label_<timestamp>.txt`
-- batch split folder: `<folder>/<folder>_batch_split_<timestamp>/`
-- batch split files: `<stem>_batch_split_tree_<index>_<timestamp>.swc`
-- batch auto typing folder report: `<folder>_batch_auto_typing_<timestamp>.txt`
+- output folder
+  - `<input_folder>/<input_folder>_<operation_name>_<timestamp>/`
+- batch report
+  - `<input_folder>_<operation_name>_<timestamp>.txt`
 
-### GUI Edit Session
+## Current single-file CLI behavior
 
-- output folder: `<input_folder>/<stem>_swc_studio_output/`
-- session log: `<stem>_session_log_<timestamp>.txt`
-- saved copy: `<stem>_closed_<timestamp>.swc`
-- records all edits in one GUI session for that SWC
+Single-file edit commands automatically write both:
+
+- an updated SWC file
+- a matching text report
+
+into the source file's default `*_swc_studio_output` directory.
+
+This applies to commands such as:
+
+- `auto-fix`
+- `auto-label`
+- `radii-clean`
+- `index-clean`
+- `set-type`
+- `dendrogram-edit`
+- `set-radius`
+- geometry edit commands
+
+## GUI session outputs
+
+The GUI writes:
+
+- session log
+  - `<stem>_session_log_<timestamp>.txt`
+- saved copy
+  - `<stem>_closed_<timestamp>.swc`
+
+into the same default single-file output directory.
 
 ## Typical report contents
 
-Validation reports:
+Validation reports can include:
 
-- pre-check rule summary
-- grouped pass/warn/fail results
-- detailed findings (node IDs, section IDs, thresholds, metrics)
+- grouped pass, warning, and fail rows
+- thresholds and metrics
+- failing node IDs and section IDs
 
-Batch reports:
+Operation reports and GUI session logs can include:
 
-- files processed/failed
-- per-file outputs
-- run-level summary counts
+- operation summary
+- node-level change tables
+- software version information
+- label type legend
 
-GUI session logs:
+When custom type definitions exist, the label legend can include:
 
-- one header per open-to-close session
-- one operation block per applied change
-- operation-specific node-change tables with only the columns that changed
+- custom type ID
+- saved custom label name
+- saved color
+- saved notes
 
-CLI single-file operation reports:
-
-- one report per edit run
-- same summary/details + node-change table format used by GUI session logs
-- currently written for single-file edit commands such as auto-fix, auto-label, radii-clean, index-clean, simplify, set-type, set-radius, dendrogram-edit, and geometry edits
-
-Single-file CLI edit commands are intended to keep one operation report, not an extra legacy feature log.
+That is why custom labels defined in the GUI can show up later in generated logs.
 
 ## Programmatic use
 
-Use `write_text_report(path, text)` in custom features/plugins to produce logs in the same style as built-in tools.
+Plugins and custom features should use the shared reporting helpers rather than writing ad hoc text files so logs stay aligned with the rest of the application.

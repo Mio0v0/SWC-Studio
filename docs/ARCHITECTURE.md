@@ -17,8 +17,7 @@ swcstudio/
     validation/
     visualization/
     morphology_editing/
-    geometry_editing/  (planned CLI/tool wrappers; core logic already shared)
-    analysis/
+    geometry_editing/
   plugins/
   cli/
   gui/
