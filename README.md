@@ -29,6 +29,13 @@ Use the docs site for:
 - tutorials
 - API and extension references
 
+### Release Assets
+
+Current GitHub Releases may include:
+
+- macOS application bundle
+- Windows executable package
+
 ## Quick Start
 
 Option 1: download a packaged executable from the GitHub Releases page and run the app directly.
