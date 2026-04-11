@@ -71,7 +71,7 @@ Single-file edit commands automatically write:
 - the updated SWC file
 - the matching operation log
 
-to the default `*_swc_studio_output` directory for the source file.
+to the default `*_swc_studio_output` directory for the source file. Auto-label uses automatic apical detection; there are no class-selection flags.
 
 ## Step 5: Use batch commands for folders
 
@@ -82,7 +82,7 @@ Examples:
 ```bash
 swcstudio validate ./data
 swcstudio split ./data
-swcstudio auto-typing ./data --soma --axon --basal
+swcstudio auto-typing ./data
 swcstudio radii-clean ./data
 swcstudio simplify ./data
 swcstudio index-clean ./data

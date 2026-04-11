@@ -19,12 +19,12 @@ from swcstudio.tools.batch_processing.features.auto_typing import get_config as 
 
 
 def _options_from_config(cfg: dict[str, Any]) -> RuleBatchOptions:
-    opts = dict(cfg.get("options", {}))
+    _ = cfg
     return RuleBatchOptions(
-        soma=bool(opts.get("soma", True)),
-        axon=bool(opts.get("axon", True)),
-        apic=bool(opts.get("apic", False)),
-        basal=bool(opts.get("basal", True)),
+        soma=True,
+        axon=True,
+        apic=False,
+        basal=True,
         rad=False,
         zip_output=False,
     )

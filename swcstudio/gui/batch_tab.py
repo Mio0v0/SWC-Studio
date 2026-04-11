@@ -6,7 +6,6 @@ from pathlib import Path
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
-    QCheckBox,
     QDialog,
     QFileDialog,
     QHBoxLayout,
@@ -29,7 +28,6 @@ from swcstudio.tools.batch_processing.features.index_clean import run_folder as 
 from swcstudio.tools.batch_processing.features.simplification import run_folder as run_batch_simplification
 from swcstudio.tools.batch_processing.features.swc_splitter import split_folder
 from .report_popup import ReportPopupDialog
-from .constants import color_for_type
 from .radii_cleaning_panel import RadiiCleaningPanel
 
 _CFG_PATH = feature_config_path("batch_processing", "auto_typing")
@@ -181,35 +179,13 @@ class BatchTabWidget(QWidget):
         root.setSpacing(8)
         root.setAlignment(Qt.AlignTop)
 
-        desc = QLabel("Auto labeling with morphology rules for all SWC files in a selected folder.")
+        desc = QLabel(
+            "Auto labeling with morphology rules for all SWC files in a selected folder. "
+            "Soma, axon, and basal labeling are always enabled; apical labeling is detected automatically from subtree geometry."
+        )
         desc.setWordWrap(True)
         desc.setStyleSheet("font-size: 12px; color: #555;")
         root.addWidget(desc)
-
-        flags_row1 = QHBoxLayout()
-        flags_row2 = QHBoxLayout()
-        self._flag_soma = QCheckBox("--soma")
-        self._flag_axon = QCheckBox("--axon")
-        self._flag_apic = QCheckBox("--apic")
-        self._flag_basal = QCheckBox("--basal")
-
-        self._flag_soma.setChecked(True)
-        self._flag_axon.setChecked(True)
-        self._flag_basal.setChecked(True)
-
-        self._flag_soma.setStyleSheet(f"QCheckBox {{ color: {color_for_type(1)}; font-weight: 600; }}")
-        self._flag_axon.setStyleSheet(f"QCheckBox {{ color: {color_for_type(2)}; font-weight: 600; }}")
-        self._flag_basal.setStyleSheet(f"QCheckBox {{ color: {color_for_type(3)}; font-weight: 600; }}")
-        self._flag_apic.setStyleSheet(f"QCheckBox {{ color: {color_for_type(4)}; font-weight: 600; }}")
-
-        for cb in (self._flag_soma, self._flag_axon, self._flag_apic):
-            flags_row1.addWidget(cb)
-        flags_row1.addStretch()
-        for cb in (self._flag_basal,):
-            flags_row2.addWidget(cb)
-        flags_row2.addStretch()
-        root.addLayout(flags_row1)
-        root.addLayout(flags_row2)
 
         action_row = QHBoxLayout()
         self._btn_run_batch_check = QPushButton("Run")
@@ -349,18 +325,6 @@ class BatchTabWidget(QWidget):
             target.setPlainText(text)
         self.log_message.emit(text)
 
-    def _selected_flags(self) -> list[str]:
-        flags = []
-        for cb in (
-            self._flag_soma,
-            self._flag_axon,
-            self._flag_apic,
-            self._flag_basal,
-        ):
-            if cb.isChecked():
-                flags.append(cb.text())
-        return flags
-
     def _on_edit_auto_typing_json(self):
         if self._config_dialog is None:
             self._config_dialog = _AutoTypingConfigDialog(self)
@@ -415,14 +379,11 @@ class BatchTabWidget(QWidget):
             self._set_status(f"No .swc files found in:\n{folder_path}")
             return
 
-        flags = set(self._selected_flags())
-        use_basal = "--basal" in flags
-        use_apic = "--apic" in flags
         opts = RuleBatchOptions(
-            soma="--soma" in flags,
-            axon="--axon" in flags,
-            apic=use_apic,
-            basal=use_basal,
+            soma=True,
+            axon=True,
+            apic=False,
+            basal=True,
             rad=False,
             zip_output=False,
         )

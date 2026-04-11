@@ -136,18 +136,13 @@ swcstudio split ./data
 
 - Purpose: rule-based auto-labeling for SWCs in one folder
 - Prints the auto-typing guide before processing
-
-Flags:
-
-- `--soma`
-- `--axon`
-- `--apic`
-- `--basal`
+- Soma, axon, and basal labeling are always enabled
+- The algorithm automatically switches between 3-class and 4-class labeling by detecting whether an apical subtree is present
 
 Example:
 
 ```bash
-swcstudio auto-typing ./data --soma --axon --basal
+swcstudio auto-typing ./data
 ```
 
 ### `swcstudio radii-clean <target>`
@@ -209,13 +204,8 @@ swcstudio auto-fix ./data/single-soma.swc
 
 - Purpose: apply the same single-file auto-label workflow used by the GUI Auto Label Editing panel
 - Changes only node types; geometry, parent IDs, and radii are preserved
-
-Flags:
-
-- `--soma`
-- `--axon`
-- `--apic`
-- `--basal`
+- Soma, axon, and basal labeling are always enabled
+- The algorithm automatically switches between 3-class and 4-class labeling by detecting whether an apical subtree is present
 
 Example:
 

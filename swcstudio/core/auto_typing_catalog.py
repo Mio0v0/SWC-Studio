@@ -98,6 +98,10 @@ def get_auto_typing_guide(config: dict[str, Any] | None = None) -> dict[str, str
     thin_axon_bonus = _f(constraints_cfg.get("thin_axon_bonus", 0.10), 0.10)
     terminal_window = _i(feature_cfg.get("terminal_window_nodes", 3), 3)
 
+    apical_detect_cfg = cfg.get("apical_detection", {})
+    apical_detect_min_score = _f(apical_detect_cfg.get("min_score", 0.55), 0.55)
+    apical_detect_min_root_radius = _f(apical_detect_cfg.get("min_root_radius_um", 1.2), 1.2)
+
     body = (
         "This panel shows the JSON configuration that controls the auto-labeling\n"
         "algorithm.\n"
@@ -125,8 +129,7 @@ def get_auto_typing_guide(config: dict[str, Any] | None = None) -> dict[str, str
         f"- Thin-axon bonus: +{thin_axon_bonus:.3f} when a primary/branch base radius is <= {thin_axon_radius:.2f} um.\n"
         f"- Terminal taper window: last/first {terminal_window} node(s) are compared to estimate distal taper.\n\n"
         "Type decision boundaries:\n"
-        "- Soma (type 1): if --soma is enabled, root nodes (parent == -1) are\n"
-        "  forced to soma before and after branch assignment.\n"
+        "- Soma (type 1): root nodes (parent == -1) are forced to soma before and after branch assignment.\n"
         "- Axon score:\n"
         f"  score_axon = {ax_path:.3f}*path + {ax_radial:.3f}*radial + {ax_persistence:.3f}*persistence + "
         f"{ax_taper:.3f}*terminal_consistency + {ax_radius:.3f}*(1-radius) + "
@@ -138,7 +141,9 @@ def get_auto_typing_guide(config: dict[str, Any] | None = None) -> dict[str, str
         f"  score_basal = {ba_z:.3f}*(1-z) + {ba_up:.3f}*(1-up_alignment) + {ba_branch:.3f}*branchiness + "
         f"{ba_radius:.3f}*radius + {ba_path:.3f}*path + {ba_persistence:.3f}*(1-persistence) + "
         f"{ba_taper:.3f}*taper + {ba_prior:.3f}*prior\n"
-        "- Branch class assignment: choose highest score among enabled classes.\n\n"
+        "- Automatic apical detection: enable type 4 only when the best soma-child apical score reaches "
+        f"{apical_detect_min_score:.3f} and the candidate subtree root radius is at least {apical_detect_min_root_radius:.2f} um.\n"
+        "- Branch class assignment: choose the highest score among axon/basal, and include apical when automatic apical detection is satisfied.\n\n"
         "Global thresholds:\n"
         f"- Seed prior threshold: prior >= {seed_prior_threshold:.3f}\n"
         f"- Missing-class reassignment: score >= {min_score:.3f} and gain >= {min_gain:.3f}\n"

@@ -6,7 +6,6 @@ import json
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
-    QCheckBox,
     QDialog,
     QHBoxLayout,
     QLabel,
@@ -18,7 +17,6 @@ from PySide6.QtWidgets import (
 
 from swcstudio.core.auto_typing import RuleBatchOptions, get_auto_rules_config, save_auto_rules_config
 from swcstudio.core.config import feature_config_path
-from .constants import color_for_type
 
 _CFG_PATH = feature_config_path("batch_processing", "auto_typing")
 
@@ -107,32 +105,13 @@ class ValidationAutoLabelPanel(QWidget):
         root.setSpacing(8)
         root.setAlignment(Qt.AlignTop)
 
-        desc = QLabel("Auto label editing on the current SWC file using the same rule engine as Batch Auto Label.")
+        desc = QLabel(
+            "Auto label editing on the current SWC file using the same rule engine as Batch Auto Label. "
+            "Soma, axon, and basal labeling are always enabled; apical labeling is detected automatically from subtree geometry."
+        )
         desc.setWordWrap(True)
         desc.setStyleSheet("font-size: 12px; color: #555;")
         root.addWidget(desc)
-
-        flags_row = QHBoxLayout()
-        flags_row.setContentsMargins(0, 0, 0, 0)
-        flags_row.setSpacing(12)
-        self._flag_soma = QCheckBox("soma")
-        self._flag_axon = QCheckBox("axon")
-        self._flag_apic = QCheckBox("apical")
-        self._flag_basal = QCheckBox("basal")
-
-        self._flag_soma.setChecked(True)
-        self._flag_axon.setChecked(True)
-        self._flag_basal.setChecked(True)
-
-        self._flag_soma.setStyleSheet(f"QCheckBox {{ color: {color_for_type(1)}; font-weight: 600; }}")
-        self._flag_axon.setStyleSheet(f"QCheckBox {{ color: {color_for_type(2)}; font-weight: 600; }}")
-        self._flag_basal.setStyleSheet(f"QCheckBox {{ color: {color_for_type(3)}; font-weight: 600; }}")
-        self._flag_apic.setStyleSheet(f"QCheckBox {{ color: {color_for_type(4)}; font-weight: 600; }}")
-
-        for cb in (self._flag_soma, self._flag_axon, self._flag_apic, self._flag_basal):
-            flags_row.addWidget(cb)
-        flags_row.addStretch()
-        root.addLayout(flags_row)
 
         top_btns = QHBoxLayout()
         self._btn_run = QPushButton("Run")
@@ -159,13 +138,11 @@ class ValidationAutoLabelPanel(QWidget):
         root.addWidget(self._summary, stretch=1)
 
     def current_options(self) -> RuleBatchOptions:
-        use_basal = bool(self._flag_basal.isChecked())
-        use_apic = bool(self._flag_apic.isChecked())
         return RuleBatchOptions(
-            soma=bool(self._flag_soma.isChecked()),
-            axon=bool(self._flag_axon.isChecked()),
-            apic=use_apic,
-            basal=use_basal,
+            soma=True,
+            axon=True,
+            apic=False,
+            basal=True,
             rad=False,
             zip_output=False,
         )

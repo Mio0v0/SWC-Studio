@@ -12,7 +12,7 @@ It is designed for inspecting reconstructions, finding structural or annotation 
 - a command-line interface (`swcstudio`)
 - a desktop GUI (`swcstudio-gui`)
 
-Both the CLI and GUI use the same core feature logic.
+Both the CLI and GUI use the same core feature logic. Auto-labeling now always runs soma/axon/basal labeling and automatically switches between 3-class and 4-class output by detecting whether an apical subtree is present.
 
 ## Documentation
 
@@ -95,7 +95,7 @@ py -m swcstudio.cli.cli --help
 
 - issue-driven SWC validation and repair
 - batch processing workflows
-- rule-based auto typing
+- rule-based auto typing with automatic apical detection
 - radii cleaning
 - manual morphology and geometry editing
 - shared GUI, CLI, and Python integration surface

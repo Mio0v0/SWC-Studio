@@ -107,7 +107,7 @@ swcstudio simplify ./data/single-soma.swc
 swcstudio connect ./data/single-soma.swc --start-id 10 --end-id 22
 ```
 
-Single-file edit commands write both the updated SWC and the matching log into the source file's default output directory. No separate `--write` flag is required.
+Single-file edit commands write both the updated SWC and the matching log into the source file's default output directory. No separate `--write` flag is required. Auto-label always applies soma/axon/basal labeling and automatically enables apical labeling only when an apical subtree is detected.
 
 ## First GUI checks
 

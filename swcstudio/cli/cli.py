@@ -414,12 +414,8 @@ def build_parser() -> argparse.ArgumentParser:
     batch_split.add_argument("folder", type=Path)
     _feature_json_arg(batch_split)
 
-    batch_auto = batch_sub.add_parser("auto-typing", help="Rule-based auto typing on folder")
+    batch_auto = batch_sub.add_parser("auto-typing", help="Rule-based auto typing on folder with automatic apical detection")
     batch_auto.add_argument("folder", type=Path)
-    batch_auto.add_argument("--soma", action="store_true", default=False)
-    batch_auto.add_argument("--axon", action="store_true", default=False)
-    batch_auto.add_argument("--apic", action="store_true", default=False)
-    batch_auto.add_argument("--basal", action="store_true", default=False)
     _feature_json_arg(batch_auto)
 
     batch_radii = batch_sub.add_parser("radii-clean", help="Radii cleaning on a file or folder")
@@ -449,12 +445,8 @@ def build_parser() -> argparse.ArgumentParser:
     val_run.add_argument("file", type=Path)
     _feature_json_arg(val_run)
 
-    val_auto_label = val_sub.add_parser("auto-label", help="Apply rule-based auto label editing to one SWC file")
+    val_auto_label = val_sub.add_parser("auto-label", help="Apply rule-based auto label editing to one SWC file with automatic apical detection")
     val_auto_label.add_argument("file", type=Path)
-    val_auto_label.add_argument("--soma", action="store_true", default=False)
-    val_auto_label.add_argument("--axon", action="store_true", default=False)
-    val_auto_label.add_argument("--apic", action="store_true", default=False)
-    val_auto_label.add_argument("--basal", action="store_true", default=False)
     _feature_json_arg(val_auto_label)
 
     val_radii = val_sub.add_parser("radii-clean", help="Radii cleaning on a file or folder")
@@ -695,21 +687,13 @@ def main(argv: list[str] | None = None) -> int:
 
         if args.tool == "batch" and args.feature == "auto-typing":
             _print_auto_typing_guide()
-            has_explicit_flags = any(
-                bool(v)
-                for v in (args.soma, args.axon, args.apic, args.basal)
-            )
-            opts = (
-                RuleBatchOptions(
-                    soma=bool(args.soma),
-                    axon=bool(args.axon),
-                    apic=bool(args.apic),
-                    basal=bool(args.basal),
-                    rad=False,
-                    zip_output=False,
-                )
-                if has_explicit_flags
-                else None
+            opts = RuleBatchOptions(
+                soma=True,
+                axon=True,
+                apic=False,
+                basal=True,
+                rad=False,
+                zip_output=False,
             )
             out = run_auto_typing(
                 str(args.folder),
@@ -873,18 +857,13 @@ def main(argv: list[str] | None = None) -> int:
             return 0
 
         if args.tool == "validation" and args.feature == "auto-label":
-            has_explicit_flags = any(bool(v) for v in (args.soma, args.axon, args.apic, args.basal))
-            opts = (
-                RuleBatchOptions(
-                    soma=bool(args.soma),
-                    axon=bool(args.axon),
-                    apic=bool(args.apic),
-                    basal=bool(args.basal),
-                    rad=False,
-                    zip_output=False,
-                )
-                if has_explicit_flags
-                else None
+            opts = RuleBatchOptions(
+                soma=True,
+                axon=True,
+                apic=False,
+                basal=True,
+                rad=False,
+                zip_output=False,
             )
             old_df = parse_swc_text_preserve_tokens(Path(args.file).read_text(encoding="utf-8", errors="ignore"))
             out = validation_auto_label_file(

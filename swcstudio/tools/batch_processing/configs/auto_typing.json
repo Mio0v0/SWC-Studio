@@ -2,12 +2,6 @@
   "enabled": true,
   "feature": "auto_typing",
   "method": "default",
-  "options": {
-    "apic": false,
-    "axon": true,
-    "basal": true,
-    "soma": true
-  },
   "rules": {
     "assign_missing": {
       "min_gain": -0.06,
@@ -60,7 +54,11 @@
     },
     "ml_base_weight": 0.72,
     "ml_blend": 0.28,
-    "notes": "This JSON controls the auto-labeling behavior (weights, thresholds, and options). It now scores soma-child directed paths, enforces hard subtree inheritance, limits the morphology to one primary axon and one primary apical trunk, and uses persistence / taper / up-direction / branch-symmetry cues before topology refinement.",
+    "notes": "This JSON controls the auto-labeling behavior (weights and thresholds). It now scores soma-child directed paths, enforces hard subtree inheritance, limits the morphology to one primary axon and one primary apical trunk, uses automatic apical detection, and uses persistence / taper / up-direction / branch-symmetry cues before topology refinement.",
+    "apical_detection": {
+      "min_root_radius_um": 1.2,
+      "min_score": 0.55
+    },
     "constraints": {
       "inherit_primary_subtree": true,
       "single_axon": true,

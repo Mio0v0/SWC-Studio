@@ -149,9 +149,13 @@ def _default_rules_config() -> dict[str, Any]:
             "thin_axon_max_base_radius_um": 1.0,
             "thin_axon_bonus": 0.10,
         },
+        "apical_detection": {
+            "min_score": 0.55,
+            "min_root_radius_um": 1.2,
+        },
         "notes": (
             "This JSON controls the auto-labeling behavior "
-            "(weights, thresholds, and options), including hard primary-subtree inheritance, "
+            "(weights and thresholds), including hard primary-subtree inheritance, "
             "single-axon/apical constraints, path-persistence / terminal-taper features, "
             "and topology-aware refinement. Edit carefully."
         ),
@@ -185,10 +189,10 @@ def save_config(cfg: dict) -> None:
 
 @dataclass
 class RuleBatchOptions:
-    soma: bool = False
-    axon: bool = False
+    soma: bool = True
+    axon: bool = True
     apic: bool = False
-    basal: bool = False
+    basal: bool = True
     rad: bool = False
     zip_output: bool = False
 
@@ -663,6 +667,26 @@ def _assign_soma_child_subtrees(
 
     child_class = _assign_branches(child_nodes, child_scores, enabled_neurites)
     return child_class, child_scores, node_child_owner
+
+
+def _detect_has_apical(
+    child_scores: dict[int, dict[int, float]],
+    rows: list[dict[str, Any]],
+) -> bool:
+    if not child_scores:
+        return False
+
+    cfg = _load_cfg().get("apical_detection", {})
+    min_score = float(cfg.get("min_score", 0.55))
+    min_root_radius = float(cfg.get("min_root_radius_um", 1.2))
+
+    best_child = max(
+        child_scores,
+        key=lambda child: float(child_scores.get(child, {}).get(4, float("-inf"))),
+    )
+    best_apical_score = float(child_scores.get(best_child, {}).get(4, float("-inf")))
+    root_radius = float(rows[best_child]["radius"])
+    return best_apical_score >= min_score and root_radius >= min_root_radius
 
 
 def _pick_best_class(scores: dict[int, float], allowed: set[int]) -> int | None:
@@ -1216,19 +1240,23 @@ def _apply_rules(rows: list[dict[str, Any]], opts: RuleBatchOptions) -> tuple[li
         enabled_neurites.add(2)
     if opts.basal:
         enabled_neurites.add(3)
-    if opts.apic:
-        enabled_neurites.add(4)
 
+    scoring_neurites = set(enabled_neurites)
     if enabled_neurites:
+        scoring_neurites.add(4)
+
+    if scoring_neurites:
         child_class, child_scores, node_child_owner = _assign_soma_child_subtrees(
             rows,
             parent_idx,
             children,
             types,
-            enabled_neurites,
+            scoring_neurites,
             path_from_root,
             radial_from_root,
         )
+        if _detect_has_apical(child_scores, rows):
+            enabled_neurites.add(4)
         child_class = _enforce_primary_subtree_constraints(child_scores, enabled_neurites)
         branch_nodes, branch_anchor, node_branch = _branch_partition(rows, parent_idx, children, types)
         scores, features, existing_ratio = _branch_scores(

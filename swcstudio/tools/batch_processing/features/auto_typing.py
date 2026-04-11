@@ -16,12 +16,6 @@ FEATURE_KEY = f"{TOOL}.{FEATURE}"
 DEFAULT_CONFIG: dict[str, Any] = {
     "enabled": True,
     "method": "default",
-    "options": {
-        "soma": True,
-        "axon": True,
-        "apic": False,
-        "basal": True,
-    },
     "rules": {
         "class_labels": {"1": "soma", "2": "axon", "3": "basal", "4": "apical"},
         "branch_score_weights": {
@@ -33,6 +27,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "ml_base_weight": 0.72,
         "seed_prior_threshold": 0.55,
         "assign_missing": {"min_score": 0.58, "min_gain": -0.06},
+        "apical_detection": {"min_score": 0.55, "min_root_radius_um": 1.2},
         "smoothing": {"maj_fraction": 0.67, "flip_margin": 0.10},
         "constraints": {
             "inherit_primary_subtree": True,
@@ -53,8 +48,8 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "radius": {"copy_parent_if_zero": True},
         "notes": (
             "This JSON controls the auto-labeling behavior "
-            "(weights, thresholds, and options), including hard primary-subtree inheritance, "
-            "single-axon/apical constraints, and topology-aware refinement. Edit carefully."
+            "(weights and thresholds), including hard primary-subtree inheritance, "
+            "single-axon/apical constraints, automatic apical detection, and topology-aware refinement. Edit carefully."
         ),
     },
 }
@@ -74,12 +69,12 @@ def get_config() -> dict[str, Any]:
 
 
 def _options_from_config(cfg: dict[str, Any]) -> RuleBatchOptions:
-    opts = cfg.get("options", {})
+    _ = cfg
     return RuleBatchOptions(
-        soma=bool(opts.get("soma", True)),
-        axon=bool(opts.get("axon", True)),
-        apic=bool(opts.get("apic", False)),
-        basal=bool(opts.get("basal", True)),
+        soma=True,
+        axon=True,
+        apic=False,
+        basal=True,
         rad=False,
         zip_output=False,
     )
