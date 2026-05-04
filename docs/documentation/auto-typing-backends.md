@@ -13,8 +13,15 @@ Four stages run in order on every SWC:
 |---|---|---|
 | Stage 1 | Cell-type detection (pyramidal vs interneuron) | sklearn ensemble over 49 whole-cell features. A soft handoff runs Stage 2+3 for both cell types when confidence is below threshold and picks the higher-confidence outcome. |
 | Stage 2 | Per-subtree classification (axon / basal / apical) | sklearn ensemble. Labels are propagated to all branches in the same primary subtree — no mid-track type switches. |
-| Stage 2b | Apical-vs-basal re-decision on pyramidal dendrites | GraphSAGE GNN over the branch graph. Optional. Skipped automatically if torch / torch_geometric / the GNN checkpoint are missing. |
+| Stage 2b | Apical-vs-basal re-decision on pyramidal dendrites | GraphSAGE GNN over the branch graph. |
 | Stage 3 | Topology refinement | Smooths short islands, enforces hard constraints (one primary axon, one primary apical) at the soma boundary. |
+
+All four stages are required. `pip install -e .` ships every stage's
+trained model file plus the torch / torch_geometric runtime, so the
+engine works out of the box. If any stage's model file is missing —
+or torch / torch_geometric fails to import — the engine refuses to
+run and surfaces a clear search-path diagnostic instead of silently
+degrading.
 
 The engine always emits soma + axon + basal labels and detects apical
 automatically — no class-selection flags. Apical detection requires
@@ -148,14 +155,13 @@ Training writes three files into `my_models/`:
 
 - `cell_type_classifier.pkl` (Stage 1)
 - `branch_classifier.pkl` (Stage 2)
-- `gnn_apical_basal.pt` (Stage 2b — skipped if `--no-gnn` is set or
-  torch is unavailable)
+- `gnn_apical_basal.pt` (Stage 2b)
 
-Tunable flags (all optional):
+Tunable flags:
 
 | Flag | Default | Meaning |
 |---|---|---|
-| `--no-gnn` | (off) | skip Stage 2b GNN training |
+| `--no-gnn` | (off) | skip Stage 2b GNN training (refresh Stages 1+2 only; the existing GNN checkpoint must already be in `--output-dir`) |
 | `--seed` | 42 | random seed for splits and models |
 | `--gnn-hidden` | 128 | GraphSAGE hidden dim |
 | `--gnn-layers` | 3 | GraphSAGE depth |
@@ -164,9 +170,8 @@ Tunable flags (all optional):
 | `--gnn-patience` | 25 | early-stopping patience |
 
 Training runs Stage 1 (fast — seconds), then Stage 2 (minutes per ~1000
-cells), then optionally the GNN (a few minutes on CPU; faster with
-CUDA). Memory and time scale with dataset size and morphology
-complexity.
+cells), then the Stage 2b GNN (a few minutes on CPU; faster with CUDA).
+Memory and time scale with dataset size and morphology complexity.
 
 ### Using your custom models
 
@@ -231,25 +236,28 @@ the bundled fallbacks.
 
 ## Troubleshooting
 
-### "Auto-typing needs the Stage 1 and Stage 2 model files."
+### "Auto-typing is missing required model files"
 
-Means the resolver couldn't find `cell_type_classifier.pkl` or
-`branch_classifier.pkl`. Run `swcstudio models status` to see the full
-search path. The most common cause is a typo or non-existent path
-passed to `--model-dir` or `SWCSTUDIO_MODEL_DIR`.
+Means the resolver couldn't find one of the three required model
+files: `cell_type_classifier.pkl` (Stage 1),
+`branch_classifier.pkl` (Stage 2), or `gnn_apical_basal.pt`
+(Stage 2b). Run `swcstudio models status` to see the full search
+path. The most common cause is a typo or non-existent path passed to
+`--model-dir` or `SWCSTUDIO_MODEL_DIR`.
 
-### GNN says "torch / torch_geometric unavailable"
+### "Auto-typing requires torch and torch_geometric"
 
-You probably installed without torch. The GNN is the only optional
-component — install it with:
+torch and torch_geometric are required dependencies of the package.
+Seeing this error means your install is broken — most often a venv
+was created with a different Python version than the one currently
+active. Reinstall:
 
 ```bash
-pip install torch torch-geometric
+pip install -e .
 ```
 
-(They're already in the standard `pip install -e .` since the [recent
-install simplification](#setup); this only matters for stripped-down
-environments.)
+If that still fails, recreate the venv from scratch (see
+[Getting Started](../GETTING_STARTED.md)).
 
 ### Pickle deserialization errors
 

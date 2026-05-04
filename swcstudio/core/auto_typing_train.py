@@ -22,8 +22,11 @@ Training stages (run in this order):
     1. Stage 1 cell-type classifier (sklearn ensemble, fast).
     2. Stage 2 per-branch / per-subtree classifier (sklearn ensemble,
        slow — minutes per 1000 cells).
-    3. (Optional) GraphSAGE GNN apical-vs-basal head on the pyramidal
-       train split. Requires torch + torch_geometric.
+    3. Stage 2b GraphSAGE GNN apical-vs-basal head on the pyramidal
+       train split. Always trained as part of the pipeline (torch +
+       torch_geometric are required dependencies of the package). Pass
+       ``--no-gnn`` if you only want to retrain Stages 1+2 against an
+       existing GNN checkpoint.
 
 Output is a directory containing the three standard model files
 (``cell_type_classifier.pkl``, ``branch_classifier.pkl``,
@@ -88,9 +91,9 @@ def train_user_models(
     output_dir
         Where to write the trained model files. Created if missing.
     train_gnn
-        Whether to also train the GraphSAGE apical-vs-basal head. If
-        torch is unavailable, the GNN is skipped automatically with a
-        printed warning.
+        Whether to retrain the GraphSAGE apical-vs-basal head. Default
+        ``True``. Set to ``False`` when you only want to refresh
+        Stages 1+2 and re-use the existing bundled GNN checkpoint.
     seed, gnn_hidden, gnn_layers, gnn_dropout, gnn_epochs, gnn_patience
         Hyperparameters. Defaults match the v9 release configuration.
 
@@ -136,83 +139,79 @@ def train_user_models(
     gnn_metrics: dict[str, Any] | None = None
     if train_gnn:
         print("\n[3/3] Training GNN apical-vs-basal head...")
-        try:
-            import torch  # noqa: F401
-            import torch_geometric  # noqa: F401
-        except Exception as exc:  # noqa: BLE001
-            print(
-                f"  SKIP — torch / torch_geometric unavailable ({exc.__class__.__name__}). "
-                f"Install with `pip install torch torch_geometric` to enable GNN training."
-            )
-        else:
-            from swcstudio.core.auto_typing.gnn_apical_basal import (  # noqa: PLC0415
-                ApicalBasalSAGE,
-                FeatureScaler,
-                TrainConfig,
-                cross_validate,
-                fit_final,
-                load_pyramidal_split,
-                save_checkpoint,
-            )
-            from swcstudio.core.auto_typing.gnn_dataset import DENDRITE_FEATURE_NAMES  # noqa: PLC0415
+        # torch and torch_geometric are required deps of the package; if
+        # they fail to import the install is broken and we want a clear
+        # error, not a silent skip.
+        import torch  # noqa: PLC0415
+        import torch_geometric  # noqa: F401, PLC0415
+        from swcstudio.core.auto_typing.gnn_apical_basal import (  # noqa: PLC0415
+            ApicalBasalSAGE,
+            FeatureScaler,
+            TrainConfig,
+            cross_validate,
+            fit_final,
+            load_pyramidal_split,
+            save_checkpoint,
+        )
+        from swcstudio.core.auto_typing.gnn_dataset import DENDRITE_FEATURE_NAMES  # noqa: PLC0415
 
-            cfg = TrainConfig(
-                hidden=gnn_hidden,
-                n_layers=gnn_layers,
-                dropout=gnn_dropout,
-                epochs=gnn_epochs,
-                patience=gnn_patience,
-                seed=seed,
-            )
-            device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        cfg = TrainConfig(
+            hidden=gnn_hidden,
+            n_layers=gnn_layers,
+            dropout=gnn_dropout,
+            epochs=gnn_epochs,
+            patience=gnn_patience,
+            seed=seed,
+        )
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-            # The eval split file produced by train_stage2 lives next to
-            # the produced bundle. Re-use it so the GNN's test files are
-            # the held-out 20% the rest of the pipeline already excluded.
-            eval_split_path = stage2_out.parent / "eval_split.json"
-            if not eval_split_path.is_file():
-                # train_stage2 doesn't always produce an eval_split.json in
-                # the user-training flow; fall back to the bundled split
-                # next to the auto_typing pipeline modules.
-                eval_split_path = (
-                    Path(__file__).resolve().parent
-                    / "auto_typing" / "models" / "eval_split.json"
-                )
-
-            train_graphs, test_graphs = load_pyramidal_split(
-                data_dir, eval_split_path,
-                feature_names=DENDRITE_FEATURE_NAMES,
-                progress=True,
-            )
-            in_dim = train_graphs[0].x.shape[1]
-            cv_results = cross_validate(
-                train_graphs, cfg, device, n_folds=5, in_dim=in_dim,
+        # The eval split file produced by train_stage2 lives next to
+        # the produced bundle. Re-use it so the GNN's test files are
+        # the held-out 20% the rest of the pipeline already excluded.
+        eval_split_path = stage2_out.parent / "eval_split.json"
+        if not eval_split_path.is_file():
+            # train_stage2 doesn't always produce an eval_split.json in
+            # the user-training flow; fall back to the bundled split
+            # next to the auto_typing pipeline modules.
+            eval_split_path = (
+                Path(__file__).resolve().parent
+                / "auto_typing" / "models" / "eval_split.json"
             )
 
-            import numpy as np  # noqa: PLC0415
-            median_best_epoch = int(np.median([r.best_epoch for r in cv_results]))
-            final_epochs = max(median_best_epoch + 1, 30)
-            model, scaler, test_metrics = fit_final(
-                train_graphs, test_graphs, cfg, device,
-                in_dim=in_dim, n_epochs=final_epochs,
-            )
+        train_graphs, test_graphs = load_pyramidal_split(
+            data_dir, eval_split_path,
+            feature_names=DENDRITE_FEATURE_NAMES,
+            progress=True,
+        )
+        in_dim = train_graphs[0].x.shape[1]
+        cv_results = cross_validate(
+            train_graphs, cfg, device, n_folds=5, in_dim=in_dim,
+        )
 
-            gnn_out = output_dir / MODEL_FILES["gnn"]
-            save_checkpoint(
-                gnn_out, model, scaler, cfg,
-                DENDRITE_FEATURE_NAMES, cv_results, test_metrics,
-                final_epochs=final_epochs,
-            )
-            print(f"  saved {gnn_out}")
+        import numpy as np  # noqa: PLC0415
+        median_best_epoch = int(np.median([r.best_epoch for r in cv_results]))
+        final_epochs = max(median_best_epoch + 1, 30)
+        model, scaler, test_metrics = fit_final(
+            train_graphs, test_graphs, cfg, device,
+            in_dim=in_dim, n_epochs=final_epochs,
+        )
 
-            cv_macro = float(
-                np.mean([r.val_branch_macro_f1 for r in cv_results])
-            )
-            gnn_metrics = {
-                "cv_macro_f1_mean": cv_macro,
-                "test_metrics": test_metrics,
-                "final_epochs": final_epochs,
-            }
+        gnn_out = output_dir / MODEL_FILES["gnn"]
+        save_checkpoint(
+            gnn_out, model, scaler, cfg,
+            DENDRITE_FEATURE_NAMES, cv_results, test_metrics,
+            final_epochs=final_epochs,
+        )
+        print(f"  saved {gnn_out}")
+
+        cv_macro = float(
+            np.mean([r.val_branch_macro_f1 for r in cv_results])
+        )
+        gnn_metrics = {
+            "cv_macro_f1_mean": cv_macro,
+            "test_metrics": test_metrics,
+            "final_epochs": final_epochs,
+        }
 
     print("\nTraining complete.")
     print(

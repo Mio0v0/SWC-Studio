@@ -9,10 +9,12 @@ an SWC into soma / axon / basal dendrite / apical dendrite:
 * Stage 2: per-subtree axon/basal/apical classifier (sklearn
   ensemble), propagated to all branches in the same primary subtree.
 * Stage 2b: GraphSAGE GNN over the branch graph re-decides
-  apical-vs-basal for pyramidal dendrite branches. Skipped
-  automatically if torch / torch_geometric / the GNN checkpoint are
-  unavailable.
+  apical-vs-basal for pyramidal dendrite branches.
 * Stage 3: topology refinement.
+
+All four stages are required. The package's required dependencies
+include sklearn, torch, and torch_geometric, and ``pip install -e .``
+ships the trained model files for every stage.
 
 End users typically reach this code through the CLI (``swcstudio
 validation auto-label``, ``swcstudio batch auto-typing``) or through

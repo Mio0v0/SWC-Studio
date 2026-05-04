@@ -58,8 +58,8 @@ Current feature mapping:
 Both Batch Processing → Auto Label Editing and Validation → Auto Label
 Editing run the same engine: the v9 ML pipeline shipped in
 `swcstudio.core.auto_typing` (Stage 1 cell-type detector + Stage 2
-per-subtree classifier + optional Stage 2b GraphSAGE GNN + Stage 3
-topology refinement).
+per-subtree classifier + Stage 2b GraphSAGE GNN + Stage 3 topology
+refinement). All four stages are required.
 
 The panel has a **Run** button and an optional **Model dir** picker.
 Leave the field blank to use the default model search path:
@@ -77,14 +77,11 @@ field shows whether the engine can run with the current selection;
 hovering reveals the full search-path diagnostic when something is
 missing.
 
-If the engine cannot find the Stage 1 / Stage 2 pickles, **Run**
-produces a clear error with the search-path diagnostic instead of
-starting work. The Stage 2b GNN is optional — if it's missing, the
-engine still runs Stages 1 + 2 + 3 and just skips the
-apical-vs-basal re-decision.
-
-The bundled v9 models ship with the package, so a fresh `pip install
--e .` produces a fully working engine with no extra steps.
+If any of the three model files (Stage 1 pickle, Stage 2 pickle,
+Stage 2b GNN checkpoint) is missing, **Run** produces a clear error
+with the search-path diagnostic instead of starting work. The bundled
+v9 models ship with the package, so a fresh `pip install -e .`
+produces a fully working engine with no extra steps.
 
 ## What happens when a file is opened
 

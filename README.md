@@ -16,7 +16,7 @@ Both the CLI and GUI use the same core feature logic.
 
 ### Auto-labeling engine
 
-Auto-labeling uses a single ML pipeline: the **v9 engine**. It runs a four-stage process — cell-type detection, per-subtree axon/basal/apical classification, an optional GraphSAGE GNN apical-vs-basal re-decision, and topology refinement — and automatically chooses between 3-class (no apical) and 4-class output per file.
+Auto-labeling uses a single ML pipeline: the **v9 engine**. It runs a four-stage process — cell-type detection, per-subtree axon/basal/apical classification, a GraphSAGE GNN apical-vs-basal re-decision, and topology refinement — and automatically chooses between 3-class (no apical) and 4-class output per file. All four stages are required and ship trained out of the box.
 
 The toolkit ships with bundled trained models. After `pip install -e .` the engine works out of the box; users can also retrain on their own labeled SWC corpus via `swcstudio train auto-typing` and have the toolkit pick up the new models automatically.
 

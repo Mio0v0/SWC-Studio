@@ -1,15 +1,18 @@
 """Public entry points for the auto-typing engine.
 
-Three stages drive every prediction:
+Four stages drive every prediction:
 
 * Stage 1: cell-type detector (sklearn ensemble, 49 whole-cell
   features) decides pyramidal vs interneuron with a soft handoff.
 * Stage 2: per-subtree axon/basal/apical classifier (sklearn
   ensemble), propagated to all branches in the same primary subtree.
 * Stage 2b: GraphSAGE GNN over the branch graph re-decides
-  apical-vs-basal for pyramidal dendrite branches. Skipped when
-  torch / torch_geometric / the GNN checkpoint are unavailable.
+  apical-vs-basal for pyramidal dendrite branches.
 * Stage 3: topology refinement.
+
+All four stages are required. ``is_available`` returns False if any
+of the three model files (Stage 1 pickle, Stage 2 pickle, GNN
+checkpoint) or torch / torch_geometric are missing.
 
 Public surface:
 
@@ -51,16 +54,37 @@ def is_available(*, model_dir: str | None = None) -> tuple[bool, str]:
     """Return ``(ok, reason)`` describing whether the auto-typing engine
     can run right now.
 
-    The engine needs the Stage 1 and Stage 2 sklearn pickles. The Stage
-    2b GNN checkpoint is optional — when missing the engine still runs
-    Stage 1 + Stage 2 + Stage 3 only.
+    The engine requires all three model files (Stage 1 sklearn pickle,
+    Stage 2 sklearn pickle, Stage 2b GNN checkpoint) plus torch and
+    torch_geometric — they are required dependencies of the package, so
+    a normal install satisfies them. When something is missing this
+    returns ``(False, reason)`` with a search-path diagnostic so the
+    GUI / CLI can fail fast with a clear message.
     """
     s1 = resolve_model_path("stage1", override=model_dir)
     s2 = resolve_model_path("stage2", override=model_dir)
-    if s1 is None or s2 is None:
+    gnn = resolve_model_path("gnn", override=model_dir)
+    missing = []
+    if s1 is None:
+        missing.append("Stage 1 (cell_type_classifier.pkl)")
+    if s2 is None:
+        missing.append("Stage 2 (branch_classifier.pkl)")
+    if gnn is None:
+        missing.append("Stage 2b GNN (gnn_apical_basal.pt)")
+    if missing:
         return False, (
-            "Auto-typing needs the Stage 1 and Stage 2 model files.\n"
-            f"{diagnostic_search_report(override=model_dir)}"
+            "Auto-typing is missing required model files: "
+            + ", ".join(missing) + ".\n"
+            + diagnostic_search_report(override=model_dir)
+        )
+    try:
+        import torch  # noqa: F401
+        import torch_geometric  # noqa: F401
+    except Exception as exc:  # noqa: BLE001
+        return False, (
+            "Auto-typing requires torch and torch_geometric "
+            f"(import failed: {exc.__class__.__name__}: {exc}). "
+            "Reinstall the package: `pip install -e .`."
         )
     return True, "available"
 
@@ -103,21 +127,21 @@ def backend_status(*, model_dir: str | None = None) -> dict[str, Any]:
 _GNN_CACHE: dict[str, Any] = {"path": None, "state": None}
 
 
-def _load_gnn_state(model_dir: str | None) -> Any | None:
+def _load_gnn_state(model_dir: str | None) -> Any:
+    """Load the Stage 2b GNN checkpoint. Raises if it cannot be loaded —
+    the GNN is a required pipeline stage, not optional.
+    """
     gnn_path = resolve_model_path("gnn", override=model_dir)
     if gnn_path is None:
-        return None
+        raise FileNotFoundError(
+            "Stage 2b GNN checkpoint (gnn_apical_basal.pt) not found.\n"
+            + diagnostic_search_report(override=model_dir)
+        )
     cache_key = str(gnn_path.resolve())
     if _GNN_CACHE.get("path") == cache_key and _GNN_CACHE.get("state") is not None:
         return _GNN_CACHE["state"]
-    try:
-        from .gnn_inference import load_gnn  # noqa: PLC0415
-    except Exception:
-        return None
-    try:
-        state = load_gnn(gnn_path)
-    except Exception:
-        return None
+    from .gnn_inference import load_gnn  # noqa: PLC0415
+    state = load_gnn(gnn_path)
     _GNN_CACHE["path"] = cache_key
     _GNN_CACHE["state"] = state
     return state

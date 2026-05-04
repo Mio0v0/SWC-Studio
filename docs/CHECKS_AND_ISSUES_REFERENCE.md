@@ -210,7 +210,7 @@ the v9 ML pipeline, implemented in:
 |---|---|---|
 | Stage 1 | sklearn ensemble over 49 whole-cell features (`cell_type_classifier.pkl`) | pyramidal vs interneuron |
 | Stage 2 | sklearn ensemble per primary subtree (`branch_classifier.pkl`) | axon / basal / apical per subtree |
-| Stage 2b | GraphSAGE GNN over the branch graph (`gnn_apical_basal.pt`, optional) | apical-vs-basal re-decision on pyramidal dendrites |
+| Stage 2b | GraphSAGE GNN over the branch graph (`gnn_apical_basal.pt`) | apical-vs-basal re-decision on pyramidal dendrites |
 | Stage 3 | topology refinement | soma-boundary constraints applied (one primary axon, one primary apical), short islands flipped |
 
 Stage 1 uses a soft handoff: when its confidence is below threshold it

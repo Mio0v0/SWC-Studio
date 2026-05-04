@@ -136,14 +136,15 @@ swcstudio split ./data
 
 - Purpose: auto-labeling for every SWC in one folder, using the v9 ML
   engine (Stage 1 cell-type detector + Stage 2 per-subtree classifier
-  + optional Stage 2b GNN + Stage 3 topology refinement)
+  + Stage 2b GraphSAGE GNN + Stage 3 topology refinement). All four
+  stages are required.
 - Prints a short engine summary before processing
 - Soma, axon, and basal labeling are always enabled
 - The engine automatically switches between 3-class and 4-class
   labeling by detecting whether an apical subtree is present
 - Optional `--model-dir` points at a directory of trained model files
-  (Stage 1 + Stage 2 + optional GNN); falls back to user-data /
-  bundled models if omitted
+  (Stage 1 + Stage 2 + Stage 2b GNN, all three required); falls back
+  to user-data / bundled models if omitted
 
 Examples:
 
@@ -343,9 +344,11 @@ swcstudio insert ./data/single-soma.swc --start-id 10 --end-id 22 --x 100 --y 12
 
 ### `swcstudio train auto-typing`
 
-Train Stage 1 (cell-type classifier), Stage 2 (per-branch classifier),
-and (optionally) the Stage 2b GraphSAGE GNN apical-vs-basal head on
-your own labeled SWC corpus.
+Train all three model files of the v9 ML pipeline — Stage 1
+(cell-type classifier), Stage 2 (per-branch classifier), and Stage 2b
+(GraphSAGE GNN apical-vs-basal head) — on your own labeled SWC corpus.
+All three are required at inference time. Pass `--no-gnn` only when
+you want to refresh Stages 1+2 against an existing GNN checkpoint.
 
 Required dataset layout:
 

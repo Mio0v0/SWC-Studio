@@ -211,8 +211,7 @@ def _print_auto_typing_guide() -> None:
         "----------------------------------\n"
         "Stage 1  cell-type detector (sklearn) — pyramidal vs interneuron\n"
         "Stage 2  per-subtree classifier (sklearn) — axon / basal / apical\n"
-        "Stage 2b GraphSAGE GNN — apical-vs-basal re-decision (skipped if\n"
-        "         torch / torch_geometric / GNN checkpoint unavailable)\n"
+        "Stage 2b GraphSAGE GNN — apical-vs-basal re-decision\n"
         "Stage 3  topology refinement\n"
         "\n"
         "Models are resolved via SWCSTUDIO_MODEL_DIR, --model-dir, the\n"
@@ -563,7 +562,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     train_auto = train_sub.add_parser(
         "auto-typing",
-        help="Train Stage 1 + Stage 2 (+ optional GNN) on a labeled SWC dataset.",
+        help="Train Stage 1 + Stage 2 + Stage 2b GNN on a labeled SWC dataset.",
     )
     train_auto.add_argument(
         "--data-dir",

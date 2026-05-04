@@ -94,8 +94,8 @@ swcstudio index-clean ./data
 
 ## Step 5b: Train your own auto-typing models
 
-If you have a labeled SWC corpus, you can train custom Stage 1 + Stage 2
-(+ optional Stage 2b GNN) models tuned to your data:
+If you have a labeled SWC corpus, you can train all three models —
+Stage 1, Stage 2, and the Stage 2b GNN — tuned to your data:
 
 ```bash
 swcstudio train auto-typing --data-dir ./labeled --output-dir ./my-models
@@ -115,7 +115,8 @@ labeled/
 
 The standard `pip install -e .` already includes torch and
 torch_geometric, so GNN training works out of the box. Use `--no-gnn`
-to train Stage 1 + Stage 2 only.
+only when you want to refresh Stages 1+2 against an existing
+`gnn_apical_basal.pt` checkpoint that's already in `--output-dir`.
 
 To make your custom models the new default everywhere (no `--model-dir`
 flag needed), copy them into your user data directory — see the
