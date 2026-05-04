@@ -27,6 +27,23 @@ GUI selector.
 """
 from __future__ import annotations
 
+import warnings as _warnings
+
+# Silence sklearn's InconsistentVersionWarning for the bundled pickles.
+# The package pins ``scikit-learn>=1.5,<1.6``, so any mismatch with the
+# trained-on version is patch-level only (e.g. 1.5.1 trained vs 1.5.2
+# installed), which sklearn keeps wire-compatible. The warning is
+# noisy — sklearn fires it once per estimator inside a pickled bundle,
+# so users would see ~10 identical messages on the first auto-label
+# run — and is not actionable at the patch level. A real cross-minor
+# mismatch would already raise an ``ImportError`` from a missing C
+# symbol, not this warning, so suppressing it doesn't hide real bugs.
+try:
+    from sklearn.exceptions import InconsistentVersionWarning as _InconsistentVersionWarning  # noqa: PLC0415
+    _warnings.filterwarnings("ignore", category=_InconsistentVersionWarning)
+except ImportError:  # pragma: no cover - sklearn is a required dep
+    pass
+
 from .config import DEFAULT_CONFIG, get_config, save_config
 from .runner import (
     backend_status,
