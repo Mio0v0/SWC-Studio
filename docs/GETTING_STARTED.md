@@ -11,13 +11,11 @@ There are two supported ways to start:
 
 ## Supported Python versions
 
-Source installs currently support:
+Source installs support **Python 3.10, 3.11, 3.12, and 3.13**.
 
-- Python 3.10
-- Python 3.11
-- Python 3.12
-
-Python 3.11 is the safest default for most users.
+Python 3.11 or 3.12 is the safest default. PyTorch occasionally lags
+on the newest Python release, so if you hit a wheel resolution problem
+on 3.13 fall back to 3.12.
 
 ## Packaged desktop release
 
@@ -36,58 +34,71 @@ Release page:
 Clone the repository:
 
 ```bash
-git clone <your-repo-url>
-cd <repo-folder-name>
+git clone https://github.com/Mio0v0/SWC-Studio.git
+cd SWC-Studio
 ```
 
-### Conda
+One command installs everything — the CLI, the desktop GUI, the
+auto-typing engine (sklearn + torch), and the bundled v9 model files:
 
-```bash
-conda create -n swc-studio python=3.11 -y
-conda activate swc-studio
-python -m pip install --upgrade pip
-pip install -e ".[gui]"
-```
-
-### venv on macOS or Linux
+### macOS / Linux
 
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install --upgrade pip
-pip install -e ".[gui]"
+pip install -e .
 ```
 
-### venv on Windows PowerShell
+### Windows PowerShell
 
 ```powershell
-py -m venv .venv
+py -3.12 -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install --upgrade pip
-pip install -e ".[gui]"
+pip install -e .
 ```
 
-### CLI-only install
+### Conda
 
 ```bash
-python -m pip install -e .
+conda create -n swc-studio python=3.12 -y
+conda activate swc-studio
+python -m pip install --upgrade pip
+pip install -e .
 ```
+
+### Optional developer extras
+
+For maintainers who need PyInstaller (release packaging) and Sphinx
+(docs build):
+
+```bash
+pip install -e ".[all]"
+```
+
+End users do not need this.
 
 ## Verify installation
 
-For a source install:
-
 ```bash
 swcstudio --help
+swcstudio models status
 swcstudio-gui --help
 ```
 
-If the console script is not on your path, use module mode:
+If a console script is not on your path, fall back to module mode:
 
 ```bash
 python -m swcstudio.cli.cli --help
 python -m swcstudio.gui.main
 ```
+
+`swcstudio models status` is worth running once after install: it
+prints the auto-typing engine's model search path and confirms the
+three bundled model files are reachable. You should see all three of
+`cell_type_classifier.pkl`, `branch_classifier.pkl`, and
+`gnn_apical_basal.pt` listed as `[FOUND]`.
 
 ## First CLI checks
 
@@ -107,7 +118,33 @@ swcstudio simplify ./data/single-soma.swc
 swcstudio connect ./data/single-soma.swc --start-id 10 --end-id 22
 ```
 
-Single-file edit commands write both the updated SWC and the matching log into the source file's default output directory. No separate `--write` flag is required.
+Single-file edit commands write both the updated SWC and the matching
+log into the source file's default output directory. No separate
+`--write` flag is required.
+
+`auto-label` always applies soma / axon / basal labeling and
+automatically enables apical labeling only when an apical subtree is
+detected.
+
+## Train your own auto-typing models (optional)
+
+The bundled models work out of the box, but if you want models tuned
+to your own labeled SWC corpus:
+
+```bash
+swcstudio train auto-typing --data-dir ./labeled-dataset --output-dir ./my-models
+```
+
+The dataset must have `pyramidal/` and `interneuron/` subfolders of
+labeled `.swc` files. To make your trained models the new default,
+copy them into your user data dir (Windows: `%APPDATA%\swcstudio\models`,
+macOS: `~/Library/Application Support/swcstudio/models`, Linux:
+`~/.local/share/swcstudio/models`) — every CLI/GUI call will use them
+automatically.
+
+See the [Auto-Typing Engine](documentation/auto-typing-backends.md) page
+for the full retraining workflow, hyperparameter flags, and model
+resolution rules.
 
 ## First GUI checks
 
@@ -145,6 +182,7 @@ Typical files written there include:
 ## Recommended next pages
 
 - [User Guide](documentation/index.md)
+- [Auto-Typing Engine](documentation/auto-typing-backends.md)
 - [GUI Workflow Guide](GUI_WORKFLOW.md)
 - [CLI Tutorial](tutorials/cli-tutorial.md)
 - [Logs And Reports](LOGS_AND_REPORTS.md)

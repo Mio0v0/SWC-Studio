@@ -6,7 +6,7 @@ functions or the corresponding tool/feature modules.
 
 from __future__ import annotations
 
-from swcstudio.core.auto_typing import RuleBatchOptions
+from swcstudio.core.auto_typing import BatchOptions
 from swcstudio.plugins import (
     autoload_plugins_from_environment,
     get_plugin,
@@ -81,7 +81,7 @@ from swcstudio.tools.visualization.features.mesh_editing import (
 )
 
 __all__ = [
-    "RuleBatchOptions",
+    "BatchOptions",
     "batch_validate_folder",
     "batch_split_folder",
     "batch_auto_typing",

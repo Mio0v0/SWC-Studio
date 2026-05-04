@@ -30,16 +30,18 @@ Generated build outputs should not be tracked:
 
 Packaging dependencies are declared in `pyproject.toml`:
 
-- `.[gui]` for runtime GUI dependencies
-- `.[build]` for build tooling (`PyInstaller`)
+- the project base (`.`) includes the CLI, GUI, auto-typing engine,
+  and bundled model files
+- `.[build]` adds `PyInstaller`
+- `.[all]` is the maintainer catch-all (build + Sphinx)
 
 Recommended install inside a clean macOS build environment:
 
 ```bash
-python3.11 -m venv .venv-packaging-macos
+python3.12 -m venv .venv-packaging-macos
 source .venv-packaging-macos/bin/activate
 python -m pip install --upgrade pip setuptools wheel
-pip install --no-cache-dir -e ".[gui,build]"
+pip install --no-cache-dir -e ".[build]"
 ```
 
 ## Build Command

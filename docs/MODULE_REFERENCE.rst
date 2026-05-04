@@ -27,7 +27,25 @@ Core Modules
 .. automodule:: swcstudio.core.validation_catalog
    :members:
 
-.. automodule:: swcstudio.core.auto_typing_impl
+.. automodule:: swcstudio.core.auto_typing
+   :members:
+
+.. automodule:: swcstudio.core.auto_typing.runner
+   :members:
+
+.. automodule:: swcstudio.core.auto_typing.types
+   :members:
+
+.. automodule:: swcstudio.core.auto_typing.config
+   :members:
+
+.. automodule:: swcstudio.core.auto_typing.pipeline
+   :members:
+
+.. automodule:: swcstudio.core.auto_typing_train
+   :members:
+
+.. automodule:: swcstudio.core.model_paths
    :members:
 
 Tool Feature Modules

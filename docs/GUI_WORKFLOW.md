@@ -35,7 +35,7 @@ Current feature mapping:
 - Batch Processing
   - Split
   - Validation
-  - Auto Label Editing
+  - Auto Label Editing  *(see "Auto Label Editing" below)*
   - Radii Cleaning
   - Simplification
   - Index Clean
@@ -46,12 +46,45 @@ Current feature mapping:
   - View Controls
 - Morphology Editing
   - Manual Label Editing
-  - Auto Label Editing
+  - Auto Label Editing  *(see "Auto Label Editing" below)*
   - Manual Radii Editing
   - Auto Radii Editing
 - Geometry Editing
   - Geometry Editing
   - Simplification
+
+## Auto Label Editing
+
+Both Batch Processing → Auto Label Editing and Validation → Auto Label
+Editing run the same engine: the v9 ML pipeline shipped in
+`swcstudio.core.auto_typing` (Stage 1 cell-type detector + Stage 2
+per-subtree classifier + optional Stage 2b GraphSAGE GNN + Stage 3
+topology refinement).
+
+The panel has a **Run** button and an optional **Model dir** picker.
+Leave the field blank to use the default model search path:
+
+1. `SWCSTUDIO_MODEL_DIR` environment variable
+2. user data directory (`%APPDATA%\swcstudio\models` on Windows,
+   `~/Library/Application Support/swcstudio/models` on macOS,
+   `~/.local/share/swcstudio/models` on Linux)
+3. bundled `swcstudio/data/models/` inside the installed package
+
+Fill in the Model dir field to point at a directory of custom-trained
+models — for example, the output of `swcstudio train auto-typing`. A
+small green "models OK" / red "models missing" indicator next to the
+field shows whether the engine can run with the current selection;
+hovering reveals the full search-path diagnostic when something is
+missing.
+
+If the engine cannot find the Stage 1 / Stage 2 pickles, **Run**
+produces a clear error with the search-path diagnostic instead of
+starting work. The Stage 2b GNN is optional — if it's missing, the
+engine still runs Stages 1 + 2 + 3 and just skips the
+apical-vs-basal re-decision.
+
+The bundled v9 models ship with the package, so a fresh `pip install
+-e .` produces a fully working engine with no extra steps.
 
 ## What happens when a file is opened
 

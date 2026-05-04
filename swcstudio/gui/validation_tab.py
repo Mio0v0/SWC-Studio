@@ -57,7 +57,7 @@ _ISSUE_GUIDE_CATALOG: list[tuple[str, list[tuple[str, str]]]] = [
             ),
             (
                 "Likely wrong labels",
-                "Aggregates nodes whose neurite types look inconsistent with the rule-based auto-typing heuristics.",
+                "Aggregates nodes whose neurite types look inconsistent with the auto-typing engine's predictions.",
             ),
         ],
     ),

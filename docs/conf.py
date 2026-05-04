@@ -95,3 +95,8 @@ myst_enable_extensions = [
     "deflist",
     "fieldlist",
 ]
+
+# Generate implicit anchors for headings up to depth 3 so cross-document
+# fragment links like `auto-typing-backends.md#using-your-custom-models`
+# resolve correctly.
+myst_heading_anchors = 3

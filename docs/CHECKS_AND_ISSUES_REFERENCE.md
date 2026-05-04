@@ -15,7 +15,7 @@ Primary code sources:
 - `swcstudio/core/validation_checks/neuron_morphology_checks.py`
 - `swcstudio/core/issues.py`
 - `swcstudio/core/radii_cleaning.py`
-- `swcstudio/core/auto_typing_impl.py`
+- `swcstudio/core/auto_typing/` (engine package)
 - `swcstudio/tools/validation/configs/default.json`
 - `swcstudio/tools/batch_processing/configs/radii_cleaning.json`
 - `swcstudio/tools/batch_processing/configs/auto_typing.json`
@@ -198,64 +198,52 @@ Important defaults:
 
 ## Auto Labeling Algorithm
 
-The suspicious label issue and Auto Label Editing use the shared backend in:
+The suspicious label issue and Auto Label Editing run the same engine,
+the v9 ML pipeline, implemented in:
 
-- `swcstudio/core/auto_typing_impl.py`
-- `swcstudio/tools/batch_processing/configs/auto_typing.json`
+- `swcstudio/core/auto_typing/` (engine package)
+- `swcstudio/tools/batch_processing/configs/auto_typing.json` (user-editable runtime knobs)
 
-### Current method
+### Pipeline stages
 
-The current method is branch-consistent and subtree-constrained:
+| Stage | Implementation | Output |
+|---|---|---|
+| Stage 1 | sklearn ensemble over 49 whole-cell features (`cell_type_classifier.pkl`) | pyramidal vs interneuron |
+| Stage 2 | sklearn ensemble per primary subtree (`branch_classifier.pkl`) | axon / basal / apical per subtree |
+| Stage 2b | GraphSAGE GNN over the branch graph (`gnn_apical_basal.pt`, optional) | apical-vs-basal re-decision on pyramidal dendrites |
+| Stage 3 | topology refinement | soma-boundary constraints applied (one primary axon, one primary apical), short islands flipped |
 
-1. segment the morphology into directed branch units
-2. identify soma-child primary subtrees
-3. score primary subtrees as axon / basal / apical
-4. enforce hard constraints:
-   - one primary axon winner
-   - one primary apical winner
-   - root-to-leaf inheritance inside a classified primary subtree
-5. score remaining branches with path-aware features
-6. run local refinement / smoothing
-7. restore subtree-wide consistency after refinement
+Stage 1 uses a soft handoff: when its confidence is below threshold it
+runs Stages 2 + 3 for both cell types and picks the higher-confidence
+outcome.
 
-### Main feature families
+### Apical detection
 
-- path length
-- radial extent
-- mean radius
-- directional persistence
-- terminal taper
-- branchiness
-- branching symmetry
-- global `+Z` alignment
-- far-from-soma basal penalty
+Apical labeling requires both a learned per-subtree score and a
+minimum subtree-root radius. Files without a qualifying apical
+subtree get 3-class output (soma / axon / basal); files with one get
+4-class output (soma / axon / basal / apical). There are no
+class-selection flags exposed to the user.
 
-### Current important config keys
+### Config keys
 
-Main config file:
+The user-editable JSON at
+`swcstudio/tools/batch_processing/configs/auto_typing.json` is small —
+the engine's behavior is set by the trained model files, not by
+hand-tuned weights. Current keys:
 
-- `swcstudio/tools/batch_processing/configs/auto_typing.json`
+- `model_dir` — override the model search path (empty string means use
+  the default search order: env var → user data dir → bundled)
+- `use_subtree_stage2` — whether Stage 2 operates on full primary
+  subtrees (default `true`)
+- `enabled` — feature gate (default `true`)
+- `notes` — free-form description; not consumed by the engine
 
-Most important current rule groups:
-
-- `options`
-- `rules.branch_score_weights`
-- `rules.constraints`
-- `rules.ml_*`
-- `rules.refinement`
-- `rules.smoothing`
-- `rules.soma_child_prior`
-- `rules.radius.copy_parent_if_zero`
-
-Important defaults in `rules.constraints`:
-
-- `inherit_primary_subtree = true`
-- `single_axon = true`
-- `single_apical = true`
-- `axon_primary_min_score = 0.42`
-- `apical_primary_min_score = 0.42`
-- `far_basal_distance_um = 500.0`
-- `far_basal_penalty = 0.22`
+To swap in your own trained models without editing this file, copy them
+into the user data directory (`%APPDATA%\swcstudio\models\` on Windows,
+`~/Library/Application Support/swcstudio/models/` on macOS, or
+`~/.local/share/swcstudio/models/` on Linux) and they take precedence
+over the bundled defaults.
 
 ## How Checks Become GUI Issues
 

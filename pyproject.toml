@@ -11,18 +11,25 @@ requires-python = ">=3.10"
 license = {text = "MIT"}
 authors = [{name = "SWC-Dash Contributors"}]
 dependencies = [
+  # Core scientific stack
   "numpy>=1.24",
   "pandas>=2.0",
+  "scipy>=1.11",
   "morphio>=3.3",
-  "neurom>=4.0"
-]
-
-[project.optional-dependencies]
-gui = [
+  "neurom>=4.0",
+  # Auto-typing engine (v9 ML pipeline) — Stage 1 + Stage 2 sklearn
+  # ensembles, Stage 2b GraphSAGE GNN.
+  "scikit-learn>=1.5,<1.8",
+  "torch>=2.1",
+  "torch-geometric>=2.6",
+  # GUI — the desktop app is the primary user surface, so PySide6 and
+  # the visualization stack are required dependencies.
   "PySide6>=6.6",
   "pyqtgraph>=0.14",
   "vispy>=0.14"
 ]
+
+[project.optional-dependencies]
 build = [
   "PyInstaller>=6.11"
 ]
@@ -31,10 +38,9 @@ docs = [
   "pydata-sphinx-theme>=0.16",
   "myst-parser>=3.0"
 ]
+# Developer/maintainer extras — packaging tools + Sphinx for the docs.
+# Regular end users do not need this.
 all = [
-  "PySide6>=6.6",
-  "pyqtgraph>=0.14",
-  "vispy>=0.14",
   "PyInstaller>=6.11",
   "sphinx>=8.2",
   "pydata-sphinx-theme>=0.16",
@@ -47,3 +53,10 @@ swcstudio-gui = "swcstudio.gui.main:main"
 
 [tool.setuptools.packages.find]
 include = ["swcstudio*"]
+
+[tool.setuptools.package-data]
+# Ship the v9 model files (Stage 1 sklearn pickle, Stage 2 sklearn
+# pickle, Stage 2b GNN checkpoint) so `pip install` is self-contained
+# and end users get a working auto-typing engine out of the box without
+# downloading anything separately.
+"swcstudio" = ["data/models/*.pt", "data/models/*.pkl"]

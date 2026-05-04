@@ -112,14 +112,20 @@ Example library call:
 
 ```bash
 python - <<'PY'
-from swcstudio.api import RuleBatchOptions, batch_auto_typing
+from swcstudio.api import BatchOptions, batch_auto_typing
+from swcstudio.plugins.registry import resolve_method
 
-opts = RuleBatchOptions(soma=True, axon=True, apic=False, basal=True, rad=False, zip_output=False)
-print(batch_auto_typing("./data", options=opts, config_overrides={"method": "lab_summary"}))
+opts = BatchOptions(soma=True, axon=True, apic=False, basal=True, rad=False, zip_output=False)
+# The default `batch_auto_typing` always runs the built-in v9 ML
+# engine. To run a plugin-registered method instead, dispatch through
+# the plugin registry directly:
+fn = resolve_method("batch_processing.auto_typing", "lab_summary")
+print(fn("./data", opts, {}))
 PY
 ```
 
-The `method` value must exactly match the name used in `register_method(...)`.
+The method name (`"lab_summary"` above) must exactly match the name
+used in `register_method(...)`.
 
 ## Persistent Plugin Loading (Recommended)
 

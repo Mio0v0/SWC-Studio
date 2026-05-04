@@ -87,7 +87,7 @@ from swcstudio.core.reporting import (
 from swcstudio.core.swc_io import parse_swc_text_preserve_tokens, write_swc_to_bytes_preserve_tokens
 from swcstudio.core.validation_engine import consolidate_complex_somas_array
 from swcstudio.tools.morphology_editing.features.simplification import simplify_dataframe
-from swcstudio.tools.validation.features.auto_typing import RuleBatchOptions, run_file as run_validation_auto_typing_file
+from swcstudio.tools.validation.features.auto_typing import BatchOptions, run_file as run_validation_auto_typing_file
 
 
 @dataclass
@@ -1855,7 +1855,27 @@ class SWCMainWindow(QMainWindow):
             return
         self._validation_auto_label_panel.set_preview_state(False, doc.last_auto_label_result)
 
-    def _on_validation_auto_label_process_requested(self, options: object):
+    def _on_validation_auto_label_process_requested(self, options: object, backend_settings: object | None = None):
+        # The panel emits (options, {"model_dir": str|None}). The dict is
+        # optional for backward compatibility with any caller still connected
+        # to the single-argument variant of the signal.
+        backend_cfg: dict = {}
+        if isinstance(backend_settings, dict):
+            backend_cfg = dict(backend_settings)
+
+        config_overrides: dict = {}
+        if backend_cfg.get("model_dir"):
+            config_overrides["model_dir"] = str(backend_cfg["model_dir"])
+
+        from swcstudio.core.auto_typing import is_available as _engine_available  # noqa: PLC0415
+        ok, reason = _engine_available(model_dir=config_overrides.get("model_dir"))
+        if not ok:
+            self._append_log(f"Validation Auto Label Editing: engine unavailable: {reason}", "WARN")
+            self._validation_auto_label_panel.set_status_text(
+                "Auto-typing engine unavailable.\n\n" + str(reason)
+            )
+            return
+
         source_doc = self._active_source_document()
         if source_doc is None or source_doc.df is None or source_doc.df.empty:
             self._append_log("Validation Auto Label Editing: no active SWC document.", "WARN")
@@ -1870,6 +1890,7 @@ class SWCMainWindow(QMainWindow):
             result_obj = run_validation_auto_typing_file(
                 str(tmp_path),
                 options=options,
+                config_overrides=config_overrides,
                 write_output=False,
                 write_log=False,
             )

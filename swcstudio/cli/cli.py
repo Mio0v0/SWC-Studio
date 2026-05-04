@@ -11,8 +11,7 @@ import json
 import sys
 from pathlib import Path
 
-from swcstudio.core.auto_typing import RuleBatchOptions
-from swcstudio.core.auto_typing_catalog import format_auto_typing_guide_text
+from swcstudio.core.auto_typing import BatchOptions
 from swcstudio.core.config import merge_config
 from swcstudio.core.swc_io import parse_swc_text_preserve_tokens, write_swc_to_bytes_preserve_tokens
 from swcstudio.core.issues import build_issue_list
@@ -207,8 +206,19 @@ def _print_validation_results(report: dict) -> None:
 
 
 def _print_auto_typing_guide() -> None:
-    print(format_auto_typing_guide_text())
-    print("")
+    print(
+        "Auto-typing engine: v9 ML pipeline\n"
+        "----------------------------------\n"
+        "Stage 1  cell-type detector (sklearn) — pyramidal vs interneuron\n"
+        "Stage 2  per-subtree classifier (sklearn) — axon / basal / apical\n"
+        "Stage 2b GraphSAGE GNN — apical-vs-basal re-decision (skipped if\n"
+        "         torch / torch_geometric / GNN checkpoint unavailable)\n"
+        "Stage 3  topology refinement\n"
+        "\n"
+        "Models are resolved via SWCSTUDIO_MODEL_DIR, --model-dir, the\n"
+        "user data directory, or the bundled package directory.\n"
+        "Run `swcstudio models status` for a full diagnostic.\n"
+    )
 
 
 def _print_simplification_rule_guide(cfg: dict | None = None) -> None:
@@ -414,12 +424,14 @@ def build_parser() -> argparse.ArgumentParser:
     batch_split.add_argument("folder", type=Path)
     _feature_json_arg(batch_split)
 
-    batch_auto = batch_sub.add_parser("auto-typing", help="Rule-based auto typing on folder")
+    batch_auto = batch_sub.add_parser("auto-typing", help="Auto-typing on folder (v9 ML pipeline).")
     batch_auto.add_argument("folder", type=Path)
-    batch_auto.add_argument("--soma", action="store_true", default=False)
-    batch_auto.add_argument("--axon", action="store_true", default=False)
-    batch_auto.add_argument("--apic", action="store_true", default=False)
-    batch_auto.add_argument("--basal", action="store_true", default=False)
+    batch_auto.add_argument(
+        "--model-dir",
+        type=Path,
+        default=None,
+        help="Override the directory holding the auto-typing model files (cell_type_classifier.pkl, branch_classifier.pkl, gnn_apical_basal.pt).",
+    )
     _feature_json_arg(batch_auto)
 
     batch_radii = batch_sub.add_parser("radii-clean", help="Radii cleaning on a file or folder")
@@ -449,12 +461,14 @@ def build_parser() -> argparse.ArgumentParser:
     val_run.add_argument("file", type=Path)
     _feature_json_arg(val_run)
 
-    val_auto_label = val_sub.add_parser("auto-label", help="Apply rule-based auto label editing to one SWC file")
+    val_auto_label = val_sub.add_parser("auto-label", help="Auto-label editing on one SWC file (v9 ML pipeline).")
     val_auto_label.add_argument("file", type=Path)
-    val_auto_label.add_argument("--soma", action="store_true", default=False)
-    val_auto_label.add_argument("--axon", action="store_true", default=False)
-    val_auto_label.add_argument("--apic", action="store_true", default=False)
-    val_auto_label.add_argument("--basal", action="store_true", default=False)
+    val_auto_label.add_argument(
+        "--model-dir",
+        type=Path,
+        default=None,
+        help="Override the directory holding the auto-typing model files.",
+    )
     _feature_json_arg(val_auto_label)
 
     val_radii = val_sub.add_parser("radii-clean", help="Radii cleaning on a file or folder")
@@ -540,6 +554,58 @@ def build_parser() -> argparse.ArgumentParser:
     geom_insert.add_argument("--z", required=True, type=float)
     geom_insert.add_argument("--radius", type=float, default=None)
     geom_insert.add_argument("--type-id", type=int, default=None)
+    # ------------------------------ train (custom hybrid models)
+    train = sub.add_parser(
+        "train",
+        help="Train custom hybrid auto-typing models on your own labeled SWC dataset.",
+    )
+    train_sub = train.add_subparsers(dest="feature")
+
+    train_auto = train_sub.add_parser(
+        "auto-typing",
+        help="Train Stage 1 + Stage 2 (+ optional GNN) on a labeled SWC dataset.",
+    )
+    train_auto.add_argument(
+        "--data-dir",
+        type=Path,
+        required=True,
+        help="Folder with pyramidal/ and interneuron/ subdirectories of labeled SWCs.",
+    )
+    train_auto.add_argument(
+        "--output-dir",
+        type=Path,
+        required=True,
+        help="Directory to write trained model files into.",
+    )
+    train_auto.add_argument(
+        "--no-gnn",
+        action="store_true",
+        help="Skip the GNN training stage (rules + Stage 1+2 only).",
+    )
+    train_auto.add_argument("--seed", type=int, default=42)
+    train_auto.add_argument("--gnn-hidden", type=int, default=128)
+    train_auto.add_argument("--gnn-layers", type=int, default=3)
+    train_auto.add_argument("--gnn-dropout", type=float, default=0.0)
+    train_auto.add_argument("--gnn-epochs", type=int, default=200)
+    train_auto.add_argument("--gnn-patience", type=int, default=25)
+
+    # ------------------------------ models (status / info)
+    models = sub.add_parser(
+        "models",
+        help="Inspect hybrid auto-typing model availability and search paths.",
+    )
+    models_sub = models.add_subparsers(dest="feature")
+    models_status = models_sub.add_parser(
+        "status",
+        help="Report which model files are reachable and where they were found.",
+    )
+    models_status.add_argument(
+        "--model-dir",
+        type=Path,
+        default=None,
+        help="Override the model directory.",
+    )
+
     # ------------------------------ plugins
     plugins = sub.add_parser("plugins", help="Plugin manager and registry inspection")
     plugins_sub = plugins.add_subparsers(dest="feature")
@@ -695,26 +761,26 @@ def main(argv: list[str] | None = None) -> int:
 
         if args.tool == "batch" and args.feature == "auto-typing":
             _print_auto_typing_guide()
-            has_explicit_flags = any(
-                bool(v)
-                for v in (args.soma, args.axon, args.apic, args.basal)
+            opts = BatchOptions(
+                soma=True,
+                axon=True,
+                apic=False,
+                basal=True,
+                rad=False,
+                zip_output=False,
             )
-            opts = (
-                RuleBatchOptions(
-                    soma=bool(args.soma),
-                    axon=bool(args.axon),
-                    apic=bool(args.apic),
-                    basal=bool(args.basal),
-                    rad=False,
-                    zip_output=False,
-                )
-                if has_explicit_flags
-                else None
-            )
+            cfg_overrides = _parse_config_overrides(args.config_json) or {}
+            if getattr(args, "model_dir", None):
+                cfg_overrides["model_dir"] = str(args.model_dir)
+            from swcstudio.core.auto_typing import is_available  # noqa: PLC0415
+            ok, reason = is_available(model_dir=cfg_overrides.get("model_dir"))
+            if not ok:
+                print(f"ERROR: auto-typing engine unavailable.\n{reason}", file=sys.stderr)
+                return 2
             out = run_auto_typing(
                 str(args.folder),
                 options=opts,
-                config_overrides=_parse_config_overrides(args.config_json),
+                config_overrides=cfg_overrides,
             )
             _print_json(out.__dict__)
             if getattr(out, "log_path", None):
@@ -873,24 +939,27 @@ def main(argv: list[str] | None = None) -> int:
             return 0
 
         if args.tool == "validation" and args.feature == "auto-label":
-            has_explicit_flags = any(bool(v) for v in (args.soma, args.axon, args.apic, args.basal))
-            opts = (
-                RuleBatchOptions(
-                    soma=bool(args.soma),
-                    axon=bool(args.axon),
-                    apic=bool(args.apic),
-                    basal=bool(args.basal),
-                    rad=False,
-                    zip_output=False,
-                )
-                if has_explicit_flags
-                else None
+            opts = BatchOptions(
+                soma=True,
+                axon=True,
+                apic=False,
+                basal=True,
+                rad=False,
+                zip_output=False,
             )
+            cfg_overrides = _parse_config_overrides(args.config_json) or {}
+            if getattr(args, "model_dir", None):
+                cfg_overrides["model_dir"] = str(args.model_dir)
+            from swcstudio.core.auto_typing import is_available  # noqa: PLC0415
+            ok, reason = is_available(model_dir=cfg_overrides.get("model_dir"))
+            if not ok:
+                print(f"ERROR: auto-typing engine unavailable.\n{reason}", file=sys.stderr)
+                return 2
             old_df = parse_swc_text_preserve_tokens(Path(args.file).read_text(encoding="utf-8", errors="ignore"))
             out = validation_auto_label_file(
                 str(args.file),
                 options=opts,
-                config_overrides=_parse_config_overrides(args.config_json),
+                config_overrides=cfg_overrides,
                 output_path=None,
                 write_output=True,
                 write_log=False,
@@ -1352,6 +1421,41 @@ def main(argv: list[str] | None = None) -> int:
                     "operation_log_path": operation_log_path,
                 })
                 return 0
+
+        # -------- train (custom hybrid models)
+        if args.tool == "train" and args.feature == "auto-typing":
+            from swcstudio.core.auto_typing_train import train_user_models  # noqa: PLC0415
+            res = train_user_models(
+                data_dir=args.data_dir,
+                output_dir=args.output_dir,
+                train_gnn=not bool(args.no_gnn),
+                seed=int(args.seed),
+                gnn_hidden=int(args.gnn_hidden),
+                gnn_layers=int(args.gnn_layers),
+                gnn_dropout=float(args.gnn_dropout),
+                gnn_epochs=int(args.gnn_epochs),
+                gnn_patience=int(args.gnn_patience),
+            )
+            _print_json({
+                "output_dir": res.output_dir,
+                "stage1_path": res.stage1_path,
+                "stage2_path": res.stage2_path,
+                "gnn_path": res.gnn_path,
+                "stage1_metrics": res.stage1_metrics,
+                "stage2_metrics_keys": sorted(list(res.stage2_metrics.keys())),
+                "gnn_metrics": res.gnn_metrics,
+            })
+            return 0
+
+        # -------- models (status)
+        if args.tool == "models" and args.feature == "status":
+            from swcstudio.core.auto_typing import backend_status  # noqa: PLC0415
+            md = str(args.model_dir) if args.model_dir else None
+            st = backend_status(model_dir=md)
+            print(st["search_diagnostic"])
+            print()
+            _print_json({k: v for k, v in st.items() if k != "search_diagnostic"})
+            return 0
 
         # -------- plugins
         if args.tool == "plugins" and args.feature == "list":

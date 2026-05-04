@@ -6,11 +6,11 @@ from pathlib import Path
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
-    QCheckBox,
     QDialog,
     QFileDialog,
     QHBoxLayout,
     QLabel,
+    QLineEdit,
     QPlainTextEdit,
     QPushButton,
     QVBoxLayout,
@@ -18,9 +18,11 @@ from PySide6.QtWidgets import (
 )
 
 from swcstudio.core.auto_typing import (
-    RuleBatchOptions,
-    get_auto_rules_config,
-    save_auto_rules_config,
+    BatchOptions,
+    backend_status,
+    get_config as get_auto_typing_config,
+    is_available,
+    save_config as save_auto_typing_config,
 )
 from swcstudio.core.config import feature_config_path
 from swcstudio.tools.batch_processing.features.auto_typing import run_folder as run_auto_typing
@@ -29,7 +31,6 @@ from swcstudio.tools.batch_processing.features.index_clean import run_folder as 
 from swcstudio.tools.batch_processing.features.simplification import run_folder as run_batch_simplification
 from swcstudio.tools.batch_processing.features.swc_splitter import split_folder
 from .report_popup import ReportPopupDialog
-from .constants import color_for_type
 from .radii_cleaning_panel import RadiiCleaningPanel
 
 _CFG_PATH = feature_config_path("batch_processing", "auto_typing")
@@ -86,7 +87,7 @@ class _AutoTypingConfigDialog(QDialog):
 
     def reload_from_source(self):
         try:
-            txt = json.dumps(get_auto_rules_config(), indent=2, sort_keys=True)
+            txt = json.dumps(get_auto_typing_config(), indent=2, sort_keys=True)
             self._editor.setPlainText(txt)
             self._status.setText("Loaded.")
         except Exception as e:  # noqa: BLE001
@@ -97,7 +98,7 @@ class _AutoTypingConfigDialog(QDialog):
             data = json.loads(self._editor.toPlainText())
             if not isinstance(data, dict):
                 raise ValueError("JSON root must be an object")
-            save_auto_rules_config(data)
+            save_auto_typing_config(data)
             self._status.setText("Saved.")
             self.saved.emit("Auto-typing JSON saved.")
         except Exception as e:  # noqa: BLE001
@@ -181,44 +182,41 @@ class BatchTabWidget(QWidget):
         root.setSpacing(8)
         root.setAlignment(Qt.AlignTop)
 
-        desc = QLabel("Auto labeling with morphology rules for all SWC files in a selected folder.")
+        desc = QLabel(
+            "Auto-labeling for all SWC files in a folder. Uses the v9 ML "
+            "pipeline (Stage 1 cell-type detector + Stage 2 per-subtree "
+            "classifier + optional Stage 2b GNN re-decision + Stage 3 "
+            "topology refinement)."
+        )
         desc.setWordWrap(True)
         desc.setStyleSheet("font-size: 12px; color: #555;")
         root.addWidget(desc)
 
-        flags_row1 = QHBoxLayout()
-        flags_row2 = QHBoxLayout()
-        self._flag_soma = QCheckBox("--soma")
-        self._flag_axon = QCheckBox("--axon")
-        self._flag_apic = QCheckBox("--apic")
-        self._flag_basal = QCheckBox("--basal")
-
-        self._flag_soma.setChecked(True)
-        self._flag_axon.setChecked(True)
-        self._flag_basal.setChecked(True)
-
-        self._flag_soma.setStyleSheet(f"QCheckBox {{ color: {color_for_type(1)}; font-weight: 600; }}")
-        self._flag_axon.setStyleSheet(f"QCheckBox {{ color: {color_for_type(2)}; font-weight: 600; }}")
-        self._flag_basal.setStyleSheet(f"QCheckBox {{ color: {color_for_type(3)}; font-weight: 600; }}")
-        self._flag_apic.setStyleSheet(f"QCheckBox {{ color: {color_for_type(4)}; font-weight: 600; }}")
-
-        for cb in (self._flag_soma, self._flag_axon, self._flag_apic):
-            flags_row1.addWidget(cb)
-        flags_row1.addStretch()
-        for cb in (self._flag_basal,):
-            flags_row2.addWidget(cb)
-        flags_row2.addStretch()
-        root.addLayout(flags_row1)
-        root.addLayout(flags_row2)
+        # ---- model dir picker (optional override)
+        self._batch_model_row = QHBoxLayout()
+        self._batch_model_row.setSpacing(6)
+        model_lbl = QLabel("Model dir (optional):")
+        model_lbl.setStyleSheet("font-size: 12px; color: #333;")
+        self._batch_model_row.addWidget(model_lbl)
+        self._batch_edit_model_dir = QLineEdit()
+        self._batch_edit_model_dir.setPlaceholderText(
+            "Leave blank to use bundled / user-data models"
+        )
+        self._batch_edit_model_dir.editingFinished.connect(self._refresh_batch_backend_status)
+        self._batch_model_row.addWidget(self._batch_edit_model_dir, stretch=1)
+        self._batch_btn_browse_model = QPushButton("Browse…")
+        self._batch_btn_browse_model.clicked.connect(self._on_browse_batch_model_dir)
+        self._batch_model_row.addWidget(self._batch_btn_browse_model)
+        self._batch_backend_status_lbl = QLabel("")
+        self._batch_backend_status_lbl.setStyleSheet("font-size: 11px; color: #888;")
+        self._batch_model_row.addWidget(self._batch_backend_status_lbl)
+        root.addLayout(self._batch_model_row)
+        self._refresh_batch_backend_status()
 
         action_row = QHBoxLayout()
         self._btn_run_batch_check = QPushButton("Run")
         self._btn_run_batch_check.clicked.connect(self._on_run_batch_check)
         action_row.addWidget(self._btn_run_batch_check)
-
-        self._btn_show_precheck = QPushButton("Rule Guide")
-        self._btn_show_precheck.clicked.connect(self.precheck_requested.emit)
-        action_row.addWidget(self._btn_show_precheck)
 
         self._btn_edit_auto_cfg = QPushButton("Show JSON")
         self._btn_edit_auto_cfg.clicked.connect(self._on_edit_auto_typing_json)
@@ -228,6 +226,28 @@ class BatchTabWidget(QWidget):
         # Keep controls pinned to the top of the tab even when there is extra height.
         root.addStretch(1)
         return page
+
+    def _on_browse_batch_model_dir(self) -> None:
+        path = QFileDialog.getExistingDirectory(
+            self, "Select directory containing auto-typing model files"
+        )
+        if path:
+            self._batch_edit_model_dir.setText(path)
+            self._refresh_batch_backend_status()
+
+    def _refresh_batch_backend_status(self) -> None:
+        md = (self._batch_edit_model_dir.text() or "").strip() or None
+        ok, _ = is_available(model_dir=md)
+        if ok:
+            st = backend_status(model_dir=md)
+            tag = " + GNN" if st.get("gnn_ok") else ""
+            self._batch_backend_status_lbl.setText(f"models OK (Stage 1+2{tag})")
+            self._batch_backend_status_lbl.setStyleSheet("font-size: 11px; color: #2a7;")
+        else:
+            self._batch_backend_status_lbl.setText("models missing — see hover for details")
+            self._batch_backend_status_lbl.setStyleSheet("font-size: 11px; color: #c33;")
+            st = backend_status(model_dir=md)
+            self._batch_backend_status_lbl.setToolTip(st.get("search_diagnostic", ""))
 
     def _build_radii_page(self) -> QWidget:
         page = RadiiCleaningPanel(self, allow_loaded_swc_run=False)
@@ -336,7 +356,7 @@ class BatchTabWidget(QWidget):
     def run_split_folder(self):
         self._on_split_folder()
 
-    def run_rule_batch(self):
+    def run_auto_typing_batch(self):
         self._on_run_batch_check()
 
     def set_active_subtab(self, name: str):
@@ -348,18 +368,6 @@ class BatchTabWidget(QWidget):
         if target is not None:
             target.setPlainText(text)
         self.log_message.emit(text)
-
-    def _selected_flags(self) -> list[str]:
-        flags = []
-        for cb in (
-            self._flag_soma,
-            self._flag_axon,
-            self._flag_apic,
-            self._flag_basal,
-        ):
-            if cb.isChecked():
-                flags.append(cb.text())
-        return flags
 
     def _on_edit_auto_typing_json(self):
         if self._config_dialog is None:
@@ -401,10 +409,10 @@ class BatchTabWidget(QWidget):
 
     def _on_run_batch_check(self):
         folder_path = QFileDialog.getExistingDirectory(
-            self, "Select folder with SWC files for rule-based batch processing"
+            self, "Select folder with SWC files for auto-labeling"
         )
         if not folder_path:
-            self._set_status("Rule-based batch processing cancelled.")
+            self._set_status("Auto-labeling batch processing cancelled.")
             return
 
         swc_files = [
@@ -415,26 +423,34 @@ class BatchTabWidget(QWidget):
             self._set_status(f"No .swc files found in:\n{folder_path}")
             return
 
-        flags = set(self._selected_flags())
-        use_basal = "--basal" in flags
-        use_apic = "--apic" in flags
-        opts = RuleBatchOptions(
-            soma="--soma" in flags,
-            axon="--axon" in flags,
-            apic=use_apic,
-            basal=use_basal,
+        opts = BatchOptions(
+            soma=True,
+            axon=True,
+            apic=False,
+            basal=True,
             rad=False,
             zip_output=False,
         )
 
+        md = (self._batch_edit_model_dir.text() or "").strip() or None
+        ok, reason = is_available(model_dir=md)
+        if not ok:
+            self._set_status(f"Auto-typing engine unavailable.\n{reason}")
+            return
+        config_overrides: dict = {}
+        if md:
+            config_overrides["model_dir"] = md
+
         try:
-            result = run_auto_typing(folder_path, options=opts)
+            result = run_auto_typing(
+                folder_path, options=opts, config_overrides=config_overrides,
+            )
         except Exception as e:
-            self._set_status(f"Rule-based batch processing failed:\n{e}")
+            self._set_status(f"Auto labeling batch failed:\n{e}")
             return
 
         lines = [
-            "Rule-based batch processing completed.",
+            "Auto-labeling batch processing completed.",
             f"Folder: {result.folder}",
             f"Output folder: {result.out_dir}",
             f"SWC files detected: {result.files_total}",

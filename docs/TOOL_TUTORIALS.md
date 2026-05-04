@@ -42,6 +42,10 @@ swcstudio move-subtree ./data/single-soma.swc --root-id 40 --x 100 --y 120 --z 5
 
 Current single-file edit behavior:
 
+- auto-label always applies soma, axon, and basal labeling
+- apical labeling is enabled automatically only when the morphology contains a strong apical subtree
+
+
 - the updated SWC is written automatically
 - the matching log is written automatically
 - both go into the source file's `*_swc_studio_output` directory
@@ -51,7 +55,7 @@ Current single-file edit behavior:
 ```bash
 swcstudio validate ./data
 swcstudio split ./data
-swcstudio auto-typing ./data --soma --axon --basal
+swcstudio auto-typing ./data
 swcstudio radii-clean ./data
 swcstudio simplify ./data
 swcstudio index-clean ./data

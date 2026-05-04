@@ -61,7 +61,11 @@ Common repair paths:
 
 - `Index Clean`
 - `Manual Label Editing`
-- `Auto Label Editing`
+- `Auto Label Editing` — runs the v9 ML engine. The bundled model
+  files work out of the box, so just click **Run**. To use
+  custom-trained models, use the **Browse…** button next to the
+  *Model dir* field. The green/red status indicator next to the field
+  tells you whether the engine can run with the current selection.
 - `Manual Radii Editing`
 - `Auto Radii Editing`
 - `Geometry Editing`

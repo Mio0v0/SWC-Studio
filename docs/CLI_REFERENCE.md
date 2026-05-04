@@ -134,21 +134,26 @@ swcstudio split ./data
 
 ### `swcstudio auto-typing <folder>`
 
-- Purpose: rule-based auto-labeling for SWCs in one folder
-- Prints the auto-typing guide before processing
+- Purpose: auto-labeling for every SWC in one folder, using the v9 ML
+  engine (Stage 1 cell-type detector + Stage 2 per-subtree classifier
+  + optional Stage 2b GNN + Stage 3 topology refinement)
+- Prints a short engine summary before processing
+- Soma, axon, and basal labeling are always enabled
+- The engine automatically switches between 3-class and 4-class
+  labeling by detecting whether an apical subtree is present
+- Optional `--model-dir` points at a directory of trained model files
+  (Stage 1 + Stage 2 + optional GNN); falls back to user-data /
+  bundled models if omitted
 
-Flags:
-
-- `--soma`
-- `--axon`
-- `--apic`
-- `--basal`
-
-Example:
+Examples:
 
 ```bash
-swcstudio auto-typing ./data --soma --axon --basal
+swcstudio auto-typing ./data
+swcstudio auto-typing ./data --model-dir ~/swc-models
 ```
+
+Run `swcstudio models status` first if you want to confirm the engine
+can resolve the model files on your machine.
 
 ### `swcstudio radii-clean <target>`
 
@@ -207,20 +212,27 @@ swcstudio auto-fix ./data/single-soma.swc
 
 ### `swcstudio auto-label <file>`
 
-- Purpose: apply the same single-file auto-label workflow used by the GUI Auto Label Editing panel
+- Purpose: apply the same single-file auto-label workflow used by the
+  GUI Auto Label Editing panel
+- Engine: v9 ML pipeline (same as `swcstudio auto-typing`)
 - Changes only node types; geometry, parent IDs, and radii are preserved
+- Soma, axon, and basal labeling are always enabled
+- The engine automatically switches between 3-class and 4-class
+  labeling by detecting whether an apical subtree is present
+- Optional `--model-dir` points at a directory of trained model files
 
-Flags:
-
-- `--soma`
-- `--axon`
-- `--apic`
-- `--basal`
-
-Example:
+Examples:
 
 ```bash
 swcstudio auto-label ./data/single-soma.swc
+swcstudio auto-label ./data/single-soma.swc --model-dir ~/my-models
+```
+
+To verify the engine can find its model files:
+
+```bash
+swcstudio models status
+swcstudio models status --model-dir ~/my-models
 ```
 
 ### `swcstudio dendrogram-edit <file>`
@@ -326,6 +338,81 @@ Insert one node after `start-id` and optionally before `end-id`.
 ```bash
 swcstudio insert ./data/single-soma.swc --start-id 10 --end-id 22 --x 100 --y 120 --z 5
 ```
+
+## Train Custom Auto-Typing Models
+
+### `swcstudio train auto-typing`
+
+Train Stage 1 (cell-type classifier), Stage 2 (per-branch classifier),
+and (optionally) the Stage 2b GraphSAGE GNN apical-vs-basal head on
+your own labeled SWC corpus.
+
+Required dataset layout:
+
+```
+<data-dir>/
+    pyramidal/
+        <files>.swc
+    interneuron/
+        <files>.swc
+```
+
+Each SWC's type column (1=soma, 2=axon, 3=basal, 4=apical) is the per-node
+ground truth. Subfolder names are the cell-type labels.
+
+Required flags:
+
+- `--data-dir <dir>`   labeled-dataset root (must contain `pyramidal/` subfolder)
+- `--output-dir <dir>` directory to write trained models into
+
+Optional flags:
+
+- `--no-gnn`           skip Stage 2b GNN training (Stage 1 + Stage 2 only)
+- `--seed <int>`       random seed (default 42)
+- `--gnn-hidden <int>` GraphSAGE hidden dim (default 128)
+- `--gnn-layers <int>` GraphSAGE depth (default 3)
+- `--gnn-dropout <f>`  dropout (default 0.0)
+- `--gnn-epochs <int>` max epochs per fold (default 200)
+- `--gnn-patience <int>` early-stopping patience (default 25)
+
+Example:
+
+```bash
+swcstudio train auto-typing --data-dir ./labeled-dataset --output-dir ./my-models
+# Then point auto-labeling at the trained models:
+swcstudio auto-label cell.swc --model-dir ./my-models
+# Or set the env var so all runs use them:
+export SWCSTUDIO_MODEL_DIR=./my-models
+```
+
+Training writes three files into `--output-dir`:
+
+- `cell_type_classifier.pkl`  Stage 1
+- `branch_classifier.pkl`     Stage 2
+- `gnn_apical_basal.pt`       Stage 2b GNN (only if not `--no-gnn`)
+
+The standard `pip install -e .` already includes torch and
+torch_geometric so GNN training works out of the box.
+
+For the full retraining workflow (recommended ways to make custom
+models the default, dataset layout, troubleshooting), see the
+[Auto-Typing Engine](documentation/auto-typing-backends.md) page.
+
+## Models
+
+### `swcstudio models status`
+
+Print which model files the auto-typing engine can find and where it
+looked. Run this once after install to confirm the bundled models are
+reachable, or any time the engine reports models missing.
+
+```bash
+swcstudio models status
+swcstudio models status --model-dir ~/my-models
+```
+
+Output is a search-path diagnostic plus a JSON summary of which model
+files were found and whether torch is available for the Stage 2b GNN.
 
 ## Plugins
 

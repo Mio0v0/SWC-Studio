@@ -15,7 +15,7 @@ rm -rf "${ROOT_DIR}/build" "${ROOT_DIR}/dist"
 source "${VENV_DIR}/bin/activate"
 
 python -m pip install --upgrade pip setuptools wheel
-pip install --no-cache-dir -e ".[gui,build]"
+pip install --no-cache-dir -e ".[build]"
 
 pyinstaller --noconfirm --clean "${ROOT_DIR}/packaging/swcstudio_gui.spec"
 

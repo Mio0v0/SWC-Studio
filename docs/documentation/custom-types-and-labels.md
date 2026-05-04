@@ -72,7 +72,11 @@ Current label-editing paths include:
 - `Morphology Editing -> Manual Label Editing`
   - change one node type directly
 - `Morphology Editing -> Auto Label Editing`
-  - run the rule-based auto-labeling backend
+  - run the v9 ML auto-typing engine (Stage 1 + Stage 2 + optional
+    Stage 2b GNN + Stage 3 refinement). The engine uses
+    `cell_type_classifier.pkl`, `branch_classifier.pkl`, and the
+    bundled `gnn_apical_basal.pt` checkpoint by default; point it at a
+    custom-trained model directory via the panel's *Model dir* picker
 - `dendrogram-edit`
   - reassign a subtree from the CLI
 

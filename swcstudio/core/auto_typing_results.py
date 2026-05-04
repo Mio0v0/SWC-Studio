@@ -1,4 +1,4 @@
-"""Core transforms for rule-based auto-typing outputs."""
+"""Core transforms for auto-typing engine outputs."""
 
 from __future__ import annotations
 

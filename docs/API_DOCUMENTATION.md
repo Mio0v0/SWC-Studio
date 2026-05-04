@@ -24,16 +24,34 @@ import swcstudio.api as swc
 
 Source: `swcstudio/api.py`
 
-### Data Type
+### Data Types
 
-#### `RuleBatchOptions`
+#### `BatchOptions`
 
-Dataclass for auto-typing:
+Dataclass for auto-typing input options:
 
-- `soma: bool`
-- `axon: bool`
-- `apic: bool`
-- `basal: bool`
+- `soma: bool` (default `True`)  — write predicted soma label
+- `axon: bool` (default `True`)  — accept predicted axon labels
+- `basal: bool` (default `True`) — accept predicted basal labels
+- `apic: bool` (default `False`) — accept predicted apical labels
+- `rad: bool` (default `False`)  — apply "copy parent radius if zero"
+  fix to zero-radius nodes
+- `zip_output: bool` (default `False`) — write a zip of the output
+  folder (folder runs only)
+
+#### `BatchResult`
+
+Returned by folder runs (`run_batch` / `batch_auto_typing`). Fields
+include `folder`, `out_dir`, `zip_path`, `files_total`, `files_processed`,
+`files_failed`, `total_nodes`, `total_type_changes`,
+`total_radius_changes`, `failures`, `per_file`, `log_path`.
+
+#### `FileResult`
+
+Returned by single-file runs (`run_file`). Fields include `input_file`,
+`output_file`, `nodes_total`, `type_changes`, `radius_changes`,
+`out_type_counts`, `failures`, `change_details`, `log_path`, `headers`,
+`rows`, `types`, `radii`.
 
 ### Batch Processing
 
@@ -45,9 +63,15 @@ Runs validation over all SWC files in a folder.
 
 Splits each SWC by soma-root trees.
 
-#### `batch_auto_typing(folder, *, options=None, config_overrides=None) -> RuleBatchResult`
+#### `batch_auto_typing(folder, *, options=None, config_overrides=None) -> BatchResult`
 
-Runs rule-based auto typing over a folder.
+Runs the v9 ML auto-typing engine over a folder. There is no backend
+selector — the engine is a single ML pipeline. The
+`config_overrides` dict accepts:
+
+- `model_dir` (str) — override the model search path
+- `use_subtree_stage2` (bool, default `True`) — whether Stage 2
+  operates on full primary subtrees
 
 #### `batch_radii_cleaning(folder, *, config_overrides=None) -> dict`
 
@@ -85,7 +109,38 @@ Runs sanitize + validation from file, optionally writes output.
 
 #### `validation_auto_typing_file(file_path, *, options=None, config_overrides=None, output_path=None, write_output=True, write_log=True)`
 
-Runs the shared auto-typing logic on a single file.
+Runs the shared auto-typing engine on a single file. The
+`config_overrides` dict accepts the same keys as `batch_auto_typing`:
+`model_dir` (override the model search path), `use_subtree_stage2`
+(default `True`).
+
+#### `swcstudio.core.auto_typing.run_file(file_path, opts, *, model_dir=None, output_path=None, write_output=True, write_log=True, use_subtree_stage2=True) -> FileResult`
+
+Direct engine entry point for a single file. The convenience wrappers
+`validation_auto_typing_file` and `validation_auto_label_file` call
+into this.
+
+#### `swcstudio.core.auto_typing.run_batch(folder, opts, *, model_dir=None, use_subtree_stage2=True) -> BatchResult`
+
+Direct engine entry point for a folder run.
+
+#### `swcstudio.core.auto_typing.is_available(*, model_dir=None) -> tuple[bool, str]`
+
+Check whether the engine can run with the current model directory.
+Used by the GUI to update the live "models OK / models missing"
+indicator and by the CLI to fail fast before doing any work.
+
+#### `swcstudio.core.auto_typing.backend_status(*, model_dir=None) -> dict`
+
+Structured status report — which model files were found, where, and
+whether torch is available for the Stage 2b GNN.
+
+#### `swcstudio.core.auto_typing_train.train_user_models(data_dir, output_dir, *, train_gnn=True, ...) -> TrainingResult`
+
+Train Stage 1 + Stage 2 (+ optional Stage 2b GNN) on a labeled SWC
+dataset and write the resulting model files to `output_dir`. End users
+typically invoke this via `swcstudio train auto-typing` on the CLI;
+the Python function exists for scripted training pipelines.
 
 #### `validation_index_clean_text(swc_text, *, config_overrides=None) -> dict`
 
@@ -305,7 +360,7 @@ from swcstudio.plugins import load_plugin_module, register_method
 def my_method(*args, **kwargs):
     ...
 
-register_method("batch_processing.auto_typing", "default", my_method)
+register_method("batch_processing.auto_typing", "lab_summary", my_method)
 load_plugin_module("my_lab_plugins.summary_plugin")
 ```
 

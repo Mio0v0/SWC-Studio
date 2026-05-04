@@ -68,3 +68,24 @@ swctools/gui/__error_log__.txt
 *_auto_typing/
 *_split/
 *_radii_cleaned/
+
+# Local datasets (top-level data/ holds the user's SWC corpora; the
+# package's own swcstudio/data/ dir is intentionally tracked because it
+# ships the bundled model files).
+/data/
+
+# ----------------------------
+# Trained models / eval artifacts (regenerated per environment)
+# ----------------------------
+# Pickle files are sklearn-version-pinned and don't transfer across envs.
+# Regenerate via:
+#   python -m hybrid.train_stage1
+#   python -m hybrid.train_stage2
+#   python -m hybrid.evaluate     (also produces eval_tmp/ pickles)
+hybrid/models/eval_tmp/
+hybrid/models/*.pkl
+
+# ----------------------------
+# Internal Claude session state
+# ----------------------------
+.claude/

@@ -9,6 +9,7 @@ This section explains how to use `SWC-Studio` as it behaves today in the GUI, CL
 setup
 workflows
 validation-and-repair
+auto-typing-backends
 custom-types-and-labels
 reports-and-outputs
 ```
@@ -20,6 +21,7 @@ If you are new to the project, read these pages first:
 - [Setup](setup.md)
 - [Workflows](workflows.md)
 - [Validation and Repair](validation-and-repair.md)
+- [Auto-Typing Engine](auto-typing-backends.md)
 
 ## What the User Guide Covers
 

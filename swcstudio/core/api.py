@@ -8,7 +8,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from swcstudio.core.auto_typing import RuleBatchOptions, get_auto_rules_config, run_rule_batch
+from swcstudio.core.auto_typing import BatchOptions, run_batch
 from swcstudio.core.custom_types import label_for_type
 from swcstudio.core.geometry_editing import (
     disconnect_branch,
@@ -57,14 +57,14 @@ def split_by_soma_roots(swc_text: str):
     return _split_swc_by_soma_roots(swc_text)
 
 
-def run_auto_typing_folder(folder: str, options: RuleBatchOptions | None = None) -> Any:
-    opts = options if options is not None else RuleBatchOptions()
-    return run_rule_batch(folder, opts)
+def run_auto_typing_folder(folder: str, options: BatchOptions | None = None) -> Any:
+    opts = options if options is not None else BatchOptions()
+    return run_batch(folder, opts)
 
 
 __all__ = [
     "SWC_COLS",
-    "RuleBatchOptions",
+    "BatchOptions",
     "label_for_type",
     "parse_swc_text",
     "write_swc_bytes",
@@ -73,7 +73,6 @@ __all__ = [
     "per_tree_validation",
     "split_by_soma_roots",
     "run_auto_typing_folder",
-    "get_auto_rules_config",
     "move_node_absolute",
     "move_subtree_absolute",
     "reconnect_branch",

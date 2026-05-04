@@ -1,6 +1,9 @@
-"""Single-file auto typing for Validation tool.
+"""Single-file auto-typing for the Validation tool.
 
-Uses the same core rule engine and JSON config as Batch Processing -> Auto Typing.
+Thin wrapper around :mod:`swcstudio.core.auto_typing`. The engine itself
+is the v9 ML pipeline; there is no backend selection, the only knobs
+are the user model directory override and whether to use the subtree
+Stage 2 head.
 """
 
 from __future__ import annotations
@@ -10,21 +13,33 @@ from typing import Any
 
 import pandas as pd
 
-from swcstudio.core.auto_typing import RuleBatchOptions, run_rule_file
-from swcstudio.core.auto_typing_results import auto_typing_result_to_dataframe, merge_labeled_types_only
+from swcstudio.core.auto_typing import BatchOptions, run_file as _run_engine_file
+from swcstudio.core.auto_typing_results import (
+    auto_typing_result_to_dataframe,
+    merge_labeled_types_only,
+)
 from swcstudio.core.config import merge_config
-from swcstudio.core.reporting import operation_output_path_for_file, resolve_requested_output_path_for_file, timestamp_slug
-from swcstudio.core.swc_io import parse_swc_text_preserve_tokens, write_swc_to_bytes_preserve_tokens
-from swcstudio.tools.batch_processing.features.auto_typing import get_config as get_batch_auto_config
+from swcstudio.core.reporting import (
+    operation_output_path_for_file,
+    resolve_requested_output_path_for_file,
+    timestamp_slug,
+)
+from swcstudio.core.swc_io import (
+    parse_swc_text_preserve_tokens,
+    write_swc_to_bytes_preserve_tokens,
+)
+from swcstudio.tools.batch_processing.features.auto_typing import (
+    get_config as get_batch_auto_config,
+)
 
 
-def _options_from_config(cfg: dict[str, Any]) -> RuleBatchOptions:
-    opts = dict(cfg.get("options", {}))
-    return RuleBatchOptions(
-        soma=bool(opts.get("soma", True)),
-        axon=bool(opts.get("axon", True)),
-        apic=bool(opts.get("apic", False)),
-        basal=bool(opts.get("basal", True)),
+def _options_from_config(cfg: dict[str, Any]) -> BatchOptions:
+    _ = cfg
+    return BatchOptions(
+        soma=True,
+        axon=True,
+        apic=False,
+        basal=True,
         rad=False,
         zip_output=False,
     )
@@ -33,22 +48,26 @@ def _options_from_config(cfg: dict[str, Any]) -> RuleBatchOptions:
 def run_file(
     file_path: str,
     *,
-    options: RuleBatchOptions | None = None,
+    options: BatchOptions | None = None,
     config_overrides: dict | None = None,
     output_path: str | None = None,
     write_output: bool = True,
     write_log: bool = True,
 ):
+    """Run auto-typing on a single file using the configured engine."""
     cfg = get_batch_auto_config()
     if isinstance(config_overrides, dict) and config_overrides:
         cfg = merge_config(cfg, config_overrides)
     opts = options if options is not None else _options_from_config(cfg)
-    return run_rule_file(
+
+    return _run_engine_file(
         file_path,
         opts,
         output_path=output_path,
         write_output=write_output,
         write_log=write_log,
+        model_dir=(cfg.get("model_dir") or None),
+        use_subtree_stage2=bool(cfg.get("use_subtree_stage2", True)),
     )
 
 
@@ -63,7 +82,7 @@ def merge_types_only(base_df: pd.DataFrame, labeled_df: pd.DataFrame) -> pd.Data
 def auto_label_file(
     file_path: str,
     *,
-    options: RuleBatchOptions | None = None,
+    options: BatchOptions | None = None,
     config_overrides: dict | None = None,
     output_path: str | None = None,
     write_output: bool = True,
@@ -108,3 +127,12 @@ def auto_label_file(
         "change_details": list(getattr(result_obj, "change_details", []) or []),
         "result_obj": result_obj,
     }
+
+
+__all__ = [
+    "BatchOptions",
+    "run_file",
+    "result_to_dataframe",
+    "merge_types_only",
+    "auto_label_file",
+]
