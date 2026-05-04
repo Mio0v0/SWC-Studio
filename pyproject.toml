@@ -18,8 +18,10 @@ dependencies = [
   "morphio>=3.3",
   "neurom>=4.0",
   # Auto-typing engine (v9 ML pipeline) — Stage 1 + Stage 2 sklearn
-  # ensembles, Stage 2b GraphSAGE GNN.
-  "scikit-learn>=1.5,<1.8",
+  # ensembles, Stage 2b GraphSAGE GNN. Pinned to the 1.5.x series the
+  # bundled pickles were trained on; sklearn does not guarantee
+  # cross-minor pickle compatibility.
+  "scikit-learn>=1.5,<1.6",
   "torch>=2.1",
   "torch-geometric>=2.6",
   # GUI — the desktop app is the primary user surface, so PySide6 and

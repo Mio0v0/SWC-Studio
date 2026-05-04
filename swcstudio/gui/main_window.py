@@ -9,7 +9,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from PySide6.QtCore import QEvent, Qt, Signal
+from PySide6.QtCore import QEvent, QThread, Qt, Signal, Slot
 from PySide6.QtGui import QAction, QDragEnterEvent, QDropEvent, QFontMetrics
 from PySide6.QtWidgets import (
     QApplication,
@@ -36,6 +36,7 @@ from PySide6.QtWidgets import (
 )
 
 from .auto_typing_guide import AutoTypingGuideWidget
+from .auto_typing_workers import _AutoLabelFileWorker
 from .batch_tab import BatchTabWidget
 from .constants import SWC_COLS, label_for_type
 from .context_inspector import ContextInspectorWidget
@@ -219,6 +220,15 @@ class SWCMainWindow(QMainWindow):
         self._batch_has_results: bool = False
         self._closing_app: bool = False
         self._runtime_log_lines: list[str] = []
+
+        # Auto-label single-file worker state. Run on a QThread so the
+        # GUI stays responsive during the (~1-second) inference.
+        self._validation_auto_label_run_id: int = 0
+        self._validation_auto_label_worker: _AutoLabelFileWorker | None = None
+        self._validation_auto_label_thread: QThread | None = None
+        self._validation_auto_label_tmp_path: Path | None = None
+        self._validation_auto_label_source_doc: _DocumentState | None = None
+        self._validation_auto_label_options: object | None = None
 
         self._build_ui()
         self._build_status_bar()
@@ -1859,6 +1869,11 @@ class SWCMainWindow(QMainWindow):
         # The panel emits (options, {"model_dir": str|None}). The dict is
         # optional for backward compatibility with any caller still connected
         # to the single-argument variant of the signal.
+        if self._validation_auto_label_thread is not None and self._validation_auto_label_thread.isRunning():
+            # Defensive: shouldn't fire because the panel disables Run
+            # while a worker is in flight, but ignore double-clicks.
+            return
+
         backend_cfg: dict = {}
         if isinstance(backend_settings, dict):
             backend_cfg = dict(backend_settings)
@@ -1882,18 +1897,14 @@ class SWCMainWindow(QMainWindow):
             self._validation_auto_label_panel.set_status_text("No active SWC loaded.")
             return
 
+        # Write the active document to a temp SWC the worker will read.
+        # The temp file is cleaned up in the worker-finished handler so
+        # it survives across thread context switches.
         tmp_fd, tmp_in = tempfile.mkstemp(prefix="swctools_auto_label_", suffix=".swc")
         os.close(tmp_fd)
         tmp_path = Path(tmp_in)
         try:
             self._write_swc_file(str(tmp_path), source_doc.df)
-            result_obj = run_validation_auto_typing_file(
-                str(tmp_path),
-                options=options,
-                config_overrides=config_overrides,
-                write_output=False,
-                write_log=False,
-            )
         except Exception as e:  # noqa: BLE001
             self._append_log(f"Validation Auto Label Editing failed: {e}", "ERROR")
             self._validation_auto_label_panel.set_status_text(f"Auto Label Editing failed:\n{e}")
@@ -1902,12 +1913,88 @@ class SWCMainWindow(QMainWindow):
             except Exception:
                 pass
             return
-        finally:
+
+        # Hand off to the worker thread. The result handlers below pick
+        # up the source doc + options + tmp path stashed on `self`.
+        self._validation_auto_label_run_id += 1
+        run_id = int(self._validation_auto_label_run_id)
+        self._validation_auto_label_tmp_path = tmp_path
+        self._validation_auto_label_source_doc = source_doc
+        self._validation_auto_label_options = options
+
+        self._validation_auto_label_panel.set_running(
+            True, status_text="Auto Label Editing — running…"
+        )
+
+        self._validation_auto_label_thread = QThread(self)
+        self._validation_auto_label_worker = _AutoLabelFileWorker(
+            run_id, str(tmp_path), options, config_overrides,
+        )
+        self._validation_auto_label_worker.moveToThread(self._validation_auto_label_thread)
+        self._validation_auto_label_thread.started.connect(self._validation_auto_label_worker.run)
+        self._validation_auto_label_worker.finished.connect(self._on_validation_auto_label_finished)
+        self._validation_auto_label_worker.failed.connect(self._on_validation_auto_label_failed)
+        self._validation_auto_label_worker.finished.connect(self._validation_auto_label_thread.quit)
+        self._validation_auto_label_worker.failed.connect(self._validation_auto_label_thread.quit)
+        self._validation_auto_label_thread.finished.connect(self._cleanup_validation_auto_label_worker_refs)
+        self._validation_auto_label_thread.start()
+
+    @Slot(int, object)
+    def _on_validation_auto_label_finished(self, run_id: int, result_obj: object) -> None:
+        if int(run_id) != int(self._validation_auto_label_run_id):
+            return
+        # Clean up the temp file ASAP — the result_obj already holds the
+        # parsed rows we need for the preview.
+        tmp_path = self._validation_auto_label_tmp_path
+        if tmp_path is not None:
             try:
                 tmp_path.unlink(missing_ok=True)
             except Exception:
                 pass
+        self._validation_auto_label_tmp_path = None
 
+        source_doc = self._validation_auto_label_source_doc
+        options = self._validation_auto_label_options
+        self._validation_auto_label_source_doc = None
+        self._validation_auto_label_options = None
+
+        if source_doc is None:
+            self._validation_auto_label_panel.set_running(False)
+            return
+
+        try:
+            self._apply_validation_auto_label_result(source_doc, options, result_obj)
+        finally:
+            self._validation_auto_label_panel.set_running(False)
+
+    @Slot(int, str)
+    def _on_validation_auto_label_failed(self, run_id: int, message: str) -> None:
+        if int(run_id) != int(self._validation_auto_label_run_id):
+            return
+        tmp_path = self._validation_auto_label_tmp_path
+        if tmp_path is not None:
+            try:
+                tmp_path.unlink(missing_ok=True)
+            except Exception:
+                pass
+        self._validation_auto_label_tmp_path = None
+        self._validation_auto_label_source_doc = None
+        self._validation_auto_label_options = None
+
+        self._append_log(f"Validation Auto Label Editing failed: {message}", "ERROR")
+        self._validation_auto_label_panel.set_status_text(
+            f"Auto Label Editing failed:\n{message}"
+        )
+        self._validation_auto_label_panel.set_running(False)
+
+    @Slot()
+    def _cleanup_validation_auto_label_worker_refs(self) -> None:
+        self._validation_auto_label_worker = None
+        self._validation_auto_label_thread = None
+
+    def _apply_validation_auto_label_result(
+        self, source_doc: "_DocumentState", options: object, result_obj: object,
+    ) -> None:
         preview_df = self._auto_label_result_to_dataframe(result_obj)
         if preview_df.empty:
             self._append_log("Validation Auto Label Editing produced empty output.", "WARN")

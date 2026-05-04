@@ -9,7 +9,7 @@ config plumbing the GUI / CLI need.
 from __future__ import annotations
 
 from dataclasses import asdict
-from typing import Any
+from typing import Any, Callable
 
 from swcstudio.core.auto_typing import (
     BatchOptions,
@@ -31,6 +31,7 @@ def _builtin_run(folder: str, options: BatchOptions, config: dict[str, Any]):
         options,
         model_dir=(config.get("model_dir") or None),
         use_subtree_stage2=bool(config.get("use_subtree_stage2", True)),
+        progress_callback=config.get("__progress_callback"),
     )
 
 
@@ -58,9 +59,16 @@ def run_folder(
     *,
     options: BatchOptions | None = None,
     config_overrides: dict | None = None,
+    progress_callback: Callable[[int, int, str], None] | None = None,
 ):
     cfg = merge_config(get_config(), config_overrides)
     opts = options if options is not None else _options_from_config(cfg)
+    if progress_callback is not None:
+        # Stash the callback in the config dict so the registered method
+        # can pick it up without breaking the (folder, options, config)
+        # plugin signature.
+        cfg = dict(cfg)
+        cfg["__progress_callback"] = progress_callback
     return _builtin_run(folder, opts, cfg)
 
 

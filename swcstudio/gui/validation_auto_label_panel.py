@@ -16,6 +16,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QPlainTextEdit,
+    QProgressBar,
     QPushButton,
     QVBoxLayout,
     QWidget,
@@ -124,8 +125,8 @@ class ValidationAutoLabelPanel(QWidget):
         desc = QLabel(
             "Auto-label editing on the current SWC file. Uses the v9 ML "
             "pipeline (Stage 1 cell-type detector + Stage 2 per-subtree "
-            "classifier + optional Stage 2b GNN re-decision + Stage 3 "
-            "topology refinement). Trained model files are required."
+            "classifier + Stage 2b GNN re-decision + Stage 3 topology "
+            "refinement). All four stages are required."
         )
         desc.setWordWrap(True)
         desc.setStyleSheet("font-size: 12px; color: #555;")
@@ -162,6 +163,16 @@ class ValidationAutoLabelPanel(QWidget):
         top_btns.addWidget(self._btn_edit_cfg)
         top_btns.addStretch()
         root.addLayout(top_btns)
+
+        # Busy indicator: indeterminate progress bar (range 0-0) shown
+        # only while a worker is running. Single-file inference is short
+        # enough that a percentage-based bar isn't useful.
+        self._progress = QProgressBar()
+        self._progress.setRange(0, 0)
+        self._progress.setVisible(False)
+        self._progress.setTextVisible(False)
+        self._progress.setMaximumHeight(8)
+        root.addWidget(self._progress)
 
         self._summary = QPlainTextEdit()
         self._summary.setReadOnly(True)
@@ -249,3 +260,14 @@ class ValidationAutoLabelPanel(QWidget):
 
     def set_status_text(self, text: str):
         self._summary.setPlainText(str(text or ""))
+
+    def set_running(self, running: bool, status_text: str | None = None) -> None:
+        """Toggle the running state — disables interactive controls and
+        shows a busy progress bar while a worker is in flight."""
+        self._progress.setVisible(bool(running))
+        self._btn_run.setEnabled(not running)
+        self._btn_edit_cfg.setEnabled(not running)
+        self._edit_model_dir.setEnabled(not running)
+        self._btn_browse_model.setEnabled(not running)
+        if running and status_text:
+            self._summary.setPlainText(str(status_text))

@@ -4,7 +4,7 @@ import os
 import json
 from pathlib import Path
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt, QThread, Signal, Slot
 from PySide6.QtWidgets import (
     QDialog,
     QFileDialog,
@@ -12,6 +12,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QPlainTextEdit,
+    QProgressBar,
     QPushButton,
     QVBoxLayout,
     QWidget,
@@ -25,11 +26,11 @@ from swcstudio.core.auto_typing import (
     save_config as save_auto_typing_config,
 )
 from swcstudio.core.config import feature_config_path
-from swcstudio.tools.batch_processing.features.auto_typing import run_folder as run_auto_typing
 from swcstudio.tools.batch_processing.features.batch_validation import validate_folder as run_batch_validation
 from swcstudio.tools.batch_processing.features.index_clean import run_folder as run_batch_index_clean
 from swcstudio.tools.batch_processing.features.simplification import run_folder as run_batch_simplification
 from swcstudio.tools.batch_processing.features.swc_splitter import split_folder
+from .auto_typing_workers import _AutoLabelBatchWorker
 from .report_popup import ReportPopupDialog
 from .radii_cleaning_panel import RadiiCleaningPanel
 
@@ -116,6 +117,9 @@ class BatchTabWidget(QWidget):
         super().__init__(parent)
         self._status_boxes: list[QPlainTextEdit] = []
         self._config_dialog: _AutoTypingConfigDialog | None = None
+        self._batch_run_id: int = 0
+        self._batch_worker: _AutoLabelBatchWorker | None = None
+        self._batch_worker_thread: QThread | None = None
         self._split_page = self._build_split_page()
         self._auto_page = self._build_auto_page()
         self._validation_page = self._build_validation_page()
@@ -185,8 +189,8 @@ class BatchTabWidget(QWidget):
         desc = QLabel(
             "Auto-labeling for all SWC files in a folder. Uses the v9 ML "
             "pipeline (Stage 1 cell-type detector + Stage 2 per-subtree "
-            "classifier + optional Stage 2b GNN re-decision + Stage 3 "
-            "topology refinement)."
+            "classifier + Stage 2b GNN re-decision + Stage 3 topology "
+            "refinement). All four stages are required."
         )
         desc.setWordWrap(True)
         desc.setStyleSheet("font-size: 12px; color: #555;")
@@ -223,6 +227,23 @@ class BatchTabWidget(QWidget):
         action_row.addWidget(self._btn_edit_auto_cfg)
         action_row.addStretch()
         root.addLayout(action_row)
+
+        # Per-file progress for batch runs. Hidden until a worker starts.
+        self._batch_progress = QProgressBar()
+        self._batch_progress.setVisible(False)
+        self._batch_progress.setTextVisible(True)
+        self._batch_progress.setFormat("%v / %m files")
+        root.addWidget(self._batch_progress)
+
+        self._batch_progress_label = QLabel("")
+        self._batch_progress_label.setVisible(False)
+        self._batch_progress_label.setWordWrap(True)
+        self._batch_progress_label.setStyleSheet("font-size: 11px; color: #555;")
+        root.addWidget(self._batch_progress_label)
+
+        # Status box for the per-run summary written when a job finishes.
+        self._batch_status_box = self._new_status_box()
+        root.addWidget(self._batch_status_box, stretch=1)
         # Keep controls pinned to the top of the tab even when there is extra height.
         root.addStretch(1)
         return page
@@ -408,11 +429,21 @@ class BatchTabWidget(QWidget):
         self._show_report_popup("Batch Split Report", result.get("log_path"))
 
     def _on_run_batch_check(self):
+        if self._batch_worker_thread is not None and self._batch_worker_thread.isRunning():
+            self._set_status(
+                "Auto-labeling batch is already running.",
+                self._batch_status_box,
+            )
+            return
+
         folder_path = QFileDialog.getExistingDirectory(
             self, "Select folder with SWC files for auto-labeling"
         )
         if not folder_path:
-            self._set_status("Auto-labeling batch processing cancelled.")
+            self._set_status(
+                "Auto-labeling batch processing cancelled.",
+                self._batch_status_box,
+            )
             return
 
         swc_files = [
@@ -420,7 +451,10 @@ class BatchTabWidget(QWidget):
             if f.lower().endswith(".swc") and os.path.isfile(os.path.join(folder_path, f))
         ]
         if not swc_files:
-            self._set_status(f"No .swc files found in:\n{folder_path}")
+            self._set_status(
+                f"No .swc files found in:\n{folder_path}",
+                self._batch_status_box,
+            )
             return
 
         opts = BatchOptions(
@@ -435,48 +469,120 @@ class BatchTabWidget(QWidget):
         md = (self._batch_edit_model_dir.text() or "").strip() or None
         ok, reason = is_available(model_dir=md)
         if not ok:
-            self._set_status(f"Auto-typing engine unavailable.\n{reason}")
+            self._set_status(
+                f"Auto-typing engine unavailable.\n{reason}",
+                self._batch_status_box,
+            )
             return
         config_overrides: dict = {}
         if md:
             config_overrides["model_dir"] = md
 
-        try:
-            result = run_auto_typing(
-                folder_path, options=opts, config_overrides=config_overrides,
+        # Hand off to a worker thread so the UI stays responsive while
+        # the engine processes potentially many files.
+        self._batch_run_id += 1
+        run_id = int(self._batch_run_id)
+        total = len(swc_files)
+
+        self._set_batch_running(True, total, folder_path)
+
+        self._batch_worker_thread = QThread(self)
+        self._batch_worker = _AutoLabelBatchWorker(
+            run_id, folder_path, opts, config_overrides,
+        )
+        self._batch_worker.moveToThread(self._batch_worker_thread)
+        self._batch_worker_thread.started.connect(self._batch_worker.run)
+        self._batch_worker.progress.connect(self._on_batch_progress)
+        self._batch_worker.finished.connect(self._on_batch_finished)
+        self._batch_worker.failed.connect(self._on_batch_failed)
+        self._batch_worker.finished.connect(self._batch_worker_thread.quit)
+        self._batch_worker.failed.connect(self._batch_worker_thread.quit)
+        self._batch_worker_thread.finished.connect(self._cleanup_batch_worker_refs)
+        self._batch_worker_thread.start()
+
+    def _set_batch_running(self, running: bool, total: int = 0, folder_path: str = "") -> None:
+        """Toggle running state for the batch auto-label panel — disables
+        controls and shows the progress bar while a worker is in flight."""
+        self._btn_run_batch_check.setEnabled(not running)
+        self._btn_edit_auto_cfg.setEnabled(not running)
+        self._batch_edit_model_dir.setEnabled(not running)
+        self._batch_btn_browse_model.setEnabled(not running)
+
+        self._batch_progress.setVisible(running)
+        self._batch_progress_label.setVisible(running)
+        if running:
+            self._batch_progress.setRange(0, max(int(total), 1))
+            self._batch_progress.setValue(0)
+            self._batch_progress_label.setText(
+                f"Starting auto-labeling on {int(total)} file(s) in:\n{folder_path}"
             )
-        except Exception as e:
-            self._set_status(f"Auto labeling batch failed:\n{e}")
+            self._set_status(
+                f"Running auto-labeling on {int(total)} file(s)…",
+                self._batch_status_box,
+            )
+
+    @Slot(int, int, str)
+    def _on_batch_progress(self, idx: int, total: int, name: str) -> None:
+        if total > 0 and self._batch_progress.maximum() != total:
+            self._batch_progress.setRange(0, int(total))
+        self._batch_progress.setValue(int(idx))
+        self._batch_progress_label.setText(f"Processing {idx + 1} / {total} — {name}")
+
+    @Slot(int, object)
+    def _on_batch_finished(self, run_id: int, result: object) -> None:
+        if int(run_id) != int(self._batch_run_id):
             return
+        # Bring the bar to 100% before hiding it.
+        self._batch_progress.setValue(self._batch_progress.maximum())
 
         lines = [
             "Auto-labeling batch processing completed.",
-            f"Folder: {result.folder}",
-            f"Output folder: {result.out_dir}",
-            f"SWC files detected: {result.files_total}",
-            f"Processed: {result.files_processed}",
-            f"Failed: {result.files_failed}",
-            f"Total nodes processed: {result.total_nodes}",
-            f"Type changes: {result.total_type_changes}",
-            f"Radius changes: {result.total_radius_changes}",
+            f"Folder: {getattr(result, 'folder', '')}",
+            f"Output folder: {getattr(result, 'out_dir', '')}",
+            f"SWC files detected: {getattr(result, 'files_total', 0)}",
+            f"Processed: {getattr(result, 'files_processed', 0)}",
+            f"Failed: {getattr(result, 'files_failed', 0)}",
+            f"Total nodes processed: {getattr(result, 'total_nodes', 0)}",
+            f"Type changes: {getattr(result, 'total_type_changes', 0)}",
+            f"Radius changes: {getattr(result, 'total_radius_changes', 0)}",
         ]
-        if result.zip_path:
-            lines.append(f"ZIP output: {result.zip_path}")
-        if result.per_file:
+        zip_path = getattr(result, "zip_path", None)
+        if zip_path:
+            lines.append(f"ZIP output: {zip_path}")
+        per_file = list(getattr(result, "per_file", []) or [])
+        if per_file:
             lines.append("")
             lines.append("Per-file summary:")
-            lines.extend(result.per_file[:25])
-            if len(result.per_file) > 25:
-                lines.append(f"... ({len(result.per_file) - 25} more)")
-        if result.failures:
+            lines.extend(per_file[:25])
+            if len(per_file) > 25:
+                lines.append(f"... ({len(per_file) - 25} more)")
+        failures = list(getattr(result, "failures", []) or [])
+        if failures:
             lines.append("")
             lines.append("Errors:")
-            lines.extend(result.failures[:10])
-        if getattr(result, "log_path", None):
-            lines.extend(["", f"Report file: {result.log_path}"])
+            lines.extend(failures[:10])
+        log_path = getattr(result, "log_path", None)
+        if log_path:
+            lines.extend(["", f"Report file: {log_path}"])
 
-        self._set_status("\n".join(lines))
-        self._show_report_popup("Auto-Typing Batch Report", getattr(result, "log_path", None))
+        self._set_status("\n".join(lines), self._batch_status_box)
+        self._set_batch_running(False)
+        self._show_report_popup("Auto-Typing Batch Report", log_path)
+
+    @Slot(int, str)
+    def _on_batch_failed(self, run_id: int, message: str) -> None:
+        if int(run_id) != int(self._batch_run_id):
+            return
+        self._set_status(
+            f"Auto labeling batch failed:\n{message}",
+            self._batch_status_box,
+        )
+        self._set_batch_running(False)
+
+    @Slot()
+    def _cleanup_batch_worker_refs(self) -> None:
+        self._batch_worker = None
+        self._batch_worker_thread = None
 
     def _on_run_batch_validation(self):
         folder_path = QFileDialog.getExistingDirectory(

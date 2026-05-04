@@ -25,7 +25,7 @@ from __future__ import annotations
 
 import zipfile
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from swcstudio.core.model_paths import (
     diagnostic_search_report,
@@ -488,8 +488,15 @@ def run_batch(
     *,
     model_dir: str | None = None,
     use_subtree_stage2: bool = True,
+    progress_callback: Callable[[int, int, str], None] | None = None,
 ) -> BatchResult:
-    """Run the auto-typing engine on every ``.swc`` file in ``folder``."""
+    """Run the auto-typing engine on every ``.swc`` file in ``folder``.
+
+    ``progress_callback`` is invoked once per file *before* processing
+    that file: ``progress_callback(index, total, current_filename)``.
+    Use it to drive a GUI progress bar without blocking the engine.
+    Exceptions raised inside the callback are propagated to the caller.
+    """
     ok, reason = is_available(model_dir=model_dir)
     if not ok:
         raise FileNotFoundError(reason)
@@ -517,8 +524,11 @@ def run_batch(
     total_nodes = 0
     total_type_changes = 0
     total_radius_changes = 0
+    total_files = len(swc_files)
 
-    for swc_path in swc_files:
+    for idx, swc_path in enumerate(swc_files):
+        if progress_callback is not None:
+            progress_callback(idx, total_files, swc_path.name)
         try:
             headers, rows = _parse_swc(swc_path)
             if not rows:
