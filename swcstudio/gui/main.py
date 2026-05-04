@@ -8,17 +8,69 @@ from .font_utils import pick_app_font
 from .main_window import SWCMainWindow
 
 
+def _apply_light_palette(app) -> None:
+    """Pin the application palette to a light theme.
+
+    Without this, Qt's Fusion style follows the host OS theme — which
+    on Windows means a fresh user with system dark mode enabled sees a
+    half-broken UI: panels with explicit light stylesheets stay white
+    while widgets without explicit colors fall through to dark
+    palette roles, leaving white text on white backgrounds (and vice
+    versa) all over the place. Pinning every palette role here gives
+    identical rendering on macOS, Windows light mode, and Windows dark
+    mode.
+    """
+    palette = QPalette()
+
+    # Active group — the standard look for foreground windows.
+    palette.setColor(QPalette.Window, QColor("#f0f0f0"))
+    palette.setColor(QPalette.WindowText, QColor("#000000"))
+    palette.setColor(QPalette.Base, QColor("#ffffff"))
+    palette.setColor(QPalette.AlternateBase, QColor("#f6f6f6"))
+    palette.setColor(QPalette.ToolTipBase, QColor("#ffffff"))
+    palette.setColor(QPalette.ToolTipText, QColor("#000000"))
+    palette.setColor(QPalette.PlaceholderText, QColor("#888888"))
+    palette.setColor(QPalette.Text, QColor("#000000"))
+    palette.setColor(QPalette.Button, QColor("#e1e1e1"))
+    palette.setColor(QPalette.ButtonText, QColor("#000000"))
+    palette.setColor(QPalette.BrightText, QColor("#ffffff"))
+    palette.setColor(QPalette.Light, QColor("#ffffff"))
+    palette.setColor(QPalette.Midlight, QColor("#e3e3e3"))
+    palette.setColor(QPalette.Dark, QColor("#555555"))
+    palette.setColor(QPalette.Mid, QColor("#b3b3b3"))
+    palette.setColor(QPalette.Shadow, QColor("#767676"))
+    palette.setColor(QPalette.Highlight, QColor("#2a82da"))
+    palette.setColor(QPalette.HighlightedText, QColor("#ffffff"))
+    palette.setColor(QPalette.Link, QColor("#0066cc"))
+    palette.setColor(QPalette.LinkVisited, QColor("#663399"))
+
+    # Disabled group — used when widgets are greyed out during long
+    # operations (e.g. while a worker thread is running).
+    palette.setColor(QPalette.Disabled, QPalette.WindowText, QColor("#909090"))
+    palette.setColor(QPalette.Disabled, QPalette.Text, QColor("#909090"))
+    palette.setColor(QPalette.Disabled, QPalette.ButtonText, QColor("#909090"))
+    palette.setColor(QPalette.Disabled, QPalette.Highlight, QColor("#cccccc"))
+    palette.setColor(QPalette.Disabled, QPalette.HighlightedText, QColor("#666666"))
+
+    app.setPalette(palette)
+
+
 def main():
     from PySide6.QtWidgets import QApplication
 
     app = QApplication(sys.argv)
     app.setApplicationName("SWC Studio")
+    # Use Fusion so the rendering is identical across platforms — the
+    # native macOS / Windows styles otherwise apply different padding,
+    # corner radii, and palette interpretation.
     app.setStyle("Fusion")
     app.setFont(pick_app_font())
-    palette = app.palette()
-    palette.setColor(QPalette.ToolTipBase, QColor("#ffffff"))
-    palette.setColor(QPalette.ToolTipText, QColor("#000000"))
-    app.setPalette(palette)
+    _apply_light_palette(app)
+
+    # Application-wide stylesheet for widget classes that don't honour
+    # the palette directly (tooltips, item-view rows). Per-panel
+    # stylesheets in main_window.py and the panel files override
+    # individual surfaces; this is the safety net.
     app.setStyleSheet(
         """
         QToolTip {
@@ -27,6 +79,47 @@ def main():
           border: 1px solid #b8c4d3;
           padding: 2px 6px;
           margin: 0px;
+        }
+        QWidget {
+          color: #000000;
+          background-color: #f0f0f0;
+        }
+        QAbstractItemView {
+          color: #000000;
+          background-color: #ffffff;
+          alternate-background-color: #f6f6f6;
+          selection-color: #ffffff;
+          selection-background-color: #2a82da;
+        }
+        QAbstractItemView::item {
+          color: #000000;
+        }
+        QHeaderView::section {
+          color: #000000;
+          background-color: #e1e1e1;
+        }
+        QLineEdit, QPlainTextEdit, QTextEdit, QSpinBox, QDoubleSpinBox,
+        QComboBox, QComboBox QAbstractItemView {
+          color: #000000;
+          background-color: #ffffff;
+        }
+        QMenu, QMenuBar, QMenuBar::item {
+          color: #000000;
+          background-color: #f0f0f0;
+        }
+        QMenu::item:selected, QMenuBar::item:selected {
+          color: #ffffff;
+          background-color: #2a82da;
+        }
+        QTabWidget::pane {
+          background-color: #f0f0f0;
+        }
+        QTabBar::tab {
+          color: #000000;
+          background-color: #e1e1e1;
+        }
+        QTabBar::tab:selected {
+          background-color: #ffffff;
         }
         """
     )
