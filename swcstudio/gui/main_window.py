@@ -36,7 +36,7 @@ from PySide6.QtWidgets import (
 )
 
 from .auto_typing_guide import AutoTypingGuideWidget
-from .auto_typing_workers import _AutoLabelFileWorker
+from .auto_typing_workers import _AutoLabelFileWorker, _TypeSuspicionWorker
 from .batch_tab import BatchTabWidget
 from .constants import SWC_COLS, label_for_type
 from .context_inspector import ContextInspectorWidget
@@ -54,6 +54,7 @@ from .validation_auto_label_panel import ValidationAutoLabelPanel
 from .validation_tab import ValidationIndexCleanWidget, ValidationPrecheckWidget, ValidationTabWidget
 from swcstudio.core.issues import (
     build_issue_list,
+    compute_type_suspicion_issues,
     issues_from_validation_report,
 )
 from swcstudio.core.custom_types import save_custom_type_definitions
@@ -229,6 +230,15 @@ class SWCMainWindow(QMainWindow):
         self._validation_auto_label_tmp_path: Path | None = None
         self._validation_auto_label_source_doc: _DocumentState | None = None
         self._validation_auto_label_options: object | None = None
+
+        # Type-suspicion worker — runs the auto-typing engine in the
+        # background after a fast-path issue list is shown so the
+        # ``Likely wrong labels`` rows can stream in without making the
+        # user wait for inference on file open.
+        self._type_suspicion_run_id: int = 0
+        self._type_suspicion_worker: _TypeSuspicionWorker | None = None
+        self._type_suspicion_thread: QThread | None = None
+        self._type_suspicion_doc: _DocumentState | None = None
 
         self._build_ui()
         self._build_status_bar()
@@ -3084,8 +3094,20 @@ class SWCMainWindow(QMainWindow):
             f"{info} info · {skipped} muted · {fixed} fixed"
         )
 
-    def _build_all_issues_for_document(self, doc: _DocumentState, report: dict) -> list[dict]:
-        return build_issue_list(doc.df, report)
+    def _build_all_issues_for_document(
+        self,
+        doc: _DocumentState,
+        report: dict,
+        *,
+        skip_type_suspicion: bool = False,
+        type_suspicious: list[dict] | None = None,
+    ) -> list[dict]:
+        return build_issue_list(
+            doc.df,
+            report,
+            skip_type_suspicion=skip_type_suspicion,
+            type_suspicious=type_suspicious,
+        )
 
     def _on_validation_report_ready(self, report: dict):
         doc = self._active_document()
@@ -3094,7 +3116,13 @@ class SWCMainWindow(QMainWindow):
         previous_issue_id = str(doc.selected_issue_id or "").strip()
         previous_issue = self._find_issue_by_id(doc, previous_issue_id)
         doc.validation_report = dict(report)
-        issues = self._build_all_issues_for_document(doc, report)
+        # Fast path: build the issue list WITHOUT type suspicion so the
+        # panel paints within ~100 ms instead of blocking on ~1-2 s of
+        # auto-typing inference. The ``Likely wrong labels`` rows are
+        # filled in by ``_start_type_suspicion_worker`` below.
+        issues = self._build_all_issues_for_document(
+            doc, report, skip_type_suspicion=True,
+        )
         issue_ids = {str(item.get("issue_id", "")) for item in issues}
         for item in issues:
             issue_id = str(item.get("issue_id", "")).strip()
@@ -3118,6 +3146,10 @@ class SWCMainWindow(QMainWindow):
         self._data_tabs.setCurrentIndex(0)
         self._data_dock.show()
         self._append_log(f"Issue navigator updated: {len(doc.issues)} actionable findings.", "INFO")
+        # Phase 2: kick off auto-typing in the background to populate the
+        # ``Likely wrong labels`` rows. The result is merged into the
+        # issue panel by ``_on_type_suspicion_finished`` when ready.
+        self._start_type_suspicion_worker(doc, report)
         if previous_issue_id and self._issue_panel.select_issue(previous_issue_id):
             doc.selected_issue_id = previous_issue_id
             return
@@ -3134,6 +3166,98 @@ class SWCMainWindow(QMainWindow):
             problem_detail="The previous issue was resolved.",
             suggested_solution="Click another issue in the left panel to continue.",
         )
+
+    # ------------------------------------------------------------------
+    # Background type-suspicion worker. Runs the auto-typing engine on
+    # the active dataframe and streams the ``Likely wrong labels``
+    # issues into the panel when ready, so the user sees fast-path
+    # issues immediately instead of waiting on ML inference at file
+    # open.
+    # ------------------------------------------------------------------
+
+    def _start_type_suspicion_worker(self, doc: _DocumentState, report: dict) -> None:
+        if doc is None or doc.df is None or doc.df.empty:
+            return
+        # If a worker is already running on a previous open, cancel it —
+        # only the active doc's results matter. Run-id check in the
+        # finished slot makes stale results harmless even if a stop
+        # races with a finish.
+        if self._type_suspicion_thread is not None and self._type_suspicion_thread.isRunning():
+            try:
+                self._type_suspicion_thread.quit()
+                self._type_suspicion_thread.wait(200)
+            except Exception:
+                pass
+            self._cleanup_type_suspicion_worker_refs()
+
+        self._type_suspicion_run_id += 1
+        run_id = int(self._type_suspicion_run_id)
+        self._type_suspicion_doc = doc
+
+        self._type_suspicion_thread = QThread(self)
+        self._type_suspicion_worker = _TypeSuspicionWorker(run_id, doc.df.copy())
+        self._type_suspicion_worker.moveToThread(self._type_suspicion_thread)
+        self._type_suspicion_thread.started.connect(self._type_suspicion_worker.run)
+        self._type_suspicion_worker.finished.connect(self._on_type_suspicion_finished)
+        self._type_suspicion_worker.failed.connect(self._on_type_suspicion_failed)
+        self._type_suspicion_worker.finished.connect(self._type_suspicion_thread.quit)
+        self._type_suspicion_worker.failed.connect(self._type_suspicion_thread.quit)
+        self._type_suspicion_thread.finished.connect(self._cleanup_type_suspicion_worker_refs)
+        self._type_suspicion_thread.start()
+
+    @Slot(int, object)
+    def _on_type_suspicion_finished(self, run_id: int, suspicion_issues: object) -> None:
+        if int(run_id) != int(self._type_suspicion_run_id):
+            return  # stale — a newer run already started
+        doc = self._type_suspicion_doc
+        self._type_suspicion_doc = None
+        if doc is None or not isinstance(suspicion_issues, list) or not suspicion_issues:
+            return
+        # Re-build the issue list with the freshly computed type-suspicion
+        # rows merged in. We pass them in explicitly so the engine isn't
+        # re-run synchronously.
+        report = doc.validation_report or {}
+        merged = self._build_all_issues_for_document(
+            doc, report,
+            type_suspicious=list(suspicion_issues),
+        )
+        # Preserve any user mutations made between the fast-path render
+        # and now (status overrides, fixed counts).
+        issue_ids = {str(item.get("issue_id", "")) for item in merged}
+        for item in merged:
+            issue_id = str(item.get("issue_id", "")).strip()
+            status = str(doc.issue_status_overrides.get(issue_id, "open")).strip().lower()
+            if status == "skipped":
+                status = "muted"
+            if status:
+                item["status"] = status
+        doc.issue_status_overrides = {
+            issue_id: status
+            for issue_id, status in doc.issue_status_overrides.items()
+            if issue_id in issue_ids and status in {"muted", "skipped"}
+        }
+        doc.issues = merged
+        # Only refresh the panel if this doc is still the active one;
+        # otherwise just update the cached list and the next focus will
+        # pick it up.
+        if doc is self._active_document():
+            self._apply_issue_state(doc)
+        self._append_log(
+            f"Issue navigator: added {len(suspicion_issues)} likely-wrong-label rows.",
+            "INFO",
+        )
+
+    @Slot(int, str)
+    def _on_type_suspicion_failed(self, run_id: int, message: str) -> None:
+        if int(run_id) != int(self._type_suspicion_run_id):
+            return
+        self._type_suspicion_doc = None
+        self._append_log(f"Type suspicion worker failed: {message}", "WARN")
+
+    @Slot()
+    def _cleanup_type_suspicion_worker_refs(self) -> None:
+        self._type_suspicion_worker = None
+        self._type_suspicion_thread = None
 
     def _on_validation_result_activated(self, row: dict):
         if str(row.get("key", "")).strip() in {"parent_id_less_than_child_id", "no_node_id_gaps"}:

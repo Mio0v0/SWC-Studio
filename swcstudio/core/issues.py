@@ -476,13 +476,40 @@ def _type_suspicion_from_dataframe(
                 pass
 
 
+def compute_type_suspicion_issues(df: pd.DataFrame | None) -> list[dict[str, Any]]:
+    """Run the auto-typing engine on ``df`` and return the ``Likely wrong
+    labels`` issues. Exposed separately so callers (typically the GUI)
+    can run it on a worker thread instead of blocking the issue panel
+    while the full v9 ML pipeline (Stage 1 + 2 + 2b GNN + 3) runs on
+    the morphology — which can take seconds on large cells.
+    """
+    if df is None or df.empty:
+        return []
+    return _type_suspicion_from_dataframe(df)
+
+
 def build_issue_list(
     df: pd.DataFrame | None,
     validation_report: dict[str, Any] | None,
     *,
     type_suspicious: list[dict[str, Any]] | None = None,
+    skip_type_suspicion: bool = False,
 ) -> list[dict[str, Any]]:
-    """Build the same combined issue list used by the GUI issue navigator."""
+    """Build the same combined issue list used by the GUI issue navigator.
+
+    Parameters
+    ----------
+    type_suspicious
+        Pre-computed list of type-suspicion issues (e.g. produced
+        asynchronously by ``compute_type_suspicion_issues`` on a worker
+        thread). When provided, replaces the synchronous run that would
+        normally happen here.
+    skip_type_suspicion
+        When True, do not run the auto-typing pipeline at all and emit
+        the issue list without ``Likely wrong labels`` entries. The GUI
+        uses this for the immediate issue panel; a follow-up worker
+        run is then merged in via ``compute_type_suspicion_issues``.
+    """
     base_issues = issues_from_validation_report(validation_report)
 
     if df is not None and not df.empty:
@@ -530,7 +557,13 @@ def build_issue_list(
         suspicious_radii = issues_from_radii_suspicion(df, ignore_node_ids=critical_radii_node_ids)
 
     computed_type_suspicious: list[dict[str, Any]] = list(type_suspicious or [])
-    if type_suspicious is None and not hard_blocked and df is not None and not df.empty:
+    if (
+        type_suspicious is None
+        and not skip_type_suspicion
+        and not hard_blocked
+        and df is not None
+        and not df.empty
+    ):
         computed_type_suspicious = _type_suspicion_from_dataframe(df)
 
     simplification_suggestion = issues_from_simplification_suggestion(df)

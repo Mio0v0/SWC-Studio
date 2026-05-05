@@ -109,4 +109,35 @@ class _AutoLabelBatchWorker(QObject):
             self.failed.emit(self._run_id, str(exc))
 
 
-__all__ = ["_AutoLabelFileWorker", "_AutoLabelBatchWorker"]
+class _TypeSuspicionWorker(QObject):
+    """Run the auto-typing engine on a dataframe and return only the
+    ``Likely wrong labels`` issues. Used by the GUI to compute type
+    suspicion off the main thread so the issue panel can show its
+    fast-path entries (validation, radii, simplification suggestion)
+    immediately instead of blocking ~1-2 seconds while the full v9 ML
+    pipeline runs.
+    """
+
+    finished = Signal(int, object)  # run_id, list[dict]
+    failed = Signal(int, str)
+
+    def __init__(self, run_id: int, df: object):
+        super().__init__()
+        self._run_id = int(run_id)
+        self._df = df
+
+    @Slot()
+    def run(self) -> None:
+        from swcstudio.core.issues import compute_type_suspicion_issues  # noqa: PLC0415
+        try:
+            issues = compute_type_suspicion_issues(self._df)
+            self.finished.emit(self._run_id, list(issues))
+        except Exception as exc:  # noqa: BLE001
+            self.failed.emit(self._run_id, str(exc))
+
+
+__all__ = [
+    "_AutoLabelFileWorker",
+    "_AutoLabelBatchWorker",
+    "_TypeSuspicionWorker",
+]
