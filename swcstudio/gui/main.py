@@ -39,8 +39,13 @@ def _apply_light_palette(app) -> None:
     palette.setColor(QPalette.Dark, QColor("#555555"))
     palette.setColor(QPalette.Mid, QColor("#b3b3b3"))
     palette.setColor(QPalette.Shadow, QColor("#767676"))
-    palette.setColor(QPalette.Highlight, QColor("#2a82da"))
-    palette.setColor(QPalette.HighlightedText, QColor("#ffffff"))
+    # Selection background is a soft blue tint with dark text instead of
+    # the classic Fusion vivid-blue + white text. Vivid blue + white can
+    # render as white-on-very-light-grey on some Windows configurations,
+    # making selected items unreadable; dark text on light blue is safe
+    # on every theme.
+    palette.setColor(QPalette.Highlight, QColor("#d6e8ff"))
+    palette.setColor(QPalette.HighlightedText, QColor("#000000"))
     palette.setColor(QPalette.Link, QColor("#0066cc"))
     palette.setColor(QPalette.LinkVisited, QColor("#663399"))
 
@@ -88,12 +93,16 @@ def main():
           color: #000000;
           background-color: #ffffff;
           alternate-background-color: #f6f6f6;
-          selection-color: #ffffff;
-          selection-background-color: #2a82da;
         }
         QAbstractItemView::item {
           color: #000000;
         }
+        /* No global selection-background rule: panels that want a
+           selection highlight rely on the soft-blue palette set above,
+           and panels that want NO highlight (e.g. the Issues panel,
+           which explicitly forces a transparent highlight in its own
+           per-widget stylesheet and palette) are not stomped by this
+           sheet. */
         QHeaderView::section {
           color: #000000;
           background-color: #e1e1e1;
@@ -107,9 +116,19 @@ def main():
           color: #000000;
           background-color: #f0f0f0;
         }
+        /* Hover/selected menu items: keep dark text, soft blue
+           background. The previous white-on-blue rendered as
+           white-on-light-grey on Windows Fusion, leaving the text
+           almost invisible. */
         QMenu::item:selected, QMenuBar::item:selected {
-          color: #ffffff;
-          background-color: #2a82da;
+          color: #000000;
+          background-color: #d6e8ff;
+        }
+        QPushButton:hover {
+          background-color: #ebf2fb;
+        }
+        QPushButton:default {
+          color: #000000;
         }
         QTabWidget::pane {
           background-color: #f0f0f0;
@@ -118,7 +137,12 @@ def main():
           color: #000000;
           background-color: #e1e1e1;
         }
+        QTabBar::tab:hover {
+          color: #000000;
+          background-color: #ebf2fb;
+        }
         QTabBar::tab:selected {
+          color: #000000;
           background-color: #ffffff;
         }
         """
