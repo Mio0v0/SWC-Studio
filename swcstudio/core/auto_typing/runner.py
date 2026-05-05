@@ -214,27 +214,25 @@ def _write_swc(
 def _check_auto_label_eligibility(rows: list[dict[str, Any]]) -> str | None:
     """Fast pre-flight check on parsed SWC rows.
 
-    The engine assumes one well-formed cell per file (one connected
-    soma + non-empty neurite arbor). Files that violate these
-    assumptions (multi-cell SWCs, soma-less reconstructions, etc.) get
-    garbage labels because the per-cell-type / per-subtree decisions
-    have no anchor. Skip them in batch mode and surface a clear
-    failure reason so the user knows to run ``batch split`` first.
+    Auto-label assumes the file describes one cell. The only case
+    that produces garbage labels and warrants a hard skip is
+    *multi-soma* files (multiple disconnected type-1 components in a
+    single SWC) — those need to be split into one cell per file
+    first. Soma-less and soma-only files are accepted: the engine's
+    proxy-root fallback picks the largest-radius root when there's
+    no explicit soma, and a soma-only file simply produces an
+    all-soma labeling, which is correct.
 
     Returns:
-        ``None`` when the file is fine, or a short human-readable
-        string describing why it's ineligible.
+        ``None`` when the file is eligible, or a short
+        human-readable reason when it is not.
     """
     if not rows:
         return "no valid SWC rows"
 
     soma_indices = [i for i, r in enumerate(rows) if int(r["type"]) == 1]
-    if not soma_indices:
-        return "no soma node (need at least one type-1 node)"
-
-    # Non-soma neurite presence — purely-soma files have nothing to label.
-    if not any(int(r["type"]) != 1 for r in rows):
-        return "file is soma-only; no neurites to label"
+    if len(soma_indices) <= 1:
+        return None  # 0 somas (proxy-root path) or 1 soma — both fine
 
     # Multi-soma detection. Two soma nodes are part of the same soma
     # only if they are directly connected (parent <-> child) or
