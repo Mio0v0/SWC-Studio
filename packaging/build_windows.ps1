@@ -34,8 +34,39 @@ if (-not (Test-Path $AppDir)) {
     throw "Expected build output folder was not created: $AppDir"
 }
 
+# Brief settle delay so AV / Windows Search / PyInstaller have all
+# released their handles on the freshly-written tree before we read it.
+Start-Sleep -Seconds 2
+
 Write-Host "Creating shareable zip..."
-Compress-Archive -Path $AppDir -DestinationPath $ZipPath -Force
+# Compress-Archive races AV / Windows Search on freshly-written
+# trees — base_library.zip is the usual victim. We shell out to
+# Python's zipfile (different file-handle semantics, doesn't hit
+# the same lock) and retry up to 3 times with backoff.
+$ZipScriptFile = Join-Path $RootDir "packaging\_zip_dist.py"
+
+$attempt = 0
+$maxAttempts = 3
+while ($true) {
+    $attempt += 1
+    try {
+        if ($PythonExe -eq "py") {
+            & py -3 $ZipScriptFile $AppDir $ZipPath
+        } else {
+            & $PythonExe $ZipScriptFile $AppDir $ZipPath
+        }
+        if ($LASTEXITCODE -eq 0 -and (Test-Path $ZipPath)) {
+            break
+        }
+        throw "zip script exit code $LASTEXITCODE"
+    } catch {
+        if ($attempt -ge $maxAttempts) {
+            throw "Failed to create zip after $attempt attempts: $($_.Exception.Message)"
+        }
+        Write-Host "Zip attempt $attempt failed ($($_.Exception.Message)); retrying after 5s..."
+        Start-Sleep -Seconds 5
+    }
+}
 
 Write-Host ""
 Write-Host "Build complete:"
