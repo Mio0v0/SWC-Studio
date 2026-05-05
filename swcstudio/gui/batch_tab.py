@@ -459,7 +459,7 @@ class BatchTabWidget(QWidget):
         opts = BatchOptions(
             soma=True,
             axon=True,
-            apic=False,
+            apic=True,
             basal=True,
             rad=False,
             zip_output=False,

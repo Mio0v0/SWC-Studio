@@ -14,7 +14,16 @@ from typing import Any
 class BatchOptions:
     soma: bool = True
     axon: bool = True
-    apic: bool = False
+    # apic defaults to True because the engine auto-detects apical
+    # subtrees (only assigning the apical label when a subtree passes
+    # a learned score + minimum-radius threshold). Setting apic=False
+    # tells the runner to REJECT apical predictions even when the
+    # engine produces them, which causes nodes to fall back to the
+    # original SWC type — and if that type was 0 (undefined), the
+    # whole subtree shows as undefined in the GUI. Default True is
+    # the right semantic: trust the engine. Pass False explicitly
+    # only when forcing 3-class soma/axon/basal output.
+    apic: bool = True
     basal: bool = True
     rad: bool = False
     zip_output: bool = False
