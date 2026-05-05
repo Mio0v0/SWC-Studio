@@ -210,16 +210,15 @@ class ValidationAutoLabelPanel(QWidget):
 
     def _refresh_backend_status(self) -> None:
         md = (self._edit_model_dir.text() or "").strip() or None
-        ok, _ = is_available(model_dir=md)
+        ok, reason = is_available(model_dir=md)
         if ok:
             self._backend_status_lbl.setText("ready")
             self._backend_status_lbl.setStyleSheet("font-size: 11px; color: #2a7;")
             self._backend_status_lbl.setToolTip("All required model files are loaded.")
         else:
-            self._backend_status_lbl.setText("model files missing")
+            self._backend_status_lbl.setText("unavailable — see details")
             self._backend_status_lbl.setStyleSheet("font-size: 11px; color: #c33;")
-            st = backend_status(model_dir=md)
-            self._backend_status_lbl.setToolTip(st.get("search_diagnostic", ""))
+            self._backend_status_lbl.setToolTip(str(reason))
 
     def _on_edit_auto_typing_json(self):
         if self._config_dialog is None:
