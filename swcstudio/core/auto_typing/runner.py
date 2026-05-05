@@ -211,6 +211,70 @@ def _write_swc(
             )
 
 
+def _check_auto_label_eligibility(rows: list[dict[str, Any]]) -> str | None:
+    """Fast pre-flight check on parsed SWC rows.
+
+    The engine assumes one well-formed cell per file (one connected
+    soma + non-empty neurite arbor). Files that violate these
+    assumptions (multi-cell SWCs, soma-less reconstructions, etc.) get
+    garbage labels because the per-cell-type / per-subtree decisions
+    have no anchor. Skip them in batch mode and surface a clear
+    failure reason so the user knows to run ``batch split`` first.
+
+    Returns:
+        ``None`` when the file is fine, or a short human-readable
+        string describing why it's ineligible.
+    """
+    if not rows:
+        return "no valid SWC rows"
+
+    soma_indices = [i for i, r in enumerate(rows) if int(r["type"]) == 1]
+    if not soma_indices:
+        return "no soma node (need at least one type-1 node)"
+
+    # Non-soma neurite presence — purely-soma files have nothing to label.
+    if not any(int(r["type"]) != 1 for r in rows):
+        return "file is soma-only; no neurites to label"
+
+    # Multi-soma detection. Two soma nodes are part of the same soma
+    # only if they are directly connected (parent <-> child) or
+    # transitively connected through soma-only edges. Build that
+    # connectivity over soma nodes, count components.
+    id_to_idx = {int(r["id"]): i for i, r in enumerate(rows)}
+    soma_set = set(soma_indices)
+    parent_idx_of = [id_to_idx.get(int(r["parent"])) for r in rows]
+
+    # Adjacency restricted to soma-soma edges.
+    soma_adj: dict[int, set[int]] = {i: set() for i in soma_indices}
+    for child in soma_indices:
+        p = parent_idx_of[child]
+        if p in soma_set:
+            soma_adj[child].add(p)
+            soma_adj[p].add(child)
+
+    seen: set[int] = set()
+    components = 0
+    for start in soma_indices:
+        if start in seen:
+            continue
+        # BFS over soma-restricted adjacency.
+        stack = [start]
+        while stack:
+            cur = stack.pop()
+            if cur in seen:
+                continue
+            seen.add(cur)
+            stack.extend(n for n in soma_adj[cur] if n not in seen)
+        components += 1
+    if components > 1:
+        return (
+            f"multi-soma file ({components} disconnected soma groups); "
+            "split with `batch split` before auto-labeling"
+        )
+
+    return None
+
+
 def _build_change_details(
     file_name: str,
     rows: list[dict[str, Any]],
@@ -399,8 +463,9 @@ def run_file(
 
     in_path = Path(file_path)
     headers, rows = _parse_swc(in_path)
-    if not rows:
-        raise ValueError(f"{in_path.name}: no valid SWC rows")
+    ineligible = _check_auto_label_eligibility(rows)
+    if ineligible is not None:
+        raise ValueError(f"{in_path.name}: {ineligible}")
 
     orig_types = [int(r["type"]) for r in rows]
     orig_radii = [float(r["radius"]) for r in rows]
@@ -531,8 +596,9 @@ def run_batch(
             progress_callback(idx, total_files, swc_path.name)
         try:
             headers, rows = _parse_swc(swc_path)
-            if not rows:
-                failures.append(f"{swc_path.name}: no valid SWC rows")
+            ineligible = _check_auto_label_eligibility(rows)
+            if ineligible is not None:
+                failures.append(f"{swc_path.name}: skipped — {ineligible}")
                 continue
 
             orig_types = [int(r["type"]) for r in rows]
