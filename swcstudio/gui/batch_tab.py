@@ -187,10 +187,10 @@ class BatchTabWidget(QWidget):
         root.setAlignment(Qt.AlignTop)
 
         desc = QLabel(
-            "Auto-labeling for all SWC files in a folder. Uses the v9 ML "
-            "pipeline (Stage 1 cell-type detector + Stage 2 per-subtree "
-            "classifier + Stage 2b GNN re-decision + Stage 3 topology "
-            "refinement). All four stages are required."
+            "Auto-label every SWC file in a folder. Three-stage ML "
+            "pipeline: (1) detect cell type, (2) classify each dendrite "
+            "branch as axon / basal / apical, (3) refine with topology "
+            "rules."
         )
         desc.setWordWrap(True)
         desc.setStyleSheet("font-size: 12px; color: #555;")
@@ -260,12 +260,11 @@ class BatchTabWidget(QWidget):
         md = (self._batch_edit_model_dir.text() or "").strip() or None
         ok, _ = is_available(model_dir=md)
         if ok:
-            st = backend_status(model_dir=md)
-            tag = " + GNN" if st.get("gnn_ok") else ""
-            self._batch_backend_status_lbl.setText(f"models OK (Stage 1+2{tag})")
+            self._batch_backend_status_lbl.setText("ready")
             self._batch_backend_status_lbl.setStyleSheet("font-size: 11px; color: #2a7;")
+            self._batch_backend_status_lbl.setToolTip("All required model files are loaded.")
         else:
-            self._batch_backend_status_lbl.setText("models missing — see hover for details")
+            self._batch_backend_status_lbl.setText("model files missing")
             self._batch_backend_status_lbl.setStyleSheet("font-size: 11px; color: #c33;")
             st = backend_status(model_dir=md)
             self._batch_backend_status_lbl.setToolTip(st.get("search_diagnostic", ""))
