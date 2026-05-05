@@ -7,6 +7,24 @@ Run from repo root with the project's venv active:
 This simply forwards to the package entry at swcstudio.gui.main
 """
 
+# IMPORTANT: multiprocessing.freeze_support() must be called as the very
+# first thing in the frozen entrypoint. When the bundled app spawns a
+# worker (sklearn n_jobs, joblib, torch dataloaders, etc.), Python on
+# macOS re-launches the *entire bundled executable* as the worker.
+# Without freeze_support() the child process re-runs main() and the
+# user sees a duplicate GUI window pop up when they open a file. With
+# it, the child detects it's a worker and runs the worker function
+# instead. No-op on non-frozen Python.
+import multiprocessing
+multiprocessing.freeze_support()
+# Force 'spawn' start method (default on macOS Python 3.8+ but explicit
+# is safer; 'fork' is unsafe with Qt / threaded libraries).
+try:
+    multiprocessing.set_start_method("spawn", force=True)
+except RuntimeError:
+    # Already set elsewhere — fine.
+    pass
+
 import os
 import sys
 
