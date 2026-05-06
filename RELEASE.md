@@ -1,0 +1,112 @@
+# Cutting a release
+
+This walks through the full sequence to ship a SWC-Studio release that
+supports the modular update mechanism. The actual publishing is
+automated by `.github/workflows/release.yml`.
+
+## Quick recipe
+
+```bash
+# 1. Bump the version locally (one source of truth → updater + pyproject)
+python scripts/stamp_version.py --version 0.2.0
+
+# 2. Verify the bump took effect
+python scripts/stamp_version.py --version 0.2.0 --check
+
+# 3. Commit + push
+git add pyproject.toml swcstudio/core/updater.py
+git commit -m "Bump version to 0.2.0"
+git push origin <your-branch>
+
+# 4. Tag and push the tag — this triggers the release workflow
+git tag v0.2.0
+git push origin v0.2.0
+```
+
+GitHub Actions will then:
+
+1. Build the layer zips, the pip wheel, and `update_manifest.json`
+2. Build the macOS `.app` (modular) and Windows `.zip`
+3. Create a draft GitHub Release `v0.2.0` and attach all assets
+4. (Gated) Publish the wheel to PyPI
+
+## What ships in a release
+
+For a tag `v0.2.0`, the workflow attaches these assets to the release:
+
+| Asset                                  | Audience                          | Size  |
+|----------------------------------------|-----------------------------------|-------|
+| `swcstudio-code-v0.2.0.zip`            | Modular .app users (code update)  | ~5 MB |
+| `swcstudio-models-v0.2.0.zip`          | Modular .app users + pip users    | ~60 MB |
+| `SWC-Studio-v0.2.0-macOS.zip`          | New / runtime-bumping Mac users   | ~700 MB |
+| `SWC-Studio-v0.2.0-Windows.zip`        | New / runtime-bumping Win users   | ~700 MB |
+| `swcstudio-0.2.0-py3-none-any.whl`     | pip users (auto-pulled by pip)    | ~5 MB |
+| `swcstudio-0.2.0.tar.gz`               | pip users (sdist fallback)        | ~5 MB |
+| `update_manifest.json`                 | the in-app updater                | ~1 KB |
+
+The `update_manifest.json` is the key file that ties everything
+together. The bundled updater fetches it from the
+`releases/latest/download/update_manifest.json` URL (always points at
+the most recent release), then offers to install whichever layer
+changed.
+
+## First-time setup
+
+### PyPI Trusted Publisher (one-time)
+
+Trusted publishing avoids the need for a PYPI_API_TOKEN secret.
+
+1. Visit https://pypi.org/manage/account/publishing/
+2. Add a "GitHub" publisher with:
+   - PyPI Project Name:  `swcstudio`
+   - Owner:              `Mio0v0`
+   - Repository name:    `SWC-Studio`
+   - Workflow filename:  `release.yml`
+   - Environment name:   `pypi`
+3. In your GitHub repo, go to Settings -> Environments -> New environment
+   - Name: `pypi`
+   - Required reviewers: optional but recommended (adds a manual approval gate)
+
+After this, every tag push produces a wheel and (after approval, if
+configured) it appears on PyPI.
+
+### Disable PyPI publish
+
+If you'd rather not publish to PyPI yet, comment out the
+`publish-pypi` job in `release.yml`. Layer zips and bundles will still
+be attached to the GitHub Release.
+
+## Dry runs
+
+Use `workflow_dispatch` to test without tagging:
+
+1. Go to Actions -> Release -> Run workflow
+2. Set `version` to e.g. `0.2.0-test`
+3. Set `dry_run` to `true`
+
+The workflow builds all the artifacts but skips upload to GitHub
+Releases and PyPI. The artifacts are downloadable from the workflow
+run page for inspection.
+
+## Troubleshooting
+
+**Workflow says "version mismatch"**
+The `pyproject.toml` `version` and the tag don't agree. Run:
+```bash
+python scripts/stamp_version.py --version <X.Y.Z>
+git commit -am "Bump version to X.Y.Z"
+git tag vX.Y.Z
+```
+
+**macOS build fails with "developer cannot be verified"**
+The released `.app` is unsigned. Users will see the Gatekeeper warning on first launch. Solutions in order of effort:
+
+* Tell users: right-click .app -> Open the first time
+* Or in their Terminal: `xattr -cr SWC-Studio.app`
+* Long-term fix: Apple Developer ID + notarization (~$99/yr)
+
+**PyPI publish fails with "trusted publisher not configured"**
+Complete the one-time setup above, then re-run the failed `publish-pypi` job.
+
+**The "Check for Updates" menu shows "Could not reach the update server"**
+The release was tagged but the workflow didn't attach `update_manifest.json` (perhaps the workflow failed on that step). Re-run the workflow or manually upload the manifest from the workflow's `layer-artifacts` artifact.

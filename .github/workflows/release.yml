@@ -1,0 +1,357 @@
+name: Release
+
+# Trigger: pushing a v* tag (e.g. `git tag v0.2.0 && git push origin v0.2.0`).
+# Also exposes a manual run for testing without tagging.
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to release (no leading v, e.g. 0.2.0)'
+        required: true
+      dry_run:
+        description: 'Build artifacts but do not publish'
+        required: false
+        default: 'false'
+
+permissions:
+  contents: write   # required to upload assets to the GitHub Release
+
+# Resolve the release version once so every job sees the same value
+# regardless of whether the trigger was a tag push or workflow_dispatch.
+env:
+  RELEASE_VERSION: ${{ github.event.inputs.version || github.ref_name }}
+
+# Cancel an older release run if a newer tag is pushed before it finishes.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: true
+
+
+jobs:
+  # =========================================================================
+  # 1. Layer zips + pip wheel + manifest. Runs on Linux (cheapest).
+  # =========================================================================
+  package-layers:
+    name: Build code/models zips + wheel + manifest
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # Need the model files (~60 MB) to be checked out, not LFS pointers.
+          lfs: false
+
+      - name: Resolve version (strip leading v)
+        id: version
+        run: |
+          RAW="${RELEASE_VERSION}"
+          VERSION_NO_V="${RAW#v}"
+          TAG="v${VERSION_NO_V}"
+          echo "version_no_v=${VERSION_NO_V}" >> "$GITHUB_OUTPUT"
+          echo "tag=${TAG}"                  >> "$GITHUB_OUTPUT"
+          echo "Building release ${TAG} (version ${VERSION_NO_V})"
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Stamp version into source tree (build-only, not committed)
+        run: |
+          python scripts/stamp_version.py --version "${{ steps.version.outputs.version_no_v }}"
+
+      - name: Install build deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install build wheel
+
+      # ---- Layer 1: swcstudio-code-vN.zip ------------------------------------
+      # Plain Python source tree. Excludes models, caches, compiled files.
+      - name: Build code layer zip
+        run: |
+          set -e
+          VERSION="${{ steps.version.outputs.version_no_v }}"
+          TAG="${{ steps.version.outputs.tag }}"
+          STAGE="staging-code"
+          rm -rf "$STAGE"
+          mkdir -p "$STAGE"
+          cp -R swcstudio "$STAGE/"
+          # Strip transient + binary artifacts
+          find "$STAGE" -name "__pycache__" -exec rm -rf {} +
+          find "$STAGE" -name "*.pyc" -delete
+          find "$STAGE" -name "*.pyo" -delete
+          # The code zip is supposed to be code-only — drop the bundled
+          # models so they ship in their own layer.
+          rm -rf "$STAGE/swcstudio/data/models"
+          # VERSION marker so the bootstrap can identify what's installed.
+          echo "$VERSION" > "$STAGE/swcstudio/VERSION"
+          mkdir -p artifacts
+          (cd "$STAGE" && zip -r -9 "../artifacts/swcstudio-code-${TAG}.zip" swcstudio)
+          ls -lah "artifacts/swcstudio-code-${TAG}.zip"
+
+      # ---- Layer 2: swcstudio-models-vN.zip ----------------------------------
+      - name: Build models layer zip
+        run: |
+          set -e
+          VERSION="${{ steps.version.outputs.version_no_v }}"
+          TAG="${{ steps.version.outputs.tag }}"
+          STAGE="staging-models"
+          rm -rf "$STAGE"
+          mkdir -p "$STAGE"
+          if compgen -G 'swcstudio/data/models/*' > /dev/null; then
+            cp swcstudio/data/models/* "$STAGE/"
+          else
+            echo "::error::no model files at swcstudio/data/models/"
+            exit 1
+          fi
+          echo "$VERSION" > "$STAGE/VERSION"
+          mkdir -p artifacts
+          (cd "$STAGE" && zip -r -9 "../artifacts/swcstudio-models-${TAG}.zip" .)
+          ls -lah "artifacts/swcstudio-models-${TAG}.zip"
+
+      # ---- Pip wheel ---------------------------------------------------------
+      # Leaning on pyproject.toml's package-data being empty (Pattern B).
+      # Wheel ships ~5 MB of code only; models download on first use.
+      - name: Build pip wheel + sdist
+        run: |
+          python -m build
+          ls -lah dist/
+
+      - name: Copy wheel + sdist into artifacts/
+        run: |
+          mkdir -p artifacts
+          cp dist/*.whl artifacts/
+          cp dist/*.tar.gz artifacts/
+          ls -lah artifacts/
+
+      # ---- Manifest (without runtime URLs at this stage) --------------------
+      # The macOS / Windows runtime zips are built in parallel jobs; their
+      # URLs are produced via the GitHub Releases asset URL pattern, so the
+      # manifest can include them without waiting on those jobs to finish.
+      - name: Generate update_manifest.json
+        run: |
+          set -e
+          VERSION="${{ steps.version.outputs.version_no_v }}"
+          TAG="${{ steps.version.outputs.tag }}"
+          # The runtime zips don't exist yet on this runner, but the
+          # manifest's runtime block only needs URL strings that point to
+          # the eventual GitHub-Releases assets. We assemble those URLs
+          # directly without inspecting files.
+          python - <<PY
+          import json, hashlib, datetime
+          from pathlib import Path
+
+          REPO = "Mio0v0/SWC-Studio"
+          TAG  = "${TAG}"
+          VER  = "${VERSION}"
+
+          def info(p):
+              data = Path(p).read_bytes()
+              return {
+                  "version": VER,
+                  "url": f"https://github.com/{REPO}/releases/download/{TAG}/{Path(p).name}",
+                  "size": len(data),
+                  "sha256": hashlib.sha256(data).hexdigest(),
+              }
+
+          manifest = {
+              "release_version": VER,
+              "released_utc": datetime.datetime.now(datetime.timezone.utc).replace(microsecond=0).isoformat(),
+              "app":     info(f"artifacts/swcstudio-code-{TAG}.zip"),
+              "models":  info(f"artifacts/swcstudio-models-{TAG}.zip"),
+              "runtime": {
+                  "min_version": VER,
+                  "url_macos":   f"https://github.com/{REPO}/releases/download/{TAG}/SWC-Studio-{TAG}-macOS.zip",
+                  "url_windows": f"https://github.com/{REPO}/releases/download/{TAG}/SWC-Studio-{TAG}-Windows.zip",
+              },
+          }
+          Path("artifacts/update_manifest.json").write_text(
+              json.dumps(manifest, indent=2) + "\n", encoding="utf-8"
+          )
+          print(json.dumps(manifest, indent=2))
+          PY
+
+      - name: Upload layer artifacts to the GitHub Release
+        # Idempotent — softprops creates the release if missing, otherwise
+        # appends/updates assets. Other jobs upload to the same release.
+        uses: softprops/action-gh-release@v2
+        if: github.event.inputs.dry_run != 'true'
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: SWC-Studio ${{ steps.version.outputs.tag }}
+          generate_release_notes: true
+          files: |
+            artifacts/swcstudio-code-${{ steps.version.outputs.tag }}.zip
+            artifacts/swcstudio-models-${{ steps.version.outputs.tag }}.zip
+            artifacts/update_manifest.json
+            artifacts/*.whl
+            artifacts/*.tar.gz
+
+      - name: Upload artifacts for downstream jobs
+        uses: actions/upload-artifact@v4
+        with:
+          name: layer-artifacts
+          path: artifacts/
+          retention-days: 7
+
+
+  # =========================================================================
+  # 2. macOS .app — runs the modular build (or monolithic; see comment).
+  # =========================================================================
+  package-macos:
+    name: Build macOS .app
+    runs-on: macos-latest
+    needs: package-layers
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Resolve version
+        id: version
+        run: |
+          RAW="${RELEASE_VERSION}"
+          VERSION_NO_V="${RAW#v}"
+          TAG="v${VERSION_NO_V}"
+          echo "version_no_v=${VERSION_NO_V}" >> "$GITHUB_OUTPUT"
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Stamp version
+        run: |
+          python scripts/stamp_version.py --version "${{ steps.version.outputs.version_no_v }}"
+
+      # Two build options live in packaging/. Switch between them by changing
+      # the script invoked below:
+      #   build_macos.sh         -> monolithic .app (legacy; bigger update size)
+      #   build_macos_modular.sh -> modular .app    (recommended; supports per-layer updates)
+      - name: Run modular macOS build
+        env:
+          PYTHON_BIN: python3.12
+        run: |
+          chmod +x packaging/build_macos_modular.sh
+          ./packaging/build_macos_modular.sh
+
+      - name: Zip the app bundle
+        run: |
+          TAG="${{ steps.version.outputs.tag }}"
+          mkdir -p artifacts
+          (cd dist && zip -r -y "../artifacts/SWC-Studio-${TAG}-macOS.zip" SWC-Studio.app)
+          ls -lah "artifacts/SWC-Studio-${TAG}-macOS.zip"
+
+      - name: Upload macOS bundle to the GitHub Release
+        uses: softprops/action-gh-release@v2
+        if: github.event.inputs.dry_run != 'true'
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          files: artifacts/SWC-Studio-${{ steps.version.outputs.tag }}-macOS.zip
+
+
+  # =========================================================================
+  # 3. Windows .zip — runs the existing PowerShell build script.
+  # =========================================================================
+  package-windows:
+    name: Build Windows zip
+    runs-on: windows-latest
+    needs: package-layers
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Resolve version
+        id: version
+        shell: bash
+        run: |
+          RAW="${RELEASE_VERSION}"
+          VERSION_NO_V="${RAW#v}"
+          TAG="v${VERSION_NO_V}"
+          echo "version_no_v=${VERSION_NO_V}" >> "$GITHUB_OUTPUT"
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Stamp version
+        shell: bash
+        run: |
+          python scripts/stamp_version.py --version "${{ steps.version.outputs.version_no_v }}"
+
+      - name: Run Windows build
+        shell: pwsh
+        run: |
+          ./packaging/build_windows.ps1
+
+      # The Windows build script already produces a zip; locate and rename it.
+      - name: Locate + rename Windows zip
+        shell: bash
+        run: |
+          TAG="${{ steps.version.outputs.tag }}"
+          mkdir -p artifacts
+          # Find the produced zip — different versions of the script name it
+          # differently. Pick the largest zip in dist/ as a heuristic.
+          ZIP=$(find dist -maxdepth 1 -name "*.zip" -printf "%s %p\n" 2>/dev/null \
+                | sort -nr | head -1 | awk '{print $2}')
+          if [ -z "$ZIP" ]; then
+            echo "::error::no Windows zip found in dist/"
+            exit 1
+          fi
+          cp "$ZIP" "artifacts/SWC-Studio-${TAG}-Windows.zip"
+          ls -lah "artifacts/SWC-Studio-${TAG}-Windows.zip"
+
+      - name: Upload Windows zip to the GitHub Release
+        uses: softprops/action-gh-release@v2
+        if: github.event.inputs.dry_run != 'true'
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          files: artifacts/SWC-Studio-${{ steps.version.outputs.tag }}-Windows.zip
+
+
+  # =========================================================================
+  # 4. Publish the wheel to PyPI (gated behind the `pypi` environment so
+  # you can require a manual approval before publishing).
+  # =========================================================================
+  publish-pypi:
+    name: Publish wheel to PyPI
+    runs-on: ubuntu-latest
+    needs: package-layers
+    if: github.event.inputs.dry_run != 'true'
+    # Optional manual gate — configure 'pypi' in repo Settings -> Environments
+    # to require a reviewer click before this job runs. Comment out if you
+    # want fully automatic publishing.
+    environment:
+      name: pypi
+      url: https://pypi.org/p/swcstudio
+    permissions:
+      id-token: write   # required for PyPI Trusted Publishers (no token needed)
+
+    steps:
+      - name: Download wheel artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: layer-artifacts
+          path: artifacts
+
+      - name: Move wheels into dist/ for the publisher action
+        run: |
+          mkdir -p dist
+          cp artifacts/*.whl    dist/ 2>/dev/null || true
+          cp artifacts/*.tar.gz dist/ 2>/dev/null || true
+          ls -lah dist/
+
+      # Trusted publishing: configure once on PyPI under Account -> Publishing.
+      # No API token to manage. https://docs.pypi.org/trusted-publishers/
+      - name: Publish to PyPI (Trusted Publisher)
+        uses: pypa/gh-action-pypi-publish@release/v1
