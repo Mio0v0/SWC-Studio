@@ -105,13 +105,23 @@ def _user_data_root() -> Path:
 
 
 def user_app_override_dir() -> Path:
-    """Where downloaded `swcstudio/` code packages land."""
+    """Where downloaded ``swcstudio/`` code packages land.
+
+    Uses ``SWC-Studio/app/`` (matching the bootstrap loader's search
+    path in ``swcstudio_bootstrap.py``).
+    """
     return _user_data_root() / "SWC-Studio" / "app"
 
 
 def user_models_override_dir() -> Path:
-    """Where downloaded model packages land."""
-    return _user_data_root() / "SWC-Studio" / "models"
+    """Where downloaded model packages land.
+
+    Uses ``swcstudio/models/`` (matching
+    :func:`swcstudio.core.model_paths.user_model_dir`) so that the
+    existing model resolver finds them automatically without any
+    further plumbing.
+    """
+    return _user_data_root() / "swcstudio" / "models"
 
 
 # -----------------------------------------------------------------------------

@@ -57,8 +57,10 @@ swcstudio-gui = "swcstudio.gui.main:main"
 include = ["swcstudio*"]
 
 [tool.setuptools.package-data]
-# Ship the v9 model files (Stage 1 sklearn pickle, Stage 2 sklearn
-# pickle, Stage 2b GNN checkpoint) so `pip install` is self-contained
-# and end users get a working auto-typing engine out of the box without
-# downloading anything separately.
-"swcstudio" = ["data/models/*.pt", "data/models/*.pkl"]
+# Models are NOT shipped in the pip wheel. They're downloaded from
+# GitHub Releases on first use by swcstudio.core.updater (Pattern B).
+# Keeping the wheel lean (~5 MB instead of ~65 MB) means
+# `pip install --upgrade swcstudio` is fast for code-only updates.
+# The bundled .app distribution still ships models inside the bundle —
+# see packaging/MODULAR_BUILD.md.
+"swcstudio" = []

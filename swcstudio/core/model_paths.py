@@ -105,14 +105,56 @@ def resolve_model_path(
     name_or_filename: str,
     *,
     override: str | os.PathLike | None = None,
+    auto_download: bool = True,
 ) -> Path | None:
     """Locate one model file by short name or by literal filename.
 
     ``name_or_filename`` accepts both ``"stage1"`` and
     ``"cell_type_classifier.pkl"``. Returns the first existing path
     found in :func:`search_dirs`, or ``None``.
+
+    If no local copy is found and ``auto_download=True`` (default),
+    falls back to fetching the models package from GitHub Releases via
+    :mod:`swcstudio.core.updater`. This is what makes pip-installed
+    users work out of the box without bundling 60 MB of models inside
+    the wheel — the first auto-label call triggers a one-time download
+    into the user data dir, and subsequent calls find it cached.
+
+    Set ``auto_download=False`` to skip the network fallback (used by
+    diagnostic / testing paths that want to know "is the model
+    physically here right now").
     """
     fname = MODEL_FILES.get(name_or_filename, name_or_filename)
+    for d in search_dirs(override):
+        candidate = d / fname
+        if candidate.is_file():
+            return candidate
+
+    if not auto_download:
+        return None
+
+    # Lazy import — keeps `model_paths` itself stdlib-only and avoids a
+    # circular import at module load time (`updater` doesn't import
+    # `model_paths`, but importing it eagerly here would still bind a
+    # network-capable module into a path-resolution helper).
+    try:
+        from swcstudio.core import updater  # noqa: WPS433
+    except ImportError:
+        return None
+
+    manifest = updater.fetch_manifest()
+    if manifest is None or manifest.models is None:
+        return None
+    try:
+        updater.apply_update("models", manifest.models)
+    except Exception:
+        # Network failure / disk failure / integrity mismatch — give up
+        # silently and let the caller report "model not found".
+        return None
+
+    # Re-scan after the download. The user override dir
+    # (~/Library/Application Support/SWC-Studio/models/) is part of
+    # search_dirs(), so the fresh files will be found.
     for d in search_dirs(override):
         candidate = d / fname
         if candidate.is_file():

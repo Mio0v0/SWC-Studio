@@ -703,6 +703,11 @@ class SWCMainWindow(QMainWindow):
         short_action = QAction("Shortcuts", self)
         short_action.triggered.connect(self._show_shortcuts)
         help_menu.addAction(short_action)
+        help_menu.addSeparator()
+        update_action = QAction("Check for Updates...", self)
+        update_action.triggered.connect(self._check_for_updates)
+        help_menu.addAction(update_action)
+        help_menu.addSeparator()
         about_action = QAction("About", self)
         about_action.triggered.connect(self._show_about_dialog)
         help_menu.addAction(about_action)
@@ -4450,3 +4455,114 @@ class SWCMainWindow(QMainWindow):
         )
         self._show_help_text_dialog("About SWC-Studio", text)
         self._append_log("Opened About dialog.", "INFO")
+
+    def _check_for_updates(self):
+        """Check GitHub Releases for a newer version and offer to install it.
+
+        Probes the modular update manifest at
+        https://github.com/Mio0v0/SWC-Studio/releases/latest/download/update_manifest.json
+        and reports any newer code/models layers. The user is offered a
+        choice: install in-place (the modular updater downloads only the
+        changed layer), or open the release page in a browser for a manual
+        full download.
+        """
+        try:
+            from swcstudio.core import updater
+        except ImportError:
+            QMessageBox.warning(
+                self, "Check for Updates",
+                "Update module not available in this build.",
+            )
+            return
+
+        self._append_log("Checking for updates...", "INFO")
+        manifest = updater.fetch_manifest()
+        if manifest is None:
+            QMessageBox.information(
+                self, "Check for Updates",
+                "Could not reach the update server. Check your internet connection "
+                "or try again later.",
+            )
+            self._append_log("Update check failed (no manifest).", "WARN")
+            return
+
+        updates = updater.available_updates(manifest)
+        cur = updater.current_versions()
+        if not updates:
+            QMessageBox.information(
+                self, "Check for Updates",
+                f"You're up to date.\n\n"
+                f"App code: {cur['app']}\n"
+                f"Models:   {cur['models']}",
+            )
+            self._append_log(
+                f"No updates available (app={cur['app']}, models={cur['models']}).",
+                "INFO",
+            )
+            return
+
+        # Build a friendly description of what's new
+        lines = [f"Release {manifest.release_version} is available.", ""]
+        if "app" in updates:
+            size_mb = (manifest.app.size or 0) / (1024 * 1024)
+            lines.append(f"  • App code: {cur['app']} → {updates['app']}  (~{size_mb:.0f} MB)")
+        if "models" in updates:
+            size_mb = (manifest.models.size or 0) / (1024 * 1024)
+            lines.append(f"  • Models:   {cur['models']} → {updates['models']}  (~{size_mb:.0f} MB)")
+        lines.append("")
+        lines.append("Updates are downloaded into your user data directory and applied on")
+        lines.append("next launch. Your bundled .app is left untouched, so you can revert")
+        lines.append("by deleting the override directory.")
+
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Information)
+        box.setWindowTitle("Check for Updates")
+        box.setText("\n".join(lines))
+        install_btn = box.addButton("Install Update", QMessageBox.AcceptRole)
+        browser_btn = box.addButton("Open Release Page", QMessageBox.ActionRole)
+        box.addButton(QMessageBox.Cancel)
+        box.exec()
+
+        clicked = box.clickedButton()
+        if clicked is install_btn:
+            self._apply_updates(manifest, updates)
+        elif clicked is browser_btn:
+            from PySide6.QtGui import QDesktopServices
+            from PySide6.QtCore import QUrl
+            QDesktopServices.openUrl(QUrl(
+                "https://github.com/Mio0v0/SWC-Studio/releases/latest"
+            ))
+            self._append_log("Opened release page in browser.", "INFO")
+        # else: user cancelled
+
+    def _apply_updates(self, manifest, updates):
+        """Download + extract each update layer the user agreed to install."""
+        from swcstudio.core import updater
+        applied: list[str] = []
+        for layer in ("app", "models"):
+            if layer not in updates:
+                continue
+            package = manifest.app if layer == "app" else manifest.models
+            self._append_log(
+                f"Downloading {layer} update {package.version}...", "INFO",
+            )
+            try:
+                target = updater.apply_update(layer, package)
+            except Exception as exc:
+                self._append_log(f"Update failed for {layer}: {exc}", "ERROR")
+                QMessageBox.warning(
+                    self, "Update Failed",
+                    f"Could not install {layer} update:\n{exc}",
+                )
+                return
+            applied.append(f"{layer} {package.version}  ->  {target}")
+            self._append_log(f"Installed {layer} update at {target}", "INFO")
+
+        msg_lines = ["Update installed:"] + ["  " + a for a in applied]
+        if "app" in updates:
+            msg_lines += ["", "Restart SWC-Studio to load the new code."]
+        else:
+            msg_lines += ["", "Models will be loaded on the next auto-label run."]
+        QMessageBox.information(
+            self, "Update Installed", "\n".join(msg_lines),
+        )
