@@ -58,7 +58,7 @@ For structural and ordering issues:
 For annotation problems:
 
 - use `Manual Label Editing` for targeted node changes
-- use `Auto Label Editing` to run the v9 ML engine for type reassignment
+- use `Auto Label Editing` to run the auto-typing engine for type reassignment
 - use dendrogram subtree reassignment when a whole branch should inherit a new label
 
 ### Radii repair

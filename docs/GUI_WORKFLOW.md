@@ -35,7 +35,7 @@ Current feature mapping:
 - Batch Processing
   - Split
   - Validation
-  - Auto Label Editing  *(see "Auto Label Editing" below)*
+  - Auto Label Editing
   - Radii Cleaning
   - Simplification
   - Index Clean
@@ -46,44 +46,12 @@ Current feature mapping:
   - View Controls
 - Morphology Editing
   - Manual Label Editing
-  - Auto Label Editing  *(see "Auto Label Editing" below)*
+  - Auto Label Editing
   - Manual Radii Editing
   - Auto Radii Editing
 - Geometry Editing
   - Geometry Editing
   - Simplification
-
-## Auto Label Editing
-
-Both Batch Processing → Auto Label Editing and Validation → Auto Label
-Editing run the same engine: the v9 ML pipeline shipped in
-`swcstudio.core.auto_typing` (Stage 1 cell-type detector + Stage 2
-per-subtree classifier + Stage 2b GraphSAGE GNN + Stage 3 topology
-refinement). All four stages are required.
-
-The panel has a **Run** button and an optional **Model dir** picker.
-Leave the field blank to use the default model search path:
-
-1. `SWCSTUDIO_MODEL_DIR` environment variable
-2. user data directory (`%APPDATA%\swcstudio\models` on Windows,
-   `~/Library/Application Support/swcstudio/models` on macOS,
-   `~/.local/share/swcstudio/models` on Linux)
-3. bundled `swcstudio/data/models/` inside the installed package
-
-Fill in the Model dir field to point at a directory of custom-trained
-models — for example, the output of `swcstudio train auto-typing`. A
-small green "models OK" / red "models missing" indicator next to the
-field shows whether the engine can run with the current selection;
-hovering reveals the full search-path diagnostic when something is
-missing.
-
-If any of the three model files (Stage 1 pickle, Stage 2 pickle,
-Stage 2b GNN checkpoint) is missing, **Run** produces a clear error
-with the search-path diagnostic instead of starting work. The bundled
-desktop app and the source checkout both ship the v9 models in place,
-so the engine works without setup. For `pip install swcstudio` from
-PyPI, models are auto-downloaded on the first auto-label call and
-cached locally — same end state, no manual step.
 
 ## What happens when a file is opened
 

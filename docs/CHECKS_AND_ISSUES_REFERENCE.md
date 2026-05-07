@@ -198,8 +198,8 @@ Important defaults:
 
 ## Auto Labeling Algorithm
 
-The suspicious label issue and Auto Label Editing run the same engine,
-the v9 ML pipeline, implemented in:
+The suspicious label issue and Auto Label Editing run the same
+auto-typing engine, implemented in:
 
 - `swcstudio/core/auto_typing/` (engine package)
 - `swcstudio/tools/batch_processing/configs/auto_typing.json` (user-editable runtime knobs)

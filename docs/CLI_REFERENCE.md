@@ -143,10 +143,7 @@ swcstudio split ./data
 
 ### `swcstudio auto-typing <folder>`
 
-- Purpose: auto-labeling for every SWC in one folder, using the v9 ML
-  engine (Stage 1 cell-type detector + Stage 2 per-subtree classifier
-  + Stage 2b GraphSAGE GNN + Stage 3 topology refinement). All four
-  stages are required.
+- Purpose: auto-labeling for every SWC in one folder.
 - Prints a short engine summary before processing
 - Soma, axon, and basal labeling are always enabled
 - The engine automatically switches between 3-class and 4-class
@@ -224,7 +221,7 @@ swcstudio auto-fix ./data/single-soma.swc
 
 - Purpose: apply the same single-file auto-label workflow used by the
   GUI Auto Label Editing panel
-- Engine: v9 ML pipeline (same as `swcstudio auto-typing`)
+- Engine: same auto-typing pipeline used by `swcstudio auto-typing`
 - Changes only node types; geometry, parent IDs, and radii are preserved
 - Soma, axon, and basal labeling are always enabled
 - The engine automatically switches between 3-class and 4-class
@@ -353,7 +350,7 @@ swcstudio insert ./data/single-soma.swc --start-id 10 --end-id 22 --x 100 --y 12
 
 ### `swcstudio train auto-typing`
 
-Train all three model files of the v9 ML pipeline — Stage 1
+Train all three model files of the auto-typing pipeline — Stage 1
 (cell-type classifier), Stage 2 (per-branch classifier), and Stage 2b
 (GraphSAGE GNN apical-vs-basal head) — on your own labeled SWC corpus.
 All three are required at inference time. Pass `--no-gnn` only when

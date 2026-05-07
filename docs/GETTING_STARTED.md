@@ -82,8 +82,8 @@ cd SWC-Studio
 ```
 
 One command installs everything — the CLI, the desktop GUI, the
-auto-typing engine (sklearn + torch + torch_geometric), and the bundled
-v9 model files:
+auto-typing engine (sklearn + torch + torch_geometric), and the
+bundled model files:
 
 ### macOS / Linux
 
@@ -184,26 +184,6 @@ log into the source file's default output directory. No separate
 `auto-label` always applies soma / axon / basal labeling and
 automatically enables apical labeling only when an apical subtree is
 detected.
-
-## Train your own auto-typing models (optional)
-
-The bundled models work out of the box, but if you want models tuned
-to your own labeled SWC corpus:
-
-```bash
-swcstudio train auto-typing --data-dir ./labeled-dataset --output-dir ./my-models
-```
-
-The dataset must have `pyramidal/` and `interneuron/` subfolders of
-labeled `.swc` files. To make your trained models the new default,
-copy them into your user data dir (Windows: `%APPDATA%\swcstudio\models`,
-macOS: `~/Library/Application Support/swcstudio/models`, Linux:
-`~/.local/share/swcstudio/models`) — every CLI/GUI call will use them
-automatically.
-
-See the [Auto-Typing Engine](documentation/auto-typing-backends.md) page
-for the full retraining workflow, hyperparameter flags, and model
-resolution rules.
 
 ## First GUI checks
 

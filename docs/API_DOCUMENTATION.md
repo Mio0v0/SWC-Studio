@@ -65,7 +65,7 @@ Splits each SWC by soma-root trees.
 
 #### `batch_auto_typing(folder, *, options=None, config_overrides=None) -> BatchResult`
 
-Runs the v9 ML auto-typing engine over a folder. There is no backend
+Runs the auto-typing engine over a folder. There is no backend
 selector — the engine is a single ML pipeline. The
 `config_overrides` dict accepts:
 

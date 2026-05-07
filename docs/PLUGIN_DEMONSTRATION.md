@@ -116,7 +116,7 @@ from swcstudio.api import BatchOptions, batch_auto_typing
 from swcstudio.plugins.registry import resolve_method
 
 opts = BatchOptions(soma=True, axon=True, apic=False, basal=True, rad=False, zip_output=False)
-# The default `batch_auto_typing` always runs the built-in v9 ML
+# The default `batch_auto_typing` always runs the built-in auto-typing
 # engine. To run a plugin-registered method instead, dispatch through
 # the plugin registry directly:
 fn = resolve_method("batch_processing.auto_typing", "lab_summary")

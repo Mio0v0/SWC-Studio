@@ -1,9 +1,8 @@
 # Auto-Typing Engine
 
-`SWC-Studio`'s auto-labeling is a single ML engine: the **v9 hybrid
-pipeline**. It runs everywhere — the CLI, both Auto Label Editing GUI
-panels, and the Python API call into the same code. There is no
-backend switch; the engine is the engine.
+`SWC-Studio`'s auto-labeling is a single ML engine. It runs everywhere
+— the CLI, both Auto Label Editing GUI panels, and the Python API call
+into the same code. There is no backend switch; the engine is the engine.
 
 ## What the engine does
 

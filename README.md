@@ -14,12 +14,6 @@ It is designed for inspecting reconstructions, finding structural or annotation 
 
 Both the CLI and GUI use the same core feature logic.
 
-### Auto-labeling engine
-
-Auto-labeling uses a single ML pipeline: the **v9 engine**. It runs a four-stage process — cell-type detection, per-subtree axon/basal/apical classification, a GraphSAGE GNN apical-vs-basal re-decision, and topology refinement — and automatically chooses between 3-class (no apical) and 4-class output per file. All four stages are required and ship trained out of the box.
-
-The auto-typing models ship inside the bundled desktop app and the source checkout, and are auto-downloaded on first use for `pip install swcstudio`. In all three cases the engine works without any manual model setup. Users can also retrain on their own labeled SWC corpus via `swcstudio train auto-typing` and have the toolkit pick up the new models automatically.
-
 ## Documentation
 
 Project documentation lives on the docs website:
@@ -32,7 +26,7 @@ Use the docs site for:
 - installation and getting started
 - GUI and CLI workflows
 - validation, repair, and reporting behavior
-- the auto-typing engine and retraining workflow
+- auto-labeling (with optional retraining)
 - tutorials
 - API and extension references
 
@@ -112,7 +106,7 @@ pip install -e .
 swcstudio-gui
 ```
 
-`pip install -e .` pulls in everything (CLI + GUI + auto-typing engine). The `-e` ("editable") flag means edits to your local `.py` files take effect on the next `python` run — useful for development. Maintainers who also need PyInstaller (release packaging) and Sphinx (docs build) can use `pip install -e ".[all]"`.
+`pip install -e .` pulls in everything (CLI + GUI + auto-labeling). The `-e` ("editable") flag means edits to your local `.py` files take effect on the next `python` run — useful for development. Maintainers who also need PyInstaller (release packaging) and Sphinx (docs build) can use `pip install -e ".[all]"`.
 
 ### Verifying the install
 
@@ -144,40 +138,10 @@ Under the hood, releases are split into three independently-updatable layers —
 
 - issue-driven SWC validation and repair
 - batch processing workflows
-- v9 ML auto-typing engine: Stage 1 cell-type detector + Stage 2 per-subtree classifier + Stage 2b GraphSAGE GNN apical-vs-basal head + Stage 3 topology refinement, with bundled trained models
-- automatic apical detection (3-class vs 4-class output chosen per file)
-- one-command retraining of the engine on user data (`swcstudio train auto-typing`)
+- auto-labeling of soma / axon / basal / apical (with optional retraining on your own data)
 - radii cleaning
 - manual morphology and geometry editing
 - shared GUI, CLI, and Python integration surface
-
-## Train your own auto-typing models
-
-If you want models tuned to your own SWCs, the toolkit ships a one-command trainer:
-
-```bash
-swcstudio train auto-typing \
-    --data-dir path/to/labeled/dataset \
-    --output-dir path/to/save/models
-```
-
-The dataset directory must have `pyramidal/` and `interneuron/` subfolders of labeled `.swc` files (each SWC's `type` column is the per-node ground truth).
-
-To use the trained models afterwards:
-
-```bash
-# One-off: pass --model-dir per call
-swcstudio auto-label cell.swc --model-dir path/to/save/models
-
-# Or set the env var for the whole shell
-export SWCSTUDIO_MODEL_DIR=path/to/save/models      # macOS/Linux
-$env:SWCSTUDIO_MODEL_DIR = "path\to\save\models"    # Windows PowerShell
-
-# Or make them the persistent default by copying into the user data dir;
-# see the docs site for the per-platform path.
-```
-
-See the [Auto-Typing Engine](https://mio0v0.github.io/SWC-Studio/documentation/auto-typing-backends.html) page in the docs for the full retraining workflow, hyperparameter flags, and model resolution rules.
 
 ## Recommended Workflow
 
