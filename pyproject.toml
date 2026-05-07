@@ -56,11 +56,22 @@ swcstudio-gui = "swcstudio.gui.main:main"
 [tool.setuptools.packages.find]
 include = ["swcstudio*"]
 
+# Pattern B: lean wheel, models downloaded on first use.
+# Setuptools defaults to auto-including any non-Python file inside a
+# package directory as package-data ("include-package-data = true").
+# We opt out so the model pickles don't end up in the wheel.
+[tool.setuptools]
+include-package-data = false
+
 [tool.setuptools.package-data]
-# Models are NOT shipped in the pip wheel. They're downloaded from
-# GitHub Releases on first use by swcstudio.core.updater (Pattern B).
-# Keeping the wheel lean (~5 MB instead of ~65 MB) means
-# `pip install --upgrade swcstudio` is fast for code-only updates.
-# The bundled .app distribution still ships models inside the bundle —
-# see packaging/MODULAR_BUILD.md.
+# With include-package-data = false above, this empty mapping is the
+# only source of truth: no extra data files ship in the wheel.
+# Models are downloaded from GitHub Releases on first use by
+# swcstudio.core.updater. The bundled .app distribution still ships
+# models inside the bundle (see packaging/MODULAR_BUILD.md).
 "swcstudio" = []
+
+[tool.setuptools.exclude-package-data]
+# Belt-and-suspenders: even if some path drags model files in via
+# auto-discovery, this explicitly excludes them from the wheel.
+"swcstudio" = ["data/models/*"]
