@@ -4,8 +4,17 @@ This page documents the current public CLI surface for `swcstudio`.
 
 ## Install and Verify
 
+The CLI is available from any of the three install paths — see
+[Getting Started](GETTING_STARTED.md) for the full options.
+
 ```bash
+# pip install (researchers / Python users)
+pip install swcstudio
+
+# OR source install (developers)
 pip install -e .
+
+# Verify
 swcstudio --help
 ```
 

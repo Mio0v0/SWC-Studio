@@ -16,12 +16,19 @@ Four stages run in order on every SWC:
 | Stage 2b | Apical-vs-basal re-decision on pyramidal dendrites | GraphSAGE GNN over the branch graph. |
 | Stage 3 | Topology refinement | Smooths short islands, enforces hard constraints (one primary axon, one primary apical) at the soma boundary. |
 
-All four stages are required. `pip install -e .` ships every stage's
-trained model file plus the torch / torch_geometric runtime, so the
-engine works out of the box. If any stage's model file is missing —
-or torch / torch_geometric fails to import — the engine refuses to
-run and surfaces a clear search-path diagnostic instead of silently
-degrading.
+All four stages are required. The torch / torch_geometric runtime
+comes along through pip in every install path. The trained model
+files reach the engine differently depending on how it was installed:
+
+| Install method | How the engine finds the model files |
+|---|---|
+| Bundled desktop app (`SWC-Studio.app` / `.zip`) | bundled inside the app under `Contents/Resources/models/` |
+| `pip install swcstudio` from PyPI | downloaded from GitHub Releases on first auto-label call (~21 MB, one-time, cached locally) |
+| Source install (`pip install -e .`) | bundled in the working tree under `swcstudio/data/models/` |
+
+If any stage's model file is missing — or torch / torch_geometric
+fails to import — the engine refuses to run and surfaces a clear
+search-path diagnostic instead of silently degrading.
 
 The engine always emits soma + axon + basal labels and detects apical
 automatically — no class-selection flags. Apical detection requires
@@ -30,11 +37,15 @@ files without an apical subtree get 3-class output.
 
 ## Setup
 
-`SWC-Studio` ships fully self-contained. `pip install -e .` puts every
-dependency *and* every model file in place — there is no separate
-download step.
+For the bundled desktop app and the source install, every dependency
+*and* every model file is in place after install — no separate
+download step needed. For `pip install swcstudio` from PyPI, models
+download from GitHub Releases on the first auto-label call (~21 MB,
+one-time, cached) — Python dependencies still come along through pip
+itself.
 
-The bundled defaults live in `swcstudio/data/models/`:
+The bundled defaults live in `swcstudio/data/models/` (source install)
+or `Contents/Resources/models/` (bundled desktop app):
 
 | Filename | Stage | Bundled? |
 |---|---|---|
@@ -269,10 +280,22 @@ under the new version.
 
 ### Bundled models are out of date
 
-If you train your own models you can re-bundle them into your local
-clone by copying them into `swcstudio/data/models/`. The package-data
-manifest in `pyproject.toml` already includes `*.pkl` and `*.pt`, so
-they'll be picked up by the next `pip install -e .`.
+To replace the bundled models with custom-trained ones, drop your
+new files into the location that wins for your install:
+
+| Install method | Where to put your custom models |
+|---|---|
+| Source install (`pip install -e .`) | `swcstudio/data/models/` — the model resolver finds them on every run |
+| `pip install swcstudio` from PyPI | the user model dir (macOS: `~/Library/Application Support/swcstudio/models/`, Windows: `%APPDATA%\swcstudio\models\`, Linux: `~/.local/share/swcstudio/models/`) |
+| Bundled desktop app | the user model dir above (overrides the bundled copy) |
+
+Or pass `--model-dir /path/to/your/models` to `swcstudio auto-label`
+for one-off use without modifying any directory permanently.
+
+Note: the pip wheel intentionally does **not** ship model files
+(see `pyproject.toml`'s `[tool.setuptools]` block). Model layers are
+distributed as a separate `swcstudio-models-vX.Y.Z.zip` GitHub Release
+asset and downloaded on first use.
 
 ## Reference
 

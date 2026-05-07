@@ -11,10 +11,22 @@ Getting Started <../GETTING_STARTED>
 
 ## Installation
 
-- <a href="../GETTING_STARTED.html">Getting Started</a> covers both release-download setup and source installation.
+<a href="../GETTING_STARTED.html">Getting Started</a> covers all three install paths:
+
+- **bundled desktop app** from GitHub Releases (double-click)
+- **`pip install swcstudio`** from PyPI (Python users)
+- **source install** from the cloned repository (developers)
 
 ## First Run
 
-- if using a release zip, extract it and open the included application
-- if using a source install, use the CLI to confirm the install
-- open the GUI to verify the desktop app starts correctly
+- if using the bundled app, extract the release zip and open `SWC-Studio.app` / the `.exe`
+- if using a pip install, run `swcstudio-gui` to launch the GUI or `swcstudio --help` for the CLI
+- if using a source install, run the same commands inside your activated venv to verify
+
+## Updating
+
+- bundled app: Help → Check for Updates (in-app updater handles modular updates)
+- pip install: `pip install --upgrade swcstudio`
+- source install: `git pull` and re-run `pip install -e .`
+
+See <a href="../GETTING_STARTED.html#updating">Getting Started → Updating</a> for full details.

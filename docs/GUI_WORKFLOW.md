@@ -80,8 +80,10 @@ missing.
 If any of the three model files (Stage 1 pickle, Stage 2 pickle,
 Stage 2b GNN checkpoint) is missing, **Run** produces a clear error
 with the search-path diagnostic instead of starting work. The bundled
-v9 models ship with the package, so a fresh `pip install -e .`
-produces a fully working engine with no extra steps.
+desktop app and the source checkout both ship the v9 models in place,
+so the engine works without setup. For `pip install swcstudio` from
+PyPI, models are auto-downloaded on the first auto-label call and
+cached locally — same end state, no manual step.
 
 ## What happens when a file is opened
 
