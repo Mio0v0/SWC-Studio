@@ -70,8 +70,8 @@ from typing import Optional
 # These are the versions of the *bundled* code and models that ship with
 # the .app. The user may have a newer version cached in the override
 # directory; in that case the override wins.
-BUNDLED_APP_VERSION    = "0.1.0"
-BUNDLED_MODELS_VERSION = "0.1.0"
+BUNDLED_APP_VERSION    = "0.2.0"
+BUNDLED_MODELS_VERSION = "0.2.0"
 
 # URL of the always-pointing-to-latest manifest. GitHub's "latest"
 # redirect makes this stable across releases. If a release has no
