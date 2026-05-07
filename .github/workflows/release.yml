@@ -296,6 +296,20 @@ jobs:
         run: |
           python scripts/stamp_version.py --version "${{ steps.version.outputs.version_no_v }}"
 
+      # The Windows build script (`build_windows.ps1`) auto-detects a
+      # ``.venv\Scripts\python.exe`` and uses it; if missing it falls back
+      # to the system ``py`` launcher (Python 3.14 on the runner) which
+      # has no PyInstaller / Pillow installed and therefore fails fast.
+      # Create the venv with the runner's Python 3.12 and install deps,
+      # so the script picks it up automatically.
+      - name: Install Windows build dependencies
+        shell: pwsh
+        run: |
+          python -m venv .venv
+          .\.venv\Scripts\python.exe -m pip install --upgrade pip setuptools wheel
+          # Project + PyInstaller, plus Pillow for make_windows_icon.py
+          .\.venv\Scripts\python.exe -m pip install -e ".[build]" pillow
+
       - name: Run Windows build
         shell: pwsh
         run: |
