@@ -180,12 +180,18 @@ jobs:
       - name: Upload layer artifacts to the GitHub Release
         # Idempotent — softprops creates the release if missing, otherwise
         # appends/updates assets. Other jobs upload to the same release.
+        # draft: true keeps the release private to repo maintainers until
+        # you click "Publish release" in the GitHub UI. ALL three upload
+        # steps must set draft: true; if any one drops it, that step
+        # promotes the release to published and partial assets become
+        # visible to end users.
         uses: softprops/action-gh-release@v2
         if: github.event.inputs.dry_run != 'true'
         with:
           tag_name: ${{ steps.version.outputs.tag }}
           name: SWC-Studio ${{ steps.version.outputs.tag }}
           generate_release_notes: true
+          draft: true
           files: |
             artifacts/swcstudio-code-${{ steps.version.outputs.tag }}.zip
             artifacts/swcstudio-models-${{ steps.version.outputs.tag }}.zip
@@ -254,6 +260,7 @@ jobs:
         if: github.event.inputs.dry_run != 'true'
         with:
           tag_name: ${{ steps.version.outputs.tag }}
+          draft: true
           files: artifacts/SWC-Studio-${{ steps.version.outputs.tag }}-macOS.zip
 
 
@@ -316,6 +323,7 @@ jobs:
         if: github.event.inputs.dry_run != 'true'
         with:
           tag_name: ${{ steps.version.outputs.tag }}
+          draft: true
           files: artifacts/SWC-Studio-${{ steps.version.outputs.tag }}-Windows.zip
 
 

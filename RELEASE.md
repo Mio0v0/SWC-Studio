@@ -27,8 +27,35 @@ GitHub Actions will then:
 
 1. Build the layer zips, the pip wheel, and `update_manifest.json`
 2. Build the macOS `.app` (modular) and Windows `.zip`
-3. Create a draft GitHub Release `v0.2.0` and attach all assets
+3. Create a **draft** GitHub Release `v0.2.0` and attach all assets
 4. (Gated) Publish the wheel to PyPI
+
+### Final manual step: publish the draft
+
+The release lands as a draft visible only to repo maintainers, so you
+can review the auto-generated notes and double-check the assets
+before end users can download anything.
+
+1. Go to https://github.com/Mio0v0/SWC-Studio/releases
+2. Find the draft release at the top (it has a "Draft" tag)
+3. Click into it, edit notes if you want, verify all 7 assets are present:
+   - `swcstudio-code-v0.2.0.zip`
+   - `swcstudio-models-v0.2.0.zip`
+   - `update_manifest.json`
+   - `SWC-Studio-v0.2.0-macOS.zip`
+   - `SWC-Studio-v0.2.0-Windows.zip`
+   - `swcstudio-0.2.0-py3-none-any.whl`
+   - `swcstudio-0.2.0.tar.gz`
+4. Click **Publish release**
+
+Only after this click do existing v0.1.0 users see "Update available"
+in the in-app dialog, since the updater fetches
+`releases/latest/download/update_manifest.json` which does not resolve
+to drafts.
+
+If you want fully-automatic publishing (no manual click), remove
+`draft: true` from all three `softprops/action-gh-release@v2` blocks
+in `.github/workflows/release.yml`.
 
 ## What ships in a release
 
