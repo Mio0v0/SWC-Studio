@@ -10,6 +10,22 @@ the previous one.
 
 from __future__ import annotations
 
+from swcstudio.core.provenance.derived import (
+    derived_from_for_swc_path,
+    derived_from_payload,
+    find_descendants,
+)
+from swcstudio.core.provenance.migration import (
+    MigrationOutcome,
+    migrate_legacy_output_dir,
+    needs_migration,
+)
+from swcstudio.core.provenance.render import (
+    render_ai_run_text,
+    render_commit_text,
+    render_diff_text,
+    render_history_log_text,
+)
 from swcstudio.core.provenance.tracked_op import (
     FORMAT_VERSION,
     OpResult,
@@ -110,7 +126,17 @@ __all__ = [
     "DiffPayload",
     "ENV_SCHEMA_VERSION",
     "FORMAT_VERSION",
+    "MigrationOutcome",
     "OpResult",
+    "derived_from_for_swc_path",
+    "derived_from_payload",
+    "find_descendants",
+    "migrate_legacy_output_dir",
+    "needs_migration",
+    "render_ai_run_text",
+    "render_commit_text",
+    "render_diff_text",
+    "render_history_log_text",
     "ai_run_to_blob_bytes",
     "build_ai_run",
     "capture_env",
