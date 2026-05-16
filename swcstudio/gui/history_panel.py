@@ -1,0 +1,363 @@
+"""GUI provenance widgets: timeline + branch picker + detail view.
+
+Implements PROVENANCE_SPEC §14 GUI surface (v1). Built as a single
+self-contained QWidget that the main window can host as a dock or
+open as a modal dialog — no changes to ``main_window.py`` required
+to land this slice.
+
+Wiring (recommended single-line addition to ``main_window.py``)::
+
+    from swcstudio.gui.history_panel import open_history_dialog
+    # ... inside a menu/action handler:
+    open_history_dialog(self, current_file)
+
+That's the full GUI integration in slice 11. Slice 12 (converting GUI
+*actions* to use tracked_op/tracked_session) is a separate, larger
+change that this panel does not depend on.
+
+The widget:
+
+* Lists every commit on every branch in a sortable table.
+* Filter chips for actor, kind, branch (no SQL exposure).
+* Click a row → right-pane detail view with the
+  ``render_commit_text`` output.
+* Branch picker dropdown to switch the active branch.
+* ``Mark as checkpoint`` button materializes a labeled .swc.
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+from typing import Optional
+
+from PySide6.QtCore import Qt, Signal
+from PySide6.QtWidgets import (
+    QComboBox,
+    QDialog,
+    QFrame,
+    QHBoxLayout,
+    QHeaderView,
+    QInputDialog,
+    QLabel,
+    QLineEdit,
+    QMessageBox,
+    QPushButton,
+    QSplitter,
+    QTableWidget,
+    QTableWidgetItem,
+    QTextEdit,
+    QVBoxLayout,
+    QWidget,
+)
+
+from swcstudio.core.provenance import (
+    DEFAULT_BRANCH,
+    OpKind,
+    create_tag,
+    ensure_schema,
+    history_dir_for,
+    list_branches,
+    list_tags,
+    open_index,
+    query_commits,
+    read_branch,
+    read_head,
+    render_commit_text,
+    write_head,
+)
+
+__all__ = ["HistoryPanel", "open_history_dialog"]
+
+
+class HistoryPanel(QWidget):
+    """Self-contained provenance browser for a single SWC file."""
+
+    commit_selected = Signal(str)  # emits commit_sha when user clicks a row
+
+    def __init__(self, swc_path: str | Path, parent: Optional[QWidget] = None) -> None:
+        super().__init__(parent)
+        self._swc_path = Path(swc_path)
+        self._hist = history_dir_for(self._swc_path)
+        self._build_ui()
+        self.refresh()
+
+    # ------------------------------------------------------------------
+    # UI construction
+    # ------------------------------------------------------------------
+
+    def _build_ui(self) -> None:
+        layout = QVBoxLayout(self)
+
+        # Top toolbar — branch picker + filter chips
+        toolbar = QHBoxLayout()
+        toolbar.addWidget(QLabel("Branch:"))
+        self._branch_combo = QComboBox()
+        self._branch_combo.currentTextChanged.connect(self._on_branch_changed)
+        toolbar.addWidget(self._branch_combo)
+
+        self._switch_btn = QPushButton("Switch")
+        self._switch_btn.clicked.connect(self._on_switch_clicked)
+        toolbar.addWidget(self._switch_btn)
+
+        self._new_branch_btn = QPushButton("New branch…")
+        self._new_branch_btn.clicked.connect(self._on_new_branch_clicked)
+        toolbar.addWidget(self._new_branch_btn)
+
+        toolbar.addSpacing(20)
+        toolbar.addWidget(QLabel("Actor:"))
+        self._actor_filter = QLineEdit()
+        self._actor_filter.setPlaceholderText("(any)")
+        self._actor_filter.setMaximumWidth(140)
+        self._actor_filter.textChanged.connect(self.refresh)
+        toolbar.addWidget(self._actor_filter)
+
+        toolbar.addWidget(QLabel("Since:"))
+        self._since_filter = QLineEdit()
+        self._since_filter.setPlaceholderText("YYYY-MM-DD")
+        self._since_filter.setMaximumWidth(120)
+        self._since_filter.textChanged.connect(self.refresh)
+        toolbar.addWidget(self._since_filter)
+
+        toolbar.addStretch(1)
+        self._refresh_btn = QPushButton("Refresh")
+        self._refresh_btn.clicked.connect(self.refresh)
+        toolbar.addWidget(self._refresh_btn)
+
+        layout.addLayout(toolbar)
+
+        # Splitter: timeline table | detail view
+        splitter = QSplitter(Qt.Horizontal)
+
+        self._table = QTableWidget(0, 5)
+        self._table.setHorizontalHeaderLabels(["sha", "ts", "actor", "branch", "message"])
+        self._table.setSelectionBehavior(QTableWidget.SelectRows)
+        self._table.setSelectionMode(QTableWidget.SingleSelection)
+        self._table.setEditTriggers(QTableWidget.NoEditTriggers)
+        hdr = self._table.horizontalHeader()
+        hdr.setSectionResizeMode(0, QHeaderView.ResizeToContents)
+        hdr.setSectionResizeMode(1, QHeaderView.ResizeToContents)
+        hdr.setSectionResizeMode(2, QHeaderView.ResizeToContents)
+        hdr.setSectionResizeMode(3, QHeaderView.ResizeToContents)
+        hdr.setSectionResizeMode(4, QHeaderView.Stretch)
+        self._table.itemSelectionChanged.connect(self._on_row_selected)
+        splitter.addWidget(self._table)
+
+        right = QFrame()
+        rlayout = QVBoxLayout(right)
+        self._detail = QTextEdit()
+        self._detail.setReadOnly(True)
+        self._detail.setFontFamily("Menlo, Consolas, monospace")
+        rlayout.addWidget(self._detail, 1)
+
+        row_buttons = QHBoxLayout()
+        self._checkpoint_btn = QPushButton("Mark as checkpoint…")
+        self._checkpoint_btn.clicked.connect(self._on_checkpoint_clicked)
+        self._checkpoint_btn.setEnabled(False)
+        row_buttons.addWidget(self._checkpoint_btn)
+
+        self._tag_btn = QPushButton("Tag commit…")
+        self._tag_btn.clicked.connect(self._on_tag_clicked)
+        self._tag_btn.setEnabled(False)
+        row_buttons.addWidget(self._tag_btn)
+
+        row_buttons.addStretch(1)
+        rlayout.addLayout(row_buttons)
+
+        splitter.addWidget(right)
+        splitter.setStretchFactor(0, 3)
+        splitter.setStretchFactor(1, 2)
+        layout.addWidget(splitter, 1)
+
+    # ------------------------------------------------------------------
+    # data loading
+    # ------------------------------------------------------------------
+
+    def refresh(self) -> None:
+        """Reload branches and the commit table."""
+        if not self._hist.exists():
+            self._table.setRowCount(0)
+            self._detail.setPlainText(
+                f"No .history/ at {self._hist}\n\n"
+                f"Run 'swcstudio history init {self._swc_path}' to start tracking."
+            )
+            return
+
+        # Branch dropdown
+        head = read_head(self._hist)
+        branches = list_branches(self._hist)
+        # Block signals while we rebuild so currentTextChanged doesn't
+        # fire spuriously and trigger an unwanted refresh.
+        self._branch_combo.blockSignals(True)
+        self._branch_combo.clear()
+        self._branch_combo.addItems(branches)
+        if head in branches:
+            self._branch_combo.setCurrentText(head)
+        self._branch_combo.blockSignals(False)
+
+        # Commit table
+        conn = open_index(self._hist)
+        try:
+            ensure_schema(conn)
+            actor = self._actor_filter.text().strip() or None
+            since = self._since_filter.text().strip() or None
+            rows = query_commits(
+                conn,
+                branch=self._branch_combo.currentText() or None,
+                actor=actor,
+                since=since,
+                limit=500,
+            )
+        finally:
+            conn.close()
+
+        self._table.setRowCount(len(rows))
+        for i, r in enumerate(rows):
+            short = (r["sha"] or "").removeprefix("sha256:")[:12]
+            items = [
+                short,
+                r["ts"] or "",
+                r["os_user"] or "",
+                r["branch"] or "",
+                r["message"] or "",
+            ]
+            for j, text in enumerate(items):
+                cell = QTableWidgetItem(text)
+                if j == 0:
+                    # Keep the full sha on the row for later retrieval.
+                    cell.setData(Qt.UserRole, r["sha"])
+                self._table.setItem(i, j, cell)
+
+        self._detail.clear()
+        self._checkpoint_btn.setEnabled(False)
+        self._tag_btn.setEnabled(False)
+
+    # ------------------------------------------------------------------
+    # signal handlers
+    # ------------------------------------------------------------------
+
+    def _on_branch_changed(self, _name: str) -> None:
+        self.refresh()
+
+    def _on_row_selected(self) -> None:
+        sha = self._current_selection_sha()
+        if not sha:
+            return
+        try:
+            text = render_commit_text(self._hist, sha)
+        except Exception as e:  # pragma: no cover - defensive
+            text = f"(error rendering commit: {e})"
+        self._detail.setPlainText(text)
+        self._checkpoint_btn.setEnabled(True)
+        self._tag_btn.setEnabled(True)
+        self.commit_selected.emit(sha)
+
+    def _on_switch_clicked(self) -> None:
+        target = self._branch_combo.currentText().strip()
+        if not target:
+            return
+        try:
+            write_head(self._hist, target)
+        except Exception as e:
+            QMessageBox.warning(self, "Switch branch", str(e))
+            return
+        QMessageBox.information(
+            self,
+            "Switch branch",
+            f"Active branch is now {target!r}. "
+            f"Future commits will land on this branch.",
+        )
+        self.refresh()
+
+    def _on_new_branch_clicked(self) -> None:
+        sha = self._current_selection_sha()
+        if not sha:
+            QMessageBox.information(
+                self, "New branch",
+                "Select a commit in the table to branch from.",
+            )
+            return
+        name, ok = QInputDialog.getText(self, "New branch", "Branch name:")
+        if not ok or not name.strip():
+            return
+        from swcstudio.core.provenance import write_branch, RefError
+        try:
+            write_branch(self._hist, name.strip(), sha)
+        except RefError as e:
+            QMessageBox.warning(self, "New branch", str(e))
+            return
+        QMessageBox.information(
+            self, "New branch",
+            f"Created branch {name.strip()!r} at {sha[:19]}.",
+        )
+        self.refresh()
+
+    def _on_checkpoint_clicked(self) -> None:
+        sha = self._current_selection_sha()
+        if not sha:
+            return
+        label, ok = QInputDialog.getText(
+            self, "Checkpoint label",
+            "Label (e.g. pre_paper):",
+        )
+        if not ok or not label.strip():
+            return
+        try:
+            # Reuse the CLI's materialization helper so behavior matches exactly.
+            from swcstudio.cli.history_cli import _materialize_state_at
+            body = _materialize_state_at(self._hist, sha)
+        except Exception as e:
+            QMessageBox.warning(self, "Checkpoint", f"Could not materialize: {e}")
+            return
+        out_dir = (history_dir_for(self._swc_path)).parent
+        safe = "".join(c if c.isalnum() or c in "-_" else "_" for c in label.strip())
+        out_path = out_dir / f"{self._swc_path.stem}_{safe}.swc"
+        out_path.write_bytes(body)
+        QMessageBox.information(self, "Checkpoint", f"Wrote {out_path}")
+
+    def _on_tag_clicked(self) -> None:
+        sha = self._current_selection_sha()
+        if not sha:
+            return
+        name, ok = QInputDialog.getText(self, "Tag commit", "Tag name:")
+        if not ok or not name.strip():
+            return
+        from swcstudio.core.provenance import TagExistsError, RefError
+        try:
+            create_tag(self._hist, name.strip(), sha)
+        except (TagExistsError, RefError) as e:
+            QMessageBox.warning(self, "Tag commit", str(e))
+            return
+        QMessageBox.information(
+            self, "Tag commit",
+            f"Tagged {sha[:19]} as {name.strip()!r}.",
+        )
+
+    # ------------------------------------------------------------------
+    # helpers
+    # ------------------------------------------------------------------
+
+    def _current_selection_sha(self) -> str | None:
+        items = self._table.selectedItems()
+        if not items:
+            return None
+        # All items in a row share the same UserRole sha (set on col 0).
+        row = items[0].row()
+        cell = self._table.item(row, 0)
+        if cell is None:
+            return None
+        sha = cell.data(Qt.UserRole)
+        return str(sha) if sha else None
+
+
+def open_history_dialog(parent: Optional[QWidget], swc_path: str | Path) -> None:
+    """Convenience: open the history panel as a modal dialog.
+
+    The main window can add a single ``View → History…`` action
+    that calls this. No other GUI wiring is required.
+    """
+    dlg = QDialog(parent)
+    dlg.setWindowTitle(f"History — {Path(swc_path).name}")
+    dlg.resize(1100, 600)
+    layout = QVBoxLayout(dlg)
+    layout.addWidget(HistoryPanel(swc_path, parent=dlg))
+    dlg.exec()

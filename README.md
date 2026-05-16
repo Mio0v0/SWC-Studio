@@ -143,6 +143,20 @@ Under the hood, releases are split into three independently-updatable layers —
 - manual morphology and geometry editing
 - shared GUI, CLI, and Python integration surface
 
+## Provenance & Versioning (new — in progress)
+
+A git-shaped per-file history layer is being added. See
+[`docs/PROVENANCE_SPEC.md`](docs/PROVENANCE_SPEC.md) for the full
+design contract and
+[`docs/PROVENANCE_CONVERSION_GUIDE.md`](docs/PROVENANCE_CONVERSION_GUIDE.md)
+for how existing handlers/plugins migrate. Once shipped, every
+mutation produces an append-only `.history/events.jsonl` + content-
+addressed `.zst` blob store + a SQLite query index, with a bounded
+`# @PROV` chain embedded in the SWC header so the file is self-
+describing. AI ops capture an MLflow-shaped run record plus a full
+environment fingerprint for reproducibility. CLI: `swcstudio history
+{log,show,checkout,branch,switch,tag,checkpoint,reproduce,reindex,verify,gc,export-crate}`.
+
 ## Recommended Workflow
 
 1. Open one SWC file in the GUI.

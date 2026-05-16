@@ -28,7 +28,11 @@ dependencies = [
   # the visualization stack are required dependencies.
   "PySide6>=6.6",
   "pyqtgraph>=0.14",
-  "vispy>=0.14"
+  "vispy>=0.14",
+  # Provenance layer (PROVENANCE_SPEC.md) — content-addressed blob
+  # store uses zstd compression. Pure-Python is unacceptably slow
+  # for the >100 MB envs we capture for AI runs.
+  "zstandard>=0.22"
 ]
 
 [project.optional-dependencies]
