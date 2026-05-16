@@ -10,6 +10,18 @@ the previous one.
 
 from __future__ import annotations
 
+from swcstudio.core.provenance.ai_run import (
+    AIRUN_SCHEMA_VERSION,
+    AIRun,
+    AIRunStatus,
+    ai_run_to_blob_bytes,
+    build_ai_run,
+)
+from swcstudio.core.provenance.env import (
+    ENV_SCHEMA_VERSION,
+    capture_env,
+    env_hash,
+)
 from swcstudio.core.provenance.diff import (
     DiffPayload,
     compute_swc_diff,
@@ -80,10 +92,18 @@ from swcstudio.core.provenance.refs import (
 )
 
 __all__ = [
+    "AIRUN_SCHEMA_VERSION",
+    "AIRun",
+    "AIRunStatus",
     "BlobCorruptError",
     "BlobNotFoundError",
     "DEFAULT_BRANCH",
     "DiffPayload",
+    "ENV_SCHEMA_VERSION",
+    "ai_run_to_blob_bytes",
+    "build_ai_run",
+    "capture_env",
+    "env_hash",
     "Event",
     "INDEX_SCHEMA_VERSION",
     "LockFile",
