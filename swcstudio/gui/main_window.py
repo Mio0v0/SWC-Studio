@@ -695,6 +695,17 @@ class SWCMainWindow(QMainWindow):
         )
         window_menu.addAction(show_auto_guide_action)
 
+        # History (provenance) — see PROVENANCE_SPEC.md and
+        # PROVENANCE_CONVERSION_GUIDE.md for the full surface.
+        history_menu = menu.addMenu("History")
+        open_history_action = QAction("Open History Browser…", self)
+        open_history_action.triggered.connect(self._on_open_history_browser)
+        history_menu.addAction(open_history_action)
+
+        init_history_action = QAction("Initialize History for This File…", self)
+        init_history_action.triggered.connect(self._on_init_history_for_current_file)
+        history_menu.addAction(init_history_action)
+
         # Help
         help_menu = menu.addMenu("Help")
         quick_action = QAction("Quick Manual", self)
@@ -4455,6 +4466,71 @@ class SWCMainWindow(QMainWindow):
         )
         self._show_help_text_dialog("About SWC-Studio", text)
         self._append_log("Opened About dialog.", "INFO")
+
+    # ----- History menu handlers (PROVENANCE_SPEC §14) -----
+    def _on_open_history_browser(self):
+        """Open the history browser dialog for the active SWC file."""
+        path = self._file_path
+        if not path:
+            from PySide6.QtWidgets import QMessageBox
+            QMessageBox.information(
+                self,
+                "History Browser",
+                "Open an SWC file first, then choose History → Open History Browser.",
+            )
+            return
+        try:
+            from swcstudio.gui.history_panel import open_history_dialog
+            open_history_dialog(self, path)
+            self._append_log(f"Opened history browser for {path}", "INFO")
+        except Exception as e:
+            self._append_log(f"Could not open history browser: {e}", "ERROR")
+
+    def _on_init_history_for_current_file(self):
+        """Initialize .history/ for the active file; import legacy if present."""
+        from PySide6.QtWidgets import QMessageBox
+        path = self._file_path
+        if not path:
+            QMessageBox.information(
+                self,
+                "Initialize History",
+                "Open an SWC file first, then choose History → Initialize History.",
+            )
+            return
+        try:
+            from swcstudio.core.provenance import (
+                history_dir_for,
+                init_history,
+                migrate_legacy_output_dir,
+                needs_migration,
+            )
+            hist = history_dir_for(path)
+            if hist.exists():
+                QMessageBox.information(
+                    self,
+                    "Initialize History",
+                    f"History is already initialized at {hist}.",
+                )
+                return
+            if needs_migration(path):
+                outcome = migrate_legacy_output_dir(path)
+                msg = "Initialized .history/."
+                if outcome.imported_commit:
+                    msg += f"\nImported state from {outcome.imported_from.name}."
+                if outcome.legacy_files_kept:
+                    msg += f"\nKept {outcome.legacy_files_kept} legacy file(s) in place."
+                QMessageBox.information(self, "Initialize History", msg)
+                self._append_log(msg.replace("\n", " "), "INFO")
+            else:
+                init_history(path)
+                QMessageBox.information(
+                    self, "Initialize History",
+                    f"Initialized .history/ at {hist}.",
+                )
+                self._append_log(f"Initialized history for {path}", "INFO")
+        except Exception as e:
+            self._append_log(f"Could not initialize history: {e}", "ERROR")
+            QMessageBox.warning(self, "Initialize History", str(e))
 
     def _check_for_updates(self):
         """Check GitHub Releases for a newer version and offer to install it.
