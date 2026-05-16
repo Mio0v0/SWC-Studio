@@ -10,6 +10,15 @@ the previous one.
 
 from __future__ import annotations
 
+from swcstudio.core.provenance.tracked_op import (
+    FORMAT_VERSION,
+    OpResult,
+    current_swc_path_for,
+    history_dir_for,
+    init_history,
+    tracked_op,
+    tracked_session,
+)
 from swcstudio.core.provenance.ai_run import (
     AIRUN_SCHEMA_VERSION,
     AIRun,
@@ -100,10 +109,17 @@ __all__ = [
     "DEFAULT_BRANCH",
     "DiffPayload",
     "ENV_SCHEMA_VERSION",
+    "FORMAT_VERSION",
+    "OpResult",
     "ai_run_to_blob_bytes",
     "build_ai_run",
     "capture_env",
+    "current_swc_path_for",
     "env_hash",
+    "history_dir_for",
+    "init_history",
+    "tracked_op",
+    "tracked_session",
     "Event",
     "INDEX_SCHEMA_VERSION",
     "LockFile",
