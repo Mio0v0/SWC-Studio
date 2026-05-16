@@ -615,6 +615,12 @@ def build_parser() -> argparse.ArgumentParser:
     plugins_load = plugins_sub.add_parser("load", help="Load plugin module by import path")
     plugins_load.add_argument("module", help="Python module path, e.g. my_plugins.brain_globe")
 
+    # ------------------------------ history (provenance)
+    # New 'history' tool group from PROVENANCE_SPEC §13. Self-contained
+    # in cli/history_cli.py to keep this file's footprint tiny.
+    from swcstudio.cli.history_cli import add_history_subparser
+    add_history_subparser(sub)
+
     return p
 
 
@@ -720,6 +726,13 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     try:
+        if args.tool == "history":
+            # New provenance tool group (PROVENANCE_SPEC §13). Lives in
+            # its own module so it doesn't entangle with the rest of
+            # this dispatcher.
+            from swcstudio.cli.history_cli import dispatch_history
+            return dispatch_history(args)
+
         if args.tool == "check":
             file_path = Path(args.file)
             if not file_path.exists():

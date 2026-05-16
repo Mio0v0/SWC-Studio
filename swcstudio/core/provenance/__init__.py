@@ -10,6 +10,7 @@ the previous one.
 
 from __future__ import annotations
 
+from swcstudio.core.provenance.crate import export_crate
 from swcstudio.core.provenance.derived import (
     derived_from_for_swc_path,
     derived_from_payload,
@@ -130,6 +131,7 @@ __all__ = [
     "OpResult",
     "derived_from_for_swc_path",
     "derived_from_payload",
+    "export_crate",
     "find_descendants",
     "migrate_legacy_output_dir",
     "needs_migration",
