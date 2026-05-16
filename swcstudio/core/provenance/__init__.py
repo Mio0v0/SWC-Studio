@@ -15,8 +15,19 @@ from swcstudio.core.provenance.canonical import (
     root_sha,
     sha256_hex,
 )
+from swcstudio.core.provenance.lockfile import LockFile, LockHeldError
+from swcstudio.core.provenance.objects import (
+    BlobCorruptError,
+    BlobNotFoundError,
+    ObjectStore,
+)
 
 __all__ = [
+    "BlobCorruptError",
+    "BlobNotFoundError",
+    "LockFile",
+    "LockHeldError",
+    "ObjectStore",
     "canonical_swc",
     "root_sha",
     "sha256_hex",
