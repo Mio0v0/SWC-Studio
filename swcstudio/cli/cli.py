@@ -1074,31 +1074,51 @@ def main(argv: list[str] | None = None) -> int:
             return 0
 
         if args.tool == "morphology" and args.feature == "set-radius":
-            old_df = parse_swc_text_preserve_tokens(Path(args.file).read_text(encoding="utf-8", errors="ignore"))
-            out = set_node_radius_file(
-                str(args.file),
-                node_id=int(args.node_id),
-                radius=float(args.radius),
-                out_path=None,
-                write_output=True,
-                config_overrides=_parse_config_overrides(args.config_json),
+            # Converted to provenance layer (rewire checklist item 1.1 #2).
+            # Same pattern as morphology set-type — see commit 990ee714.
+            from swcstudio.core.provenance import (
+                OpKind,
+                current_swc_path_for,
+                tracked_op,
             )
-            out["operation_log_path"] = _write_cli_operation_report(
-                Path(args.file),
-                operation_name="morphology_set_radius",
-                title="Manual Radius Edit",
-                summary=(
-                    f"Updated node {int(args.node_id)} radius from "
-                    f"{float(out.get('old_radius', 0.0)):.6g} to {float(out.get('new_radius', 0.0)):.6g}."
-                ),
-                details=[],
-                old_df=old_df,
-                new_df=out.get("dataframe"),
+            from swcstudio.tools.morphology_editing.features.manual_radii import (
+                set_node_radius_text,
             )
-            out_print = {k: v for k, v in out.items() if k not in {"bytes", "dataframe", "config_used"}}
+
+            src = Path(args.file)
+            if not src.exists():
+                raise FileNotFoundError(str(src))
+
+            with tracked_op(
+                src,
+                kind=OpKind.SET_RADIUS,
+                params={"node_id": int(args.node_id), "radius": float(args.radius)},
+                message=f"set-radius node={args.node_id} radius={args.radius}",
+            ) as op:
+                in_bytes = op.input_bytes if op.input_bytes is not None else src.read_bytes()
+                in_text = in_bytes.decode("utf-8", errors="ignore")
+                result = set_node_radius_text(
+                    in_text,
+                    node_id=int(args.node_id),
+                    radius=float(args.radius),
+                    config_overrides=_parse_config_overrides(args.config_json),
+                )
+                op.set_output(result["bytes"])
+
+            out_print = {
+                "node_id":            int(args.node_id),
+                "old_radius":         float(result.get("old_radius", 0.0)),
+                "new_radius":         float(result.get("new_radius", 0.0)),
+                "input_path":         str(src),
+                "output_path":        str(current_swc_path_for(src)),
+                "operation_log_path": None,
+                "commit_sha":         op.result.commit_sha,
+                "branch":             op.result.branch,
+                "input_sha":          op.result.input_sha,
+                "output_sha":         op.result.output_sha,
+                "diff_ref":           op.result.diff_ref,
+            }
             _print_json(out_print)
-            if out.get("operation_log_path"):
-                print(f"\nOperation report: {out.get('operation_log_path')}")
             return 0
 
         if args.tool == "morphology" and args.feature == "set-type":
