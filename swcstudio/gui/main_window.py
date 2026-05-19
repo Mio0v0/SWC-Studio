@@ -1374,6 +1374,49 @@ class SWCMainWindow(QMainWindow):
 
         return change_rows
 
+    def _record_tracked_commit(
+        self,
+        doc: _DocumentState,
+        new_df: pd.DataFrame,
+        *,
+        kind,
+        params: dict,
+        message: str = "",
+    ) -> object | None:
+        """Record a provenance commit for a single GUI mutation.
+
+        Stage-1 design (see docs/PROVENANCE_REWIRE_CHECKLIST.md, GUI
+        section): each Apply-button click is its own commit, mirroring
+        the in-memory undo stack one-for-one. Future stage-2 work may
+        switch this to tracked_session-per-document with sub-ops per
+        click; the per-handler call sites won't need to change.
+
+        Returns the OpResult on success, None if the document has no
+        on-disk path yet (untitled / preview docs are not tracked).
+        Failures are logged and swallowed — provenance must never
+        block a GUI edit from being applied to the in-memory display.
+        """
+        if doc.is_preview or not getattr(doc, "file_path", ""):
+            return None
+        try:
+            from swcstudio.core.provenance import OpKind, tracked_op  # noqa: PLC0415
+            from swcstudio.core.swc_io import write_swc_to_bytes_preserve_tokens  # noqa: PLC0415
+            kind_value = kind.value if isinstance(kind, OpKind) else str(kind)
+            with tracked_op(
+                doc.file_path,
+                kind=kind,
+                params=dict(params or {}),
+                message=message or f"GUI {kind_value}",
+            ) as op:
+                op.set_output(write_swc_to_bytes_preserve_tokens(new_df))
+            return op.result
+        except Exception as e:  # noqa: BLE001
+            # Never block a GUI edit because the history layer failed.
+            # Surface the failure in the log so it's visible without
+            # crashing the user's session.
+            self._append_log(f"Provenance commit failed: {e}", "WARN")
+            return None
+
     def _record_session_operation(
         self,
         doc: _DocumentState,
@@ -2123,6 +2166,7 @@ class SWCMainWindow(QMainWindow):
         return write_text_report(log_path, format_auto_typing_report_text(payload))
 
     def _on_manual_radii_apply_requested(self, node_id: int, new_radius: float):
+        # Converted to provenance layer (rewire checklist GUI item G2).
         doc = self._active_source_document()
         if doc is None or doc.df is None or doc.df.empty:
             self._append_log("Manual Radii: no active SWC document.", "WARN")
@@ -2140,7 +2184,22 @@ class SWCMainWindow(QMainWindow):
 
         new_df = doc.df.copy()
         new_df.loc[mask, "radius"] = target_radius
-        node_type = int(new_df.loc[mask, "type"].iloc[0])
+
+        # Provenance: record this Apply as one SET_RADIUS commit on the
+        # document's .history/. Falls through silently if the document
+        # has no file path (preview / untitled doc).
+        from swcstudio.core.provenance import OpKind  # noqa: PLC0415
+        self._record_tracked_commit(
+            doc,
+            new_df,
+            kind=OpKind.SET_RADIUS,
+            params={"node_id": int(node_id), "radius": target_radius},
+            message=(
+                f"GUI manual radii: node {int(node_id)} "
+                f"{old_radius:.6g} → {target_radius:.6g}"
+            ),
+        )
+
         self._apply_document_dataframe(
             doc,
             new_df,

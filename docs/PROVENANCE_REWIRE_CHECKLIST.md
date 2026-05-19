@@ -81,7 +81,7 @@ with the right op kind + params.
 | # | Status | Slot method | line | Triggered by | Op kind | AI? |
 |---|---|---|---|---|---|---|
 | G1 | ⬜ | `_on_validation_auto_label_process_requested` | 1894 | validation_auto_label_panel | `AUTO_LABEL` | **yes** |
-| G2 | ⬜ | `_on_manual_radii_apply_requested` | 2125 | manual_radii_panel | `MANUAL_RADII` | no |
+| G2 | ✅ | `_on_manual_radii_apply_requested` | 2125 | manual_radii_panel | `SET_RADIUS` | no | Done. Headless verified (commit lands, current.swc updated, params recorded, original untouched, preview/untitled docs skipped). **Requires user click-test in live GUI.** |
 | G3 | ⬜ | `_on_validation_radii_apply_requested` | 2159 | validation_tab radii fix | `RADII_CLEAN` | no |
 | G4 | ⬜ | `_on_geometry_move_selection_requested` | 2245 | geometry_editing_panel | `GEOMETRY_EDIT` | no |
 | G5 | ⬜ | `_on_geometry_reconnect_requested` | 2275 | geometry_editing_panel | `GEOMETRY_EDIT` | no |
