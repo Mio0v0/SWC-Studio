@@ -1102,28 +1102,59 @@ def main(argv: list[str] | None = None) -> int:
             return 0
 
         if args.tool == "morphology" and args.feature == "set-type":
-            old_df = parse_swc_text_preserve_tokens(Path(args.file).read_text(encoding="utf-8", errors="ignore"))
-            out = set_node_type_file(
-                str(args.file),
-                node_id=int(args.node_id),
-                new_type=int(args.new_type),
-                out_path=None,
-                write_output=True,
-                config_overrides=_parse_config_overrides(args.config_json),
+            # Converted to provenance layer per PROVENANCE_CONVERSION_GUIDE.md
+            # (rewire checklist item 1.1 #1). The mutation now flows through
+            # tracked_op so the edit is recorded as a commit in .history/;
+            # the old timestamped output file + text report path is replaced
+            # by a refreshed <stem>_current.swc with @PROV header.
+            from swcstudio.core.provenance import (
+                OpKind,
+                current_swc_path_for,
+                tracked_op,
             )
-            out["operation_log_path"] = _write_cli_operation_report(
-                Path(args.file),
-                operation_name="morphology_set_type",
-                title="Manual Label Edit",
-                summary="Applied labeling edits in Morphology Editing.",
-                details=[],
-                old_df=old_df,
-                new_df=out.get("dataframe"),
+            from swcstudio.tools.morphology_editing.features.manual_label import (
+                set_node_type_text,
             )
-            out_print = {k: v for k, v in out.items() if k not in {"bytes", "dataframe", "config_used"}}
+
+            src = Path(args.file)
+            if not src.exists():
+                raise FileNotFoundError(str(src))
+
+            with tracked_op(
+                src,
+                kind=OpKind.SET_TYPE,
+                params={"node_id": int(args.node_id), "new_type": int(args.new_type)},
+                message=f"set-type node={args.node_id} type={args.new_type}",
+            ) as op:
+                # op.input_bytes is the latest committed state (falls back to
+                # the original file on the first commit). Always edit from
+                # there so chained commits build on each other.
+                in_bytes = op.input_bytes if op.input_bytes is not None else src.read_bytes()
+                in_text = in_bytes.decode("utf-8", errors="ignore")
+                result = set_node_type_text(
+                    in_text,
+                    node_id=int(args.node_id),
+                    new_type=int(args.new_type),
+                    config_overrides=_parse_config_overrides(args.config_json),
+                )
+                op.set_output(result["bytes"])
+
+            # JSON contract: keep every key the old handler emitted, plus the
+            # new provenance fields scripts can opt into.
+            out_print = {
+                "node_id":            int(args.node_id),
+                "new_type":           int(args.new_type),
+                "old_type":           int(result.get("old_type", 0)),
+                "input_path":         str(src),
+                "output_path":        str(current_swc_path_for(src)),
+                "operation_log_path": None,  # no per-op text report under the new design
+                "commit_sha":         op.result.commit_sha,
+                "branch":             op.result.branch,
+                "input_sha":          op.result.input_sha,
+                "output_sha":         op.result.output_sha,
+                "diff_ref":           op.result.diff_ref,
+            }
             _print_json(out_print)
-            if out.get("operation_log_path"):
-                print(f"\nOperation report: {out.get('operation_log_path')}")
             return 0
 
         # -------- geometry

@@ -22,7 +22,7 @@ your scripts depend on.
 
 | # | Status | Command | cli.py line | Op kind | AI? | Notes |
 |---|---|---|---|---|---|---|
-| 1 | ⬜ | `swcstudio morphology set-type` | 1104 | `SET_TYPE` | no | Pattern in `tracked_handlers_example.py` |
+| 1 | ✅ | `swcstudio morphology set-type` | 1104 | `SET_TYPE` | no | Done. Byte-identical to old path on a 28k-line real SWC; chain verified; original untouched. |
 | 2 | ⬜ | `swcstudio morphology set-radius` | 1076 | `SET_RADIUS` | no | Same pattern as #1 |
 | 3 | ⬜ | `swcstudio morphology dendrogram-edit` | 1051 | `DENDROGRAM_EDIT` | no | Subtree reassignment |
 | 4 | ⬜ | `swcstudio validation auto-fix` | 905 | `AUTO_FIX` | no | Multi-rule auto-fix pass |
