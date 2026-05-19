@@ -29,7 +29,7 @@ your scripts depend on.
 | 5 | 🟦 | `swcstudio validation auto-label` | 953 | `AUTO_LABEL` | **yes** | **Blocked**: pickle/numpy incompat in dev env (`MT19937 not a known BitGenerator`). Original handler also fails here — not a conversion regression. Resume on machine with working sklearn 1.5 + matching numpy. |
 | 6 | ✅ | `swcstudio validation radii-clean` | 852 | `RADII_CLEAN` | no | Done (file mode only). Byte-identical 1.6 MB output on real SWC; 16 passes, 8,039 radius changes. Folder/batch mode still falls through to old path (item 1.2 #18). |
 | 7 | ✅ | `swcstudio validation index-clean` | 1004 | `INDEX_CLEAN` | no | Done. Byte-identical reordering verified on a deliberately disordered 5-node SWC; remapped_id_count=2, id_map_size=5 preserved. |
-| 8 | ⬜ | `swcstudio geometry simplify` | 1131 | `SIMPLIFICATION` | no | Geometry-aware simplify |
+| 8 | ✅ | `swcstudio geometry simplify` | 1131 | `SIMPLIFICATION` | no | Done. Byte-identical on real SWC; 28,075 → 9,164 nodes (67.36% reduction); params_used preserved. |
 | 9 | ⬜ | `swcstudio geometry move-node` | 1183 | `GEOMETRY_EDIT` | no | params: `{op: move-node, ...}` |
 | 10 | ⬜ | `swcstudio geometry move-subtree` | 1207 | `GEOMETRY_EDIT` | no | |
 | 11 | ⬜ | `swcstudio geometry connect` | 1231 | `GEOMETRY_EDIT` | no | |
