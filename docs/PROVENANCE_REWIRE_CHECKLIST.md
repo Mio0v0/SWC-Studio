@@ -51,7 +51,7 @@ needed (each file's history covers it).
 | 17 | ⬜ | `swcstudio batch auto-typing` | 774 | `AUTO_LABEL` | **yes** |
 | 18 | ⬜ | `swcstudio batch radii-clean` | 802 | `RADII_CLEAN` | no |
 | 19 | ⬜ | `swcstudio batch simplify` | 812 | `SIMPLIFICATION` | no |
-| 20 | ⬜ | `swcstudio batch index-clean` | 822 | `INDEX_CLEAN` | no |
+| 20 | ✅ | `swcstudio batch index-clean` | 822 | `INDEX_CLEAN` | no | Done. 4-file test (3 unique contents) succeeds; per-file .history/ created on each input; identical content produces identical commit SHA (content-addressing confirmed). |
 
 ### 1.3 Read-only — no conversion needed
 

@@ -74,6 +74,71 @@ def _print_json(payload) -> None:
     print(json.dumps(payload, indent=2, sort_keys=True, default=str))
 
 
+def _tracked_batch(
+    folder: Path,
+    *,
+    op_kind,
+    mutate_text,
+    params_for=lambda swc: {},
+    message="",
+    per_file_summary=None,
+) -> dict:
+    """Per-file tracked_op loop for batch CLI handlers.
+
+    For each .swc in ``folder``, opens a tracked_op on that file's own
+    .history/ and runs ``mutate_text`` on op.input_bytes. One commit per
+    file. Errors per file are caught so a single bad file doesn't stop
+    the batch; they show up in the returned ``failures`` list.
+
+    The new design produces NO separate batch output folder — every
+    output lands as a commit on its input file's own .history/. The
+    summary dict matches the legacy shape (folder, files_total,
+    files_processed, files_failed, per_file, failures) plus a new
+    ``commits`` list mapping each processed file to its commit sha.
+    """
+    from swcstudio.core.provenance import tracked_op
+
+    swcs = sorted(
+        [p for p in folder.iterdir() if p.is_file() and p.suffix.lower() == ".swc"],
+        key=lambda p: p.name.lower(),
+    )
+    if not swcs:
+        raise FileNotFoundError(f"No .swc files found in: {folder}")
+
+    processed = 0
+    failures: list[str] = []
+    per_file: list[str] = []
+    commits: list[dict] = []
+
+    for swc in swcs:
+        try:
+            with tracked_op(
+                swc,
+                kind=op_kind,
+                params=params_for(swc),
+                message=message or f"batch {op_kind.value if hasattr(op_kind, 'value') else op_kind} on {swc.name}",
+            ) as op:
+                in_bytes = op.input_bytes if op.input_bytes is not None else swc.read_bytes()
+                result = mutate_text(in_bytes.decode("utf-8", errors="ignore"))
+                op.set_output(result["bytes"])
+            processed += 1
+            commits.append({"file": swc.name, "commit_sha": op.result.commit_sha})
+            if per_file_summary is not None:
+                per_file.append(per_file_summary(swc, result, op.result))
+        except Exception as e:  # noqa: BLE001
+            failures.append(f"{swc.name}: {e}")
+
+    return {
+        "folder":          str(folder),
+        "files_total":     len(swcs),
+        "files_processed": processed,
+        "files_failed":    len(failures),
+        "per_file":        per_file,
+        "failures":        failures,
+        "commits":         commits,
+    }
+
+
 def _summarize_batch_radii_output(out: dict) -> dict:
     mode = str(out.get("mode", ""))
     if mode == "file":
@@ -820,13 +885,37 @@ def main(argv: list[str] | None = None) -> int:
             return 0
 
         if args.tool == "batch" and args.feature == "index-clean":
-            out = batch_index_clean_folder(
-                str(args.folder),
-                config_overrides=_parse_config_overrides(args.config_json),
+            # Converted to provenance layer (rewire checklist item 1.2 #20).
+            # NEW: each input SWC gets one commit on its own .history/;
+            # no separate batch output folder is created. Outputs land at
+            # <each>_swc_studio_output/<stem>_current.swc.
+            from swcstudio.core.provenance import OpKind
+            from swcstudio.tools.validation.features.index_clean import index_clean_text
+
+            folder = Path(args.folder)
+            if not folder.is_dir():
+                raise NotADirectoryError(str(folder))
+            cfg_overrides = _parse_config_overrides(args.config_json)
+
+            def _mutate(text: str):
+                return index_clean_text(text, config_overrides=cfg_overrides)
+
+            def _summary(swc, result, op_result):
+                return (
+                    f"{swc.name}: {int(result.get('original_node_count', 0))} nodes -> "
+                    f"{int(result.get('new_node_count', 0))} nodes, "
+                    f"remapped IDs: {int(result.get('remapped_id_count', 0))}"
+                )
+
+            out = _tracked_batch(
+                folder,
+                op_kind=OpKind.INDEX_CLEAN,
+                mutate_text=_mutate,
+                params_for=lambda _: {},
+                message="batch index-clean",
+                per_file_summary=_summary,
             )
             _print_json(out)
-            if out.get("log_path"):
-                print(f"\nReport file: {out.get('log_path')}")
             return 0
 
         # -------- validation
