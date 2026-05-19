@@ -47,7 +47,7 @@ needed (each file's history covers it).
 
 | # | Status | Command | cli.py line | Op kind | AI? |
 |---|---|---|---|---|---|
-| 16 | ⬜ | `swcstudio batch split` | 764 | `SPLIT` (+ `derived_from` per child) | no |
+| 16 | ✅ | `swcstudio batch split` | 764 | `SPLIT` (+ `derived_from` per child) | no | Done. multi-soma split into 4 trees, each output gets its own .history/ with derived_from pointing to source file. single-soma correctly skipped (no split needed). |
 | 17 | ⬜ | `swcstudio batch auto-typing` | 774 | `AUTO_LABEL` | **yes** |
 | 18 | ✅ | `swcstudio batch radii-clean` | 802 | `RADII_CLEAN` | no | Done. Folder mode uses _tracked_batch; file mode delegates to converted single-file path. multi-soma: 17 passes, 3,305 changes. |
 | 19 | ✅ | `swcstudio batch simplify` | 812 | `SIMPLIFICATION` | no | Done. multi-soma: 6,155 → 1,356 nodes (77.97% reduction); per-file commit on each input. |

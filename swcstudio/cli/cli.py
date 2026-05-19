@@ -827,13 +827,117 @@ def main(argv: list[str] | None = None) -> int:
             return 0
 
         if args.tool == "batch" and args.feature == "split":
-            out = split_folder(
-                str(args.folder),
-                config_overrides=_parse_config_overrides(args.config_json),
+            # Converted to provenance layer (rewire checklist item 1.2 #16).
+            # Split is structurally unlike the other batch verbs: each
+            # input SWC produces N output SWCs (one per soma root).
+            #
+            # New provenance shape:
+            #   * No commit on the input file (it is read, not modified).
+            #   * Each output file is a NEW dataset with its own .history/.
+            #     Its first commit records derived_from = {root_sha,
+            #     commit_sha, path} pointing back to the source — when
+            #     present, the source's tracked history; otherwise the
+            #     raw input hash + a sentinel.
+            #   * Outputs land at <input_stem>/<input_stem>_tree_<N>.swc
+            #     in a per-batch timestamped folder, matching the legacy
+            #     "single_output_subdir" structure so users keep familiar
+            #     folder layouts.
+            from swcstudio.core.provenance import (
+                OpKind,
+                canonical_swc,
+                derived_from_for_swc_path,
+                derived_from_payload,
+                sha256_hex,
+                tracked_op,
             )
-            _print_json(out)
-            if out.get("log_path"):
-                print(f"\nReport file: {out.get('log_path')}")
+            from swcstudio.tools.batch_processing.features.swc_splitter import (
+                split_swc_text,
+            )
+            import time
+
+            folder = Path(args.folder)
+            if not folder.is_dir():
+                raise NotADirectoryError(str(folder))
+
+            cfg_overrides = _parse_config_overrides(args.config_json)
+            run_ts = time.strftime("%Y%m%d_%H%M%S")
+            out_dir = folder / f"{folder.name}_batch_split_{run_ts}"
+            out_dir.mkdir(parents=True, exist_ok=True)
+
+            swcs = sorted(
+                [p for p in folder.iterdir() if p.is_file() and p.suffix.lower() == ".swc"],
+                key=lambda p: p.name.lower(),
+            )
+            if not swcs:
+                raise FileNotFoundError(f"No .swc files found in: {folder}")
+
+            files_total = len(swcs)
+            files_split = files_skipped = trees_saved = 0
+            failures: list[str] = []
+            output_files: list[str] = []
+            output_commits: list[dict] = []
+
+            for fp in swcs:
+                try:
+                    text = fp.read_text(encoding="utf-8", errors="ignore")
+                    trees = split_swc_text(text, config_overrides=cfg_overrides)
+                    if len(trees) <= 1:
+                        files_skipped += 1
+                        continue
+                    files_split += 1
+                    # Use the input file's root hash + (if available) its
+                    # current branch tip as the derived_from anchor.
+                    src_payload = derived_from_for_swc_path(fp)
+                    if src_payload is None:
+                        src_payload = derived_from_payload(
+                            source_root_sha=sha256_hex(canonical_swc(fp.read_bytes())),
+                            source_commit_sha="sha256:" + ("0" * 64),  # sentinel: no commit yet
+                            source_path=fp.name,
+                        )
+
+                    file_out_dir = out_dir / fp.stem
+                    file_out_dir.mkdir(parents=True, exist_ok=True)
+                    for idx, (_root_id, sub_text, _node_count) in enumerate(trees, start=1):
+                        out_path = file_out_dir / f"{fp.stem}_tree_{idx}.swc"
+                        # First, create the new file with the split bytes.
+                        out_path.write_bytes(sub_text.encode("utf-8"))
+                        # Now record a derived_from commit on its history.
+                        try:
+                            with tracked_op(
+                                out_path,
+                                kind=OpKind.SPLIT,
+                                params={"source": fp.name, "tree_index": idx,
+                                        "tree_count": len(trees)},
+                                message=f"split: tree {idx}/{len(trees)} from {fp.name}",
+                                derived_from=src_payload,
+                            ) as op:
+                                # No-op edit relative to the just-written file —
+                                # this records the commit + derived_from with
+                                # input_sha == output_sha.
+                                op.set_output(out_path.read_bytes())
+                            output_commits.append({
+                                "file":       str(out_path.relative_to(out_dir)),
+                                "commit_sha": op.result.commit_sha,
+                            })
+                        except Exception as e:  # noqa: BLE001
+                            failures.append(f"{out_path.name}: history record failed: {e}")
+                        output_files.append(str(out_path.relative_to(out_dir)))
+                        trees_saved += 1
+                except Exception as e:  # noqa: BLE001
+                    failures.append(f"{fp.name}: {e}")
+
+            result = {
+                "folder":         str(folder),
+                "out_dir":        str(out_dir),
+                "files_total":    files_total,
+                "files_split":    files_split,
+                "files_skipped":  files_skipped,
+                "trees_saved":    trees_saved,
+                "output_files":   output_files,
+                "output_commits": output_commits,
+                "failures":       failures,
+            }
+            _print_json(result)
             return 0
 
         if args.tool == "batch" and args.feature == "auto-typing":
