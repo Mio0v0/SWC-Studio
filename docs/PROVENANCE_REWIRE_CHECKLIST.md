@@ -25,7 +25,7 @@ your scripts depend on.
 | 1 | ✅ | `swcstudio morphology set-type` | 1104 | `SET_TYPE` | no | Done. Byte-identical to old path on a 28k-line real SWC; chain verified; original untouched. |
 | 2 | ✅ | `swcstudio morphology set-radius` | 1076 | `SET_RADIUS` | no | Done. Byte-identical to bare feature on real SWC; node 1.radius: 2.5390625 → 9.9 round-trips; chain + verify clean. |
 | 3 | ⬜ | `swcstudio morphology dendrogram-edit` | 1051 | `DENDROGRAM_EDIT` | no | Subtree reassignment |
-| 4 | ⬜ | `swcstudio validation auto-fix` | 905 | `AUTO_FIX` | no | Multi-rule auto-fix pass |
+| 4 | ✅ | `swcstudio validation auto-fix` | 905 | `AUTO_FIX` | no | Done. 1.3 MB byte-identical output on real SWC; 27 issues, validation results still printed to stdout; report_summary embedded in commit params. |
 | 5 | ⬜ | `swcstudio validation auto-label` | 953 | `AUTO_LABEL` | **yes** | Set `is_ai=True` (auto-detected) |
 | 6 | ⬜ | `swcstudio validation radii-clean` | 852 | `RADII_CLEAN` | no | File or folder; file-mode here |
 | 7 | ✅ | `swcstudio validation index-clean` | 1004 | `INDEX_CLEAN` | no | Done. Byte-identical reordering verified on a deliberately disordered 5-node SWC; remapped_id_count=2, id_map_size=5 preserved. |

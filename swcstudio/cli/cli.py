@@ -903,51 +903,72 @@ def main(argv: list[str] | None = None) -> int:
             return 0
 
         if args.tool == "validation" and args.feature == "auto-fix":
-            old_df = parse_swc_text_preserve_tokens(Path(args.file).read_text(encoding="utf-8", errors="ignore"))
-            out = auto_fix_file(
-                str(args.file),
-                out_path=None,
-                write_output=True,
-                config_overrides=_parse_config_overrides(args.config_json),
+            # Converted to provenance layer (rewire checklist item 1.1 #4).
+            # Auto-fix carries extra metadata beyond the diff (which rules
+            # fired, what issues were found). We:
+            #   * print the validation results to stdout (user-visible),
+            #   * embed a summary of those results into the commit's params
+            #     so it's queryable later via 'history show',
+            #   * drop the separate validation_auto_fix_<ts>.txt sidecar
+            #     (per spec M9 — equivalent text available via
+            #     'history show <sha> --format=text' plus the validation
+            #     results we just printed).
+            from swcstudio.core.provenance import (
+                OpKind,
+                current_swc_path_for,
+                tracked_op,
             )
-            report = out.get("report", {})
-            if isinstance(report, dict):
-                _print_validation_results(report)
-                report_path = write_text_report(
-                    operation_report_path_for_file(args.file, "validation_auto_fix"),
-                    format_validation_report_text(report),
-                )
-                out["report_path"] = report_path
-                print("\nReport file: " + report_path + "\n")
-            try:
-                new_df = parse_swc_text_preserve_tokens(str(out.get("sanitized_text", "") or ""))
-                out["operation_log_path"] = _write_cli_operation_report(
-                    Path(args.file),
-                    operation_name="validation_auto_fix",
-                    title="Validation Auto Fix",
-                    summary="Validated and sanitized one SWC file.",
-                    details=[
-                        f"Input: {args.file}",
-                        f"Output: {out.get('output_path') or ''}",
-                        f"Result count: {len(list(out.get('rows', []) or []))}",
-                    ],
-                    old_df=old_df,
-                    new_df=new_df,
-                )
-            except Exception:
-                pass
-            # Avoid dumping full sanitized SWC content in terminal.
+            from swcstudio.tools.validation.features.auto_fix import auto_fix_text
+
+            src = Path(args.file)
+            if not src.exists():
+                raise FileNotFoundError(str(src))
+
+            # Run auto-fix once up front so we can include the result count
+            # in the op's params before opening the tracked_op block. The
+            # function is deterministic given the same input + config, so
+            # we'll re-run it inside the block on the same bytes for the
+            # actual mutation. (Cheap; auto-fix is in-memory only.)
+            cfg_overrides = _parse_config_overrides(args.config_json)
+            pre_text = src.read_text(encoding="utf-8", errors="ignore")
+            pre_run = auto_fix_text(pre_text, config_overrides=cfg_overrides)
+            pre_rows = list(pre_run.get("rows", []) or [])
+            pre_report = pre_run.get("report") if isinstance(pre_run.get("report"), dict) else {}
+            pre_summary = dict((pre_report or {}).get("summary", {}))
+
+            with tracked_op(
+                src,
+                kind=OpKind.AUTO_FIX,
+                params={
+                    "result_count":   len(pre_rows),
+                    "report_summary": pre_summary,
+                },
+                message=f"auto-fix ({len(pre_rows)} issue(s); {pre_summary})",
+            ) as op:
+                in_bytes = op.input_bytes if op.input_bytes is not None else src.read_bytes()
+                in_text = in_bytes.decode("utf-8", errors="ignore")
+                result = auto_fix_text(in_text, config_overrides=cfg_overrides)
+                op.set_output(result["sanitized_bytes"])
+
+            # Print validation results so users still see what was fixed,
+            # exactly like the old handler did.
+            if isinstance(result.get("report"), dict):
+                _print_validation_results(result["report"])
+
             out_print = {
-                "input_path": out.get("input_path"),
-                "output_path": out.get("output_path"),
-                "report_path": out.get("report_path"),
-                "operation_log_path": out.get("operation_log_path"),
-                "result_count": len(list(out.get("rows", []) or [])),
-                "sanitized_text_length": len(str(out.get("sanitized_text", "") or "")),
+                "input_path":            str(src),
+                "output_path":           str(current_swc_path_for(src)),
+                "report_path":           None,  # dropped — see 'history show' + stdout output above
+                "operation_log_path":    None,
+                "result_count":          len(list(result.get("rows", []) or [])),
+                "sanitized_text_length": len(str(result.get("sanitized_text", "") or "")),
+                "commit_sha":            op.result.commit_sha,
+                "branch":                op.result.branch,
+                "input_sha":             op.result.input_sha,
+                "output_sha":            op.result.output_sha,
+                "diff_ref":              op.result.diff_ref,
             }
             _print_json(out_print)
-            if out.get("operation_log_path"):
-                print(f"Operation report: {out.get('operation_log_path')}")
             return 0
 
         if args.tool == "validation" and args.feature == "auto-label":
