@@ -2216,6 +2216,7 @@ class SWCMainWindow(QMainWindow):
         self._rerun_active_validation()
 
     def _on_validation_radii_apply_requested(self, result: object):
+        # Converted to provenance layer (rewire checklist GUI item G3).
         doc = self._active_source_document()
         if doc is None or doc.df is None or doc.df.empty:
             self._append_log("Auto Radii Editing: no active SWC document.", "WARN")
@@ -2244,6 +2245,22 @@ class SWCMainWindow(QMainWindow):
                     "new_parameters": f"radius={float(row.get('new_radius', 0.0)):.10g}",
                 }
             )
+
+        # Provenance: the auto-radii pass that produced `result` ran on
+        # the current in-memory doc.df, so this commit records exactly
+        # that mutation as one RADII_CLEAN op.
+        from swcstudio.core.provenance import OpKind  # noqa: PLC0415
+        self._record_tracked_commit(
+            doc,
+            new_df_final,
+            kind=OpKind.RADII_CLEAN,
+            params={"passes": passes_used, "radius_changes": total_changes},
+            message=(
+                f"GUI auto radii: passes={passes_used}, "
+                f"radius_changes={total_changes}"
+            ),
+        )
+
         self._apply_document_dataframe(
             doc,
             new_df_final,
@@ -2302,6 +2319,7 @@ class SWCMainWindow(QMainWindow):
         self._rerun_active_validation()
 
     def _on_geometry_move_selection_requested(self, node_ids: object, anchor_id: int, x: float, y: float, z: float):
+        # Converted to provenance layer (rewire checklist GUI item G4).
         doc = self._active_source_document()
         if doc is None or doc.df is None or doc.df.empty:
             self._append_log("Geometry Editing: no active SWC document.", "WARN")
@@ -2316,6 +2334,14 @@ class SWCMainWindow(QMainWindow):
         except Exception as exc:  # noqa: BLE001
             self._append_log(f"Geometry Editing: {exc}", "WARN")
             return
+        from swcstudio.core.provenance import OpKind  # noqa: PLC0415
+        self._record_tracked_commit(
+            doc, new_df, kind=OpKind.GEOMETRY_EDIT,
+            params={"op": "move-selection", "anchor_id": int(anchor_id),
+                    "selected_node_ids": selected_node_ids,
+                    "x": float(x), "y": float(y), "z": float(z)},
+            message=f"GUI geometry move-selection anchor={anchor_id} ({len(selected_node_ids)} nodes)",
+        )
         self._apply_geometry_dataframe(
             doc,
             new_df,
@@ -2332,6 +2358,7 @@ class SWCMainWindow(QMainWindow):
         self._append_log(f"Geometry Editing: moved {len(selected_node_ids)} selected node(s).", "INFO")
 
     def _on_geometry_reconnect_requested(self, source_id: int, target_id: int):
+        # Converted to provenance layer (rewire checklist GUI item G5).
         doc = self._active_source_document()
         if doc is None or doc.df is None or doc.df.empty:
             self._append_log("Geometry Editing: no active SWC document.", "WARN")
@@ -2343,6 +2370,12 @@ class SWCMainWindow(QMainWindow):
         except Exception as exc:  # noqa: BLE001
             self._append_log(f"Geometry Editing: {exc}", "WARN")
             return
+        from swcstudio.core.provenance import OpKind  # noqa: PLC0415
+        self._record_tracked_commit(
+            doc, new_df, kind=OpKind.GEOMETRY_EDIT,
+            params={"op": "connect", "start_id": int(source_id), "end_id": int(target_id)},
+            message=f"GUI geometry reconnect end={target_id} → parent={source_id}",
+        )
         self._geometry_panel.clear_all_selections()
         self._geometry_panel.set_current_node(None)
         self._apply_geometry_dataframe(
@@ -2394,6 +2427,12 @@ class SWCMainWindow(QMainWindow):
         except Exception as exc:  # noqa: BLE001
             self._append_log(f"Geometry Editing: {exc}", "WARN")
             return
+        from swcstudio.core.provenance import OpKind  # noqa: PLC0415
+        self._record_tracked_commit(
+            doc, new_df, kind=OpKind.GEOMETRY_EDIT,
+            params={"op": "disconnect", "start_id": int(source_id), "end_id": int(target_id)},
+            message=f"GUI geometry disconnect path {source_id} … {target_id}",
+        )
         self._geometry_panel.clear_all_selections()
         self._geometry_panel.set_current_node(None)
         self._apply_geometry_dataframe(
@@ -2429,6 +2468,13 @@ class SWCMainWindow(QMainWindow):
         except Exception as exc:  # noqa: BLE001
             self._append_log(f"Geometry Editing: {exc}", "WARN")
             return
+        from swcstudio.core.provenance import OpKind  # noqa: PLC0415
+        self._record_tracked_commit(
+            doc, new_df, kind=OpKind.GEOMETRY_EDIT,
+            params={"op": "delete-node", "node_id": int(node_id),
+                    "reconnect_children": bool(reconnect_children)},
+            message=f"GUI geometry delete-node id={node_id} reconnect={bool(reconnect_children)}",
+        )
         self._geometry_panel.clear_all_selections()
         self._geometry_panel.set_current_node(None)
         event_title = "Delete Node" if not reconnect_children else "Delete Node + Reconnect Children"
@@ -2461,6 +2507,12 @@ class SWCMainWindow(QMainWindow):
         except Exception as exc:  # noqa: BLE001
             self._append_log(f"Geometry Editing: {exc}", "WARN")
             return
+        from swcstudio.core.provenance import OpKind  # noqa: PLC0415
+        self._record_tracked_commit(
+            doc, new_df, kind=OpKind.GEOMETRY_EDIT,
+            params={"op": "delete-subtree", "root_id": int(root_id)},
+            message=f"GUI geometry delete-subtree root={root_id}",
+        )
         self._geometry_panel.clear_all_selections()
         self._geometry_panel.set_current_node(None)
         self._apply_geometry_dataframe(
@@ -2491,6 +2543,14 @@ class SWCMainWindow(QMainWindow):
         except Exception as exc:  # noqa: BLE001
             self._append_log(f"Geometry Editing: {exc}", "WARN")
             return
+        from swcstudio.core.provenance import OpKind  # noqa: PLC0415
+        self._record_tracked_commit(
+            doc, new_df, kind=OpKind.GEOMETRY_EDIT,
+            params={"op": "insert", "start_id": int(start_id), "end_id": int(end_id),
+                    "x": float(x), "y": float(y), "z": float(z),
+                    "inserted_node_id": int(inserted_node_id)},
+            message=f"GUI geometry insert between {start_id} and {end_id}",
+        )
         self._geometry_panel.clear_all_selections()
         self._geometry_panel.set_current_node(None)
         self._apply_geometry_dataframe(
@@ -3344,6 +3404,7 @@ class SWCMainWindow(QMainWindow):
         self._on_issue_selected(issues[0])
 
     def _on_validation_index_clean_requested(self, new_df: object, id_map: object):
+        # Converted to provenance layer (rewire checklist GUI item G10).
         doc = self._active_source_document()
         if doc is None or doc.df is None or doc.df.empty:
             self._append_log("Validation: no active SWC document for Index Clean.", "WARN")
@@ -3362,6 +3423,14 @@ class SWCMainWindow(QMainWindow):
             original_node_count=original_node_count,
             new_node_count=new_node_count,
             remapped_id_count=remapped_id_count,
+        )
+        from swcstudio.core.provenance import OpKind  # noqa: PLC0415
+        self._record_tracked_commit(
+            doc, new_df, kind=OpKind.INDEX_CLEAN,
+            params={"original_node_count": original_node_count,
+                    "new_node_count": new_node_count,
+                    "remapped_id_count": remapped_id_count},
+            message=f"GUI validation index-clean ({remapped_id_count} ids remapped)",
         )
         self._apply_document_dataframe(
             doc,
@@ -4092,6 +4161,10 @@ class SWCMainWindow(QMainWindow):
         source_key = str(issue.get("source_key", "")).strip()
         payload = dict(issue.get("source_payload", {}) or {})
 
+        # Provenance: both branches below mutate doc.df. Each commits as
+        # one AUTO_FIX op carrying the issue_id + applied-node count.
+        from swcstudio.core.provenance import OpKind  # noqa: PLC0415
+
         if source_key == "radii_outlier_batch":
             changes = list(payload.get("changes", []) or [])
             if not changes:
@@ -4109,6 +4182,12 @@ class SWCMainWindow(QMainWindow):
                 applied.append(f"Node {node_id}: {old_radius:.5g} -> {new_radius:.5g}")
             if not applied:
                 return
+            self._record_tracked_commit(
+                doc, df, kind=OpKind.AUTO_FIX,
+                params={"issue_id": str(issue_id), "fix_kind": "radii_outlier_batch",
+                        "applied_count": len(applied)},
+                message=f"GUI apply suggested radii: issue={issue_id} ({len(applied)} nodes)",
+            )
             self._apply_document_dataframe(
                 doc,
                 df,
@@ -4137,6 +4216,12 @@ class SWCMainWindow(QMainWindow):
                 applied.append(f"Node {node_id}: {old_type} -> {new_type}")
             if not applied:
                 return
+            self._record_tracked_commit(
+                doc, df, kind=OpKind.AUTO_FIX,
+                params={"issue_id": str(issue_id), "fix_kind": "type_suspicion_batch",
+                        "applied_count": len(applied)},
+                message=f"GUI apply suggested labels: issue={issue_id} ({len(applied)} nodes)",
+            )
             self._apply_document_dataframe(
                 doc,
                 df,

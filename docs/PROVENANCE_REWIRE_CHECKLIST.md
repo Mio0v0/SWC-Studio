@@ -80,19 +80,19 @@ with the right op kind + params.
 
 | # | Status | Slot method | line | Triggered by | Op kind | AI? |
 |---|---|---|---|---|---|---|
-| G1 | ⬜ | `_on_validation_auto_label_process_requested` | 1894 | validation_auto_label_panel | `AUTO_LABEL` | **yes** |
-| G2 | ✅ | `_on_manual_radii_apply_requested` | 2125 | manual_radii_panel | `SET_RADIUS` | no | Done. Headless verified (commit lands, current.swc updated, params recorded, original untouched, preview/untitled docs skipped). **Requires user click-test in live GUI.** |
-| G3 | ⬜ | `_on_validation_radii_apply_requested` | 2159 | validation_tab radii fix | `RADII_CLEAN` | no |
-| G4 | ⬜ | `_on_geometry_move_selection_requested` | 2245 | geometry_editing_panel | `GEOMETRY_EDIT` | no |
-| G5 | ⬜ | `_on_geometry_reconnect_requested` | 2275 | geometry_editing_panel | `GEOMETRY_EDIT` | no |
-| G6 | ⬜ | `_on_geometry_disconnect_requested` | 2308 | geometry_editing_panel | `GEOMETRY_EDIT` | no |
-| G7 | ⬜ | `_on_geometry_delete_node_requested` | 2361 | geometry_editing_panel | `GEOMETRY_EDIT` | no |
-| G8 | ⬜ | `_on_geometry_delete_subtree_requested` | 2392 | geometry_editing_panel | `GEOMETRY_EDIT` | no |
-| G9 | ⬜ | `_on_geometry_insert_node_requested` | 2421 | geometry_editing_panel | `GEOMETRY_EDIT` | no |
-| G10 | ⬜ | `_on_validation_index_clean_requested` | 3287 | validation_tab index-clean | `INDEX_CLEAN` | no |
-| G11 | ⬜ | `_on_apply_suggested_fix_requested` | 4026 | issue_panel single-fix | `AUTO_FIX` | no |
-| G12 | ⬜ | `_on_save` | 2707 | File → Save (Ctrl+S) | **session close** | no |
-| G13 | ⬜ | `_on_save_as` | 2719 | File → Save As | **session close** | no |
+| G1 | 🟦 | `_on_validation_auto_label_process_requested` | 1894 | validation_auto_label_panel | `AUTO_LABEL` | **yes** | **Blocked** by same numpy pickle issue as CLI #5 / #17. Convert together when env fixed. |
+| G2 | ✅ | `_on_manual_radii_apply_requested` | 2125 | manual_radii_panel | `SET_RADIUS` | no | Done. Headless verified. **Requires user click-test in live GUI.** |
+| G3 | ✅ | `_on_validation_radii_apply_requested` | 2159 | validation_tab radii fix | `RADII_CLEAN` | no | Done. Records passes + radius_changes counts in params. |
+| G4 | ✅ | `_on_geometry_move_selection_requested` | 2245 | geometry_editing_panel | `GEOMETRY_EDIT` | no | Done. Records anchor_id, selected_node_ids, xyz. |
+| G5 | ✅ | `_on_geometry_reconnect_requested` | 2275 | geometry_editing_panel | `GEOMETRY_EDIT` | no | Done. Records start_id/end_id. |
+| G6 | ✅ | `_on_geometry_disconnect_requested` | 2308 | geometry_editing_panel | `GEOMETRY_EDIT` | no | Done. Records start_id/end_id. |
+| G7 | ✅ | `_on_geometry_delete_node_requested` | 2361 | geometry_editing_panel | `GEOMETRY_EDIT` | no | Done. Records node_id + reconnect_children flag. |
+| G8 | ✅ | `_on_geometry_delete_subtree_requested` | 2392 | geometry_editing_panel | `GEOMETRY_EDIT` | no | Done. Records root_id. |
+| G9 | ✅ | `_on_geometry_insert_node_requested` | 2421 | geometry_editing_panel | `GEOMETRY_EDIT` | no | Done. Records start_id/end_id, xyz, inserted_node_id. |
+| G10 | ✅ | `_on_validation_index_clean_requested` | 3287 | validation_tab index-clean | `INDEX_CLEAN` | no | Done. Records original/new node counts, remapped_id_count. |
+| G11 | ✅ | `_on_apply_suggested_fix_requested` | 4026 | issue_panel single-fix | `AUTO_FIX` | no | Done. Records issue_id, fix_kind, applied_count for both radii_outlier_batch and type_suspicion_batch flows. |
+| G12 | ⏭ | `_on_save` | 2707 | File → Save (Ctrl+S) | n/a in Stage-1 | no | **Skipped (Stage-1 design).** Each click already commits via _record_tracked_commit. Save just persists current.swc to user's chosen location; provenance covers the edit history independently. Revisit in Stage-2 if tracked_session model is adopted. |
+| G13 | ⏭ | `_on_save_as` | 2719 | File → Save As | n/a in Stage-1 | no | Same reason as G12. |
 
 ### 2.1 Panel-side direct mutation paths (also need attention)
 
