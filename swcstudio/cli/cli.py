@@ -1002,39 +1002,49 @@ def main(argv: list[str] | None = None) -> int:
             return 0
 
         if args.tool == "validation" and args.feature == "index-clean":
-            old_df = parse_swc_text_preserve_tokens(Path(args.file).read_text(encoding="utf-8", errors="ignore"))
-            out = validation_index_clean_file(
-                str(args.file),
-                out_path=None,
-                write_output=True,
-                write_report=False,
-                config_overrides=_parse_config_overrides(args.config_json),
+            # Converted to provenance layer (rewire checklist item 1.1 #7).
+            from swcstudio.core.provenance import (
+                OpKind,
+                current_swc_path_for,
+                tracked_op,
             )
-            out["operation_log_path"] = _write_cli_operation_report(
-                Path(args.file),
-                operation_name="validation_index_clean",
-                title="Validation Index Clean",
-                summary="Reordered and reindexed the SWC for clean parent-before-child indexing.",
-                details=validation_index_clean_detail_lines(
-                    input_path=str(args.file),
-                    output_path=str(out.get("output_path") or ""),
-                    original_node_count=int(out.get("original_node_count", 0)),
-                    new_node_count=int(out.get("new_node_count", 0)),
-                    remapped_id_count=int(out.get("remapped_id_count", 0)),
-                ),
-                old_df=old_df,
-                new_df=out.get("dataframe"),
-                id_map=dict(out.get("id_map", {}) or {}),
+            from swcstudio.tools.validation.features.index_clean import (
+                index_clean_text,
             )
-            out_print = {k: v for k, v in out.items() if k not in {"bytes", "dataframe", "id_map", "config_used"}}
-            if not out_print.get("log_path"):
-                out_print.pop("log_path", None)
-            out_print["id_map_size"] = len(dict(out.get("id_map", {})))
+
+            src = Path(args.file)
+            if not src.exists():
+                raise FileNotFoundError(str(src))
+
+            with tracked_op(
+                src,
+                kind=OpKind.INDEX_CLEAN,
+                params={},
+                message="index-clean (reorder + reindex)",
+            ) as op:
+                in_bytes = op.input_bytes if op.input_bytes is not None else src.read_bytes()
+                in_text = in_bytes.decode("utf-8", errors="ignore")
+                result = index_clean_text(
+                    in_text,
+                    config_overrides=_parse_config_overrides(args.config_json),
+                )
+                op.set_output(result["bytes"])
+
+            out_print = {
+                "original_node_count": int(result.get("original_node_count", 0)),
+                "new_node_count":      int(result.get("new_node_count", 0)),
+                "remapped_id_count":   int(result.get("remapped_id_count", 0)),
+                "id_map_size":         len(dict(result.get("id_map", {}))),
+                "input_path":          str(src),
+                "output_path":         str(current_swc_path_for(src)),
+                "operation_log_path":  None,
+                "commit_sha":          op.result.commit_sha,
+                "branch":              op.result.branch,
+                "input_sha":           op.result.input_sha,
+                "output_sha":          op.result.output_sha,
+                "diff_ref":            op.result.diff_ref,
+            }
             _print_json(out_print)
-            if out.get("log_path"):
-                print(f"\nReport file: {out.get('log_path')}")
-            if out.get("operation_log_path"):
-                print(f"Operation report: {out.get('operation_log_path')}")
             return 0
 
         # -------- visualization

@@ -28,7 +28,7 @@ your scripts depend on.
 | 4 | ⬜ | `swcstudio validation auto-fix` | 905 | `AUTO_FIX` | no | Multi-rule auto-fix pass |
 | 5 | ⬜ | `swcstudio validation auto-label` | 953 | `AUTO_LABEL` | **yes** | Set `is_ai=True` (auto-detected) |
 | 6 | ⬜ | `swcstudio validation radii-clean` | 852 | `RADII_CLEAN` | no | File or folder; file-mode here |
-| 7 | ⬜ | `swcstudio validation index-clean` | 1004 | `INDEX_CLEAN` | no | Reorder + reindex |
+| 7 | ✅ | `swcstudio validation index-clean` | 1004 | `INDEX_CLEAN` | no | Done. Byte-identical reordering verified on a deliberately disordered 5-node SWC; remapped_id_count=2, id_map_size=5 preserved. |
 | 8 | ⬜ | `swcstudio geometry simplify` | 1131 | `SIMPLIFICATION` | no | Geometry-aware simplify |
 | 9 | ⬜ | `swcstudio geometry move-node` | 1183 | `GEOMETRY_EDIT` | no | params: `{op: move-node, ...}` |
 | 10 | ⬜ | `swcstudio geometry move-subtree` | 1207 | `GEOMETRY_EDIT` | no | |
