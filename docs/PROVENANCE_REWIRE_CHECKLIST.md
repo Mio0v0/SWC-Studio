@@ -49,8 +49,8 @@ needed (each file's history covers it).
 |---|---|---|---|---|---|
 | 16 | ⬜ | `swcstudio batch split` | 764 | `SPLIT` (+ `derived_from` per child) | no |
 | 17 | ⬜ | `swcstudio batch auto-typing` | 774 | `AUTO_LABEL` | **yes** |
-| 18 | ⬜ | `swcstudio batch radii-clean` | 802 | `RADII_CLEAN` | no |
-| 19 | ⬜ | `swcstudio batch simplify` | 812 | `SIMPLIFICATION` | no |
+| 18 | ✅ | `swcstudio batch radii-clean` | 802 | `RADII_CLEAN` | no | Done. Folder mode uses _tracked_batch; file mode delegates to converted single-file path. multi-soma: 17 passes, 3,305 changes. |
+| 19 | ✅ | `swcstudio batch simplify` | 812 | `SIMPLIFICATION` | no | Done. multi-soma: 6,155 → 1,356 nodes (77.97% reduction); per-file commit on each input. |
 | 20 | ✅ | `swcstudio batch index-clean` | 822 | `INDEX_CLEAN` | no | Done. 4-file test (3 unique contents) succeeds; per-file .history/ created on each input; identical content produces identical commit SHA (content-addressing confirmed). |
 
 ### 1.3 Read-only — no conversion needed

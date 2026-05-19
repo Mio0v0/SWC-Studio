@@ -865,23 +865,92 @@ def main(argv: list[str] | None = None) -> int:
             return 0
 
         if args.tool == "batch" and args.feature == "radii-clean":
-            out = batch_clean_radii_path(
-                str(args.target),
-                config_overrides=_parse_config_overrides(args.config_json),
+            # Converted to provenance layer (rewire checklist item 1.2 #18).
+            # The 'target' arg can be a file or a folder. File mode delegates
+            # to the already-converted single-file path. Folder mode iterates
+            # via _tracked_batch.
+            target = Path(args.target)
+            cfg_overrides = _parse_config_overrides(args.config_json)
+            if target.is_file():
+                # Reuse the converted single-file 'validation radii-clean' path.
+                from swcstudio.core.provenance import OpKind, current_swc_path_for, tracked_op
+                from swcstudio.tools.batch_processing.features.radii_cleaning import clean_swc_text
+                with tracked_op(
+                    target, kind=OpKind.RADII_CLEAN,
+                    params={"config_overrides": cfg_overrides or None},
+                    message="batch radii-clean (single file mode)",
+                ) as op:
+                    in_bytes = op.input_bytes if op.input_bytes is not None else target.read_bytes()
+                    result = clean_swc_text(in_bytes.decode("utf-8", errors="ignore"),
+                                            config_overrides=cfg_overrides)
+                    op.set_output(result["bytes"])
+                _print_json({
+                    "mode": "file",
+                    "input_path": str(target),
+                    "output_path": str(current_swc_path_for(target)),
+                    "passes": int(result.get("passes", 0)),
+                    "radius_changes": int(result.get("changes", 0)),
+                    "change_count": int(len(result.get("change_details", []) or [])),
+                    "commit_sha": op.result.commit_sha,
+                    "branch": op.result.branch,
+                })
+                return 0
+            if not target.is_dir():
+                raise NotADirectoryError(str(target))
+
+            from swcstudio.core.provenance import OpKind
+            from swcstudio.tools.batch_processing.features.radii_cleaning import clean_swc_text
+
+            def _mutate(text: str):
+                return clean_swc_text(text, config_overrides=cfg_overrides)
+
+            def _summary(swc, result, op_result):
+                return (
+                    f"{swc.name}: passes={int(result.get('passes', 0))}, "
+                    f"radius_changes={int(result.get('changes', 0))}"
+                )
+
+            out = _tracked_batch(
+                target,
+                op_kind=OpKind.RADII_CLEAN,
+                mutate_text=_mutate,
+                params_for=lambda _: {"config_overrides": cfg_overrides or None},
+                message="batch radii-clean",
+                per_file_summary=_summary,
             )
-            _print_json(_summarize_batch_radii_output(out))
-            if out.get("log_path"):
-                print(f"\nReport file: {out.get('log_path')}")
+            out["mode"] = "folder"
+            _print_json(out)
             return 0
 
         if args.tool == "batch" and args.feature == "simplify":
-            out = batch_simplify_folder(
-                str(args.folder),
-                config_overrides=_parse_config_overrides(args.config_json),
+            # Converted to provenance layer (rewire checklist item 1.2 #19).
+            from swcstudio.core.provenance import OpKind
+            from swcstudio.tools.morphology_editing.features.simplification import simplify_swc_text
+
+            folder = Path(args.folder)
+            if not folder.is_dir():
+                raise NotADirectoryError(str(folder))
+            cfg_overrides = _parse_config_overrides(args.config_json)
+
+            def _mutate(text: str):
+                return simplify_swc_text(text, config_overrides=cfg_overrides)
+
+            def _summary(swc, result, op_result):
+                return (
+                    f"{swc.name}: {int(result.get('original_node_count', 0))} -> "
+                    f"{int(result.get('new_node_count', 0))} nodes "
+                    f"({float(result.get('reduction_percent', 0.0)):.2f}% reduction)"
+                )
+
+            out = _tracked_batch(
+                folder,
+                op_kind=OpKind.SIMPLIFICATION,
+                mutate_text=_mutate,
+                params_for=lambda _: {"config_overrides": cfg_overrides or None},
+                message="batch simplify",
+                per_file_summary=_summary,
             )
             _print_json(out)
-            if out.get("log_path"):
-                print(f"\nReport file: {out.get('log_path')}")
             return 0
 
         if args.tool == "batch" and args.feature == "index-clean":
