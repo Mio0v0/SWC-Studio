@@ -1091,28 +1091,55 @@ def main(argv: list[str] | None = None) -> int:
 
         # -------- morphology
         if args.tool == "morphology" and args.feature == "dendrogram-edit":
-            old_df = parse_swc_text_preserve_tokens(Path(args.file).read_text(encoding="utf-8", errors="ignore"))
-            out = reassign_subtree_types_in_file(
-                str(args.file),
-                node_id=int(args.node_id),
-                new_type=int(args.new_type),
-                out_path=None,
-                write_output=True,
-                config_overrides=_parse_config_overrides(args.config_json),
+            # Converted to provenance layer (rewire checklist item 1.1 #3).
+            from swcstudio.core.provenance import (
+                OpKind,
+                current_swc_path_for,
+                tracked_op,
             )
-            out["operation_log_path"] = _write_cli_operation_report(
-                Path(args.file),
-                operation_name="morphology_dendrogram_edit",
-                title="Manual Label Edit",
-                summary="Applied labeling edits in Morphology Editing.",
-                details=[],
-                    old_df=old_df,
-                    new_df=out.get("dataframe"),
+            from swcstudio.tools.morphology_editing.features.dendrogram_editing import (
+                reassign_subtree_types,
             )
-            out_print = _summarize_dendrogram_edit_output(out)
+
+            src = Path(args.file)
+            if not src.exists():
+                raise FileNotFoundError(str(src))
+
+            with tracked_op(
+                src,
+                kind=OpKind.DENDROGRAM_EDIT,
+                params={
+                    "node_id":  int(args.node_id),
+                    "new_type": int(args.new_type),
+                },
+                message=f"dendrogram-edit subtree at node={args.node_id} → type={args.new_type}",
+            ) as op:
+                in_bytes = op.input_bytes if op.input_bytes is not None else src.read_bytes()
+                in_text = in_bytes.decode("utf-8", errors="ignore")
+                result = reassign_subtree_types(
+                    in_text,
+                    node_id=int(args.node_id),
+                    new_type=int(args.new_type),
+                    config_overrides=_parse_config_overrides(args.config_json),
+                )
+                op.set_output(result["bytes"])
+
+            changed_ids = list(result.get("changed_node_ids", []) or [])
+            out_print = {
+                "changes":                int(result.get("changes", 0)),
+                "changed_node_count":     len(changed_ids),
+                "input_path":             str(src),
+                "output_path":            str(current_swc_path_for(src)),
+                "operation_log_path":     None,
+                "commit_sha":             op.result.commit_sha,
+                "branch":                 op.result.branch,
+                "input_sha":              op.result.input_sha,
+                "output_sha":             op.result.output_sha,
+                "diff_ref":               op.result.diff_ref,
+            }
+            if changed_ids:
+                out_print["changed_node_id_preview"] = changed_ids[:10]
             _print_json(out_print)
-            if out.get("operation_log_path"):
-                print(f"\nOperation report: {out.get('operation_log_path')}")
             return 0
 
         if args.tool == "morphology" and args.feature == "set-radius":
