@@ -30,13 +30,13 @@ your scripts depend on.
 | 6 | ✅ | `swcstudio validation radii-clean` | 852 | `RADII_CLEAN` | no | Done (file mode only). Byte-identical 1.6 MB output on real SWC; 16 passes, 8,039 radius changes. Folder/batch mode still falls through to old path (item 1.2 #18). |
 | 7 | ✅ | `swcstudio validation index-clean` | 1004 | `INDEX_CLEAN` | no | Done. Byte-identical reordering verified on a deliberately disordered 5-node SWC; remapped_id_count=2, id_map_size=5 preserved. |
 | 8 | ✅ | `swcstudio geometry simplify` | 1131 | `SIMPLIFICATION` | no | Done. Byte-identical on real SWC; 28,075 → 9,164 nodes (67.36% reduction); params_used preserved. |
-| 9 | ⬜ | `swcstudio geometry move-node` | 1183 | `GEOMETRY_EDIT` | no | params: `{op: move-node, ...}` |
-| 10 | ⬜ | `swcstudio geometry move-subtree` | 1207 | `GEOMETRY_EDIT` | no | |
-| 11 | ⬜ | `swcstudio geometry connect` | 1231 | `GEOMETRY_EDIT` | no | |
-| 12 | ⬜ | `swcstudio geometry disconnect` | 1265 | `GEOMETRY_EDIT` | no | |
-| 13 | ⬜ | `swcstudio geometry delete-node` | 1319 | `GEOMETRY_EDIT` | no | |
-| 14 | ⬜ | `swcstudio geometry delete-subtree` | 1353 | `GEOMETRY_EDIT` | no | |
-| 15 | ⬜ | `swcstudio geometry insert` | 1383 | `GEOMETRY_EDIT` | no | |
+| 9 | ✅ | `swcstudio geometry move-node` | 1183 | `GEOMETRY_EDIT` | no | Done. Byte-identical; params {op:'move-node', node_id, x, y, z}. |
+| 10 | ✅ | `swcstudio geometry move-subtree` | 1207 | `GEOMETRY_EDIT` | no | Done. Byte-identical; params {op:'move-subtree', root_id, x, y, z}. |
+| 11 | ✅ | `swcstudio geometry connect` | 1231 | `GEOMETRY_EDIT` | no | Done. Byte-identical; params {op:'connect', start_id, end_id}. |
+| 12 | ✅ | `swcstudio geometry disconnect` | 1265 | `GEOMETRY_EDIT` | no | Done. Byte-identical; path-existence sanity check preserved. |
+| 13 | ✅ | `swcstudio geometry delete-node` | 1319 | `GEOMETRY_EDIT` | no | Done. Byte-identical; reconnect_children flag recorded in params. |
+| 14 | ✅ | `swcstudio geometry delete-subtree` | 1353 | `GEOMETRY_EDIT` | no | Done. Byte-identical; params {op:'delete-subtree', root_id}. |
+| 15 | ✅ | `swcstudio geometry insert` | 1383 | `GEOMETRY_EDIT` | no | Done. Byte-identical; params capture x/y/z and optional radius/type_id. |
 
 ### 1.2 Batch mutating — bulk variants
 

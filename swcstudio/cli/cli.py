@@ -1301,260 +1301,192 @@ def main(argv: list[str] | None = None) -> int:
             file_path = Path(args.file)
             if not file_path.exists():
                 raise FileNotFoundError(str(file_path))
-            text = file_path.read_text(encoding="utf-8", errors="ignore")
-            df = parse_swc_text_preserve_tokens(text)
+            # NOTE: each geometry sub-handler below uses tracked_op to read
+            # op.input_bytes (latest committed state) rather than re-reading
+            # the source file. The old pre-parse of `df` is unnecessary now.
 
             if args.feature == "move-node":
-                out_df = geometry_move_node_absolute(df, int(args.node_id), float(args.x), float(args.y), float(args.z))
-                output_path = _write_geometry_output(
+                # Converted to provenance layer (rewire checklist item 1.1 #9).
+                from swcstudio.core.provenance import OpKind, current_swc_path_for, tracked_op
+                with tracked_op(
                     file_path,
-                    out_df,
-                    operation_name="geometry_move_node",
-                )
-                operation_log_path = _write_cli_operation_report(
-                    file_path,
-                    operation_name="geometry_move_node",
-                    title="Move Node",
-                    summary=f"Moved node {int(args.node_id)} to absolute coordinates.",
-                    details=[
-                        f"Node ID: {int(args.node_id)}",
-                        f"New XYZ: ({float(args.x):.5g}, {float(args.y):.5g}, {float(args.z):.5g})",
-                        f"Output: {output_path or '(not written)'}",
-                    ],
-                    old_df=df,
-                    new_df=out_df,
-                    output_dir=Path(output_path).parent,
-                )
-                _print_json({"operation": "move-node", "node_id": int(args.node_id), "output_path": output_path, "operation_log_path": operation_log_path})
+                    kind=OpKind.GEOMETRY_EDIT,
+                    params={"op": "move-node", "node_id": int(args.node_id),
+                            "x": float(args.x), "y": float(args.y), "z": float(args.z)},
+                    message=f"geometry move-node id={args.node_id} → ({args.x},{args.y},{args.z})",
+                ) as op:
+                    in_bytes = op.input_bytes if op.input_bytes is not None else file_path.read_bytes()
+                    in_df = parse_swc_text_preserve_tokens(in_bytes.decode("utf-8", errors="ignore"))
+                    out_df = geometry_move_node_absolute(
+                        in_df, int(args.node_id),
+                        float(args.x), float(args.y), float(args.z),
+                    )
+                    op.set_output(write_swc_to_bytes_preserve_tokens(out_df))
+                _print_json({
+                    "operation":          "move-node",
+                    "node_id":            int(args.node_id),
+                    "output_path":        str(current_swc_path_for(file_path)),
+                    "operation_log_path": None,
+                    "commit_sha":         op.result.commit_sha,
+                    "branch":             op.result.branch,
+                    "input_sha":          op.result.input_sha,
+                    "output_sha":         op.result.output_sha,
+                    "diff_ref":           op.result.diff_ref,
+                })
                 return 0
 
             if args.feature == "move-subtree":
-                out_df = geometry_move_subtree_absolute(df, int(args.root_id), float(args.x), float(args.y), float(args.z))
-                output_path = _write_geometry_output(
+                from swcstudio.core.provenance import OpKind, current_swc_path_for, tracked_op
+                with tracked_op(
                     file_path,
-                    out_df,
-                    operation_name="geometry_move_subtree",
-                )
-                operation_log_path = _write_cli_operation_report(
-                    file_path,
-                    operation_name="geometry_move_subtree",
-                    title="Move Subtree",
-                    summary=f"Moved subtree rooted at node {int(args.root_id)} to absolute coordinates.",
-                    details=[
-                        f"Root node ID: {int(args.root_id)}",
-                        f"New XYZ: ({float(args.x):.5g}, {float(args.y):.5g}, {float(args.z):.5g})",
-                        f"Output: {output_path or '(not written)'}",
-                    ],
-                    old_df=df,
-                    new_df=out_df,
-                    output_dir=Path(output_path).parent,
-                )
-                _print_json({"operation": "move-subtree", "root_id": int(args.root_id), "output_path": output_path, "operation_log_path": operation_log_path})
+                    kind=OpKind.GEOMETRY_EDIT,
+                    params={"op": "move-subtree", "root_id": int(args.root_id),
+                            "x": float(args.x), "y": float(args.y), "z": float(args.z)},
+                    message=f"geometry move-subtree root={args.root_id} → ({args.x},{args.y},{args.z})",
+                ) as op:
+                    in_bytes = op.input_bytes if op.input_bytes is not None else file_path.read_bytes()
+                    in_df = parse_swc_text_preserve_tokens(in_bytes.decode("utf-8", errors="ignore"))
+                    out_df = geometry_move_subtree_absolute(
+                        in_df, int(args.root_id),
+                        float(args.x), float(args.y), float(args.z),
+                    )
+                    op.set_output(write_swc_to_bytes_preserve_tokens(out_df))
+                _print_json({
+                    "operation": "move-subtree", "root_id": int(args.root_id),
+                    "output_path": str(current_swc_path_for(file_path)),
+                    "operation_log_path": None,
+                    "commit_sha": op.result.commit_sha, "branch": op.result.branch,
+                    "input_sha": op.result.input_sha, "output_sha": op.result.output_sha,
+                    "diff_ref": op.result.diff_ref,
+                })
                 return 0
 
             if args.feature == "connect":
-                end_row = df.loc[df["id"].astype(int) == int(args.end_id)].iloc[0]
-                old_parent = int(end_row["parent"])
-                out_df = geometry_reconnect_branch(df, int(args.start_id), int(args.end_id))
-                output_path = _write_geometry_output(
+                from swcstudio.core.provenance import OpKind, current_swc_path_for, tracked_op
+                with tracked_op(
                     file_path,
-                    out_df,
-                    operation_name="geometry_connect",
-                )
-                operation_log_path = _write_cli_operation_report(
-                    file_path,
-                    operation_name="geometry_connect",
-                    title="Reconnect Branch",
-                    summary=f"Connected end node {int(args.end_id)} to start node {int(args.start_id)}.",
-                    details=[
-                        f"Start node ID: {int(args.start_id)}",
-                        f"End node ID: {int(args.end_id)}",
-                        f"End node old parent ID: {old_parent}",
-                        f"End node new parent ID: {int(args.start_id)}",
-                        "Node IDs preserved; no automatic renumbering.",
-                    ],
-                    old_df=df,
-                    new_df=out_df,
-                    output_dir=Path(output_path).parent,
-                )
+                    kind=OpKind.GEOMETRY_EDIT,
+                    params={"op": "connect", "start_id": int(args.start_id), "end_id": int(args.end_id)},
+                    message=f"geometry connect end={args.end_id} → parent={args.start_id}",
+                ) as op:
+                    in_bytes = op.input_bytes if op.input_bytes is not None else file_path.read_bytes()
+                    in_df = parse_swc_text_preserve_tokens(in_bytes.decode("utf-8", errors="ignore"))
+                    out_df = geometry_reconnect_branch(in_df, int(args.start_id), int(args.end_id))
+                    op.set_output(write_swc_to_bytes_preserve_tokens(out_df))
                 _print_json({
                     "operation": "connect",
-                    "start_id": int(args.start_id),
-                    "end_id": int(args.end_id),
-                    "output_path": output_path,
-                    "operation_log_path": operation_log_path,
+                    "start_id": int(args.start_id), "end_id": int(args.end_id),
+                    "output_path": str(current_swc_path_for(file_path)),
+                    "operation_log_path": None,
+                    "commit_sha": op.result.commit_sha, "branch": op.result.branch,
+                    "input_sha": op.result.input_sha, "output_sha": op.result.output_sha,
+                    "diff_ref": op.result.diff_ref,
                 })
                 return 0
 
             if args.feature == "disconnect":
-                parent_by_id = {
-                    int(row["id"]): int(row["parent"])
-                    for _, row in df[["id", "parent"]].iterrows()
-                }
-                path = path_between_nodes(df, int(args.start_id), int(args.end_id))
-                if len(path) < 2:
-                    raise ValueError("Start and end nodes are not connected.")
-                disconnected_children: list[int] = []
-                old_edges: list[str] = []
-                for left, right in zip(path[:-1], path[1:]):
-                    left = int(left)
-                    right = int(right)
-                    if int(parent_by_id.get(left, -1)) == right:
-                        disconnected_children.append(left)
-                        old_edges.append(f"{right} -> {left}")
-                    elif int(parent_by_id.get(right, -1)) == left:
-                        disconnected_children.append(right)
-                        old_edges.append(f"{left} -> {right}")
-                    else:
-                        raise ValueError("Encountered a non-parent-child step while disconnecting the selected path.")
-                out_df = geometry_disconnect_branch(df, int(args.start_id), int(args.end_id))
-                output_path = _write_geometry_output(
+                from swcstudio.core.provenance import OpKind, current_swc_path_for, tracked_op
+                with tracked_op(
                     file_path,
-                    out_df,
-                    operation_name="geometry_disconnect",
-                )
-                operation_log_path = _write_cli_operation_report(
-                    file_path,
-                    operation_name="geometry_disconnect",
-                    title="Disconnect Branch",
-                    summary=f"Disconnected the path between {int(args.start_id)} and {int(args.end_id)}.",
-                    details=[
-                        f"Start node ID: {int(args.start_id)}",
-                        f"End node ID: {int(args.end_id)}",
-                        f"Path nodes: {', '.join(str(v) for v in path)}",
-                        f"Disconnected child node IDs: {', '.join(str(v) for v in disconnected_children)}",
-                        f"Disconnected edges: {', '.join(old_edges)}",
-                        "New parent IDs on disconnected child nodes: -1",
-                        "Node IDs preserved; no automatic renumbering.",
-                    ],
-                    old_df=df,
-                    new_df=out_df,
-                    output_dir=Path(output_path).parent,
-                )
+                    kind=OpKind.GEOMETRY_EDIT,
+                    params={"op": "disconnect", "start_id": int(args.start_id), "end_id": int(args.end_id)},
+                    message=f"geometry disconnect path {args.start_id} … {args.end_id}",
+                ) as op:
+                    in_bytes = op.input_bytes if op.input_bytes is not None else file_path.read_bytes()
+                    in_df = parse_swc_text_preserve_tokens(in_bytes.decode("utf-8", errors="ignore"))
+                    # Sanity check the path exists (raises if not connected)
+                    path = path_between_nodes(in_df, int(args.start_id), int(args.end_id))
+                    if len(path) < 2:
+                        raise ValueError("Start and end nodes are not connected.")
+                    out_df = geometry_disconnect_branch(in_df, int(args.start_id), int(args.end_id))
+                    op.set_output(write_swc_to_bytes_preserve_tokens(out_df))
                 _print_json({
                     "operation": "disconnect",
-                    "start_id": int(args.start_id),
-                    "end_id": int(args.end_id),
-                    "output_path": output_path,
-                    "operation_log_path": operation_log_path,
+                    "start_id": int(args.start_id), "end_id": int(args.end_id),
+                    "output_path": str(current_swc_path_for(file_path)),
+                    "operation_log_path": None,
+                    "commit_sha": op.result.commit_sha, "branch": op.result.branch,
+                    "input_sha": op.result.input_sha, "output_sha": op.result.output_sha,
+                    "diff_ref": op.result.diff_ref,
                 })
                 return 0
 
             if args.feature == "delete-node":
-                row = df.loc[df["id"].astype(int) == int(args.node_id)].iloc[0]
-                child_count = int((df["parent"].astype(int) == int(args.node_id)).sum())
-                out_df = geometry_delete_node(df, int(args.node_id), reconnect_children=bool(args.reconnect_children))
-                output_path = _write_geometry_output(
+                from swcstudio.core.provenance import OpKind, current_swc_path_for, tracked_op
+                with tracked_op(
                     file_path,
-                    out_df,
-                    operation_name="geometry_delete_node",
-                )
-                operation_log_path = _write_cli_operation_report(
-                    file_path,
-                    operation_name="geometry_delete_node",
-                    title="Delete Node" if not bool(args.reconnect_children) else "Delete Node + Reconnect Children",
-                    summary=f"Deleted node {int(args.node_id)}.",
-                    details=[
-                        f"Node ID: {int(args.node_id)}",
-                        f"Type: {label_for_type(int(row['type']))} ({int(row['type'])})",
-                        f"Child count: {child_count}",
-                        f"Reconnect children: {'yes' if bool(args.reconnect_children) else 'no'}",
-                        "Remaining node IDs preserved; no automatic renumbering.",
-                    ],
-                    old_df=df,
-                    new_df=out_df,
-                    output_dir=Path(output_path).parent,
-                )
+                    kind=OpKind.GEOMETRY_EDIT,
+                    params={"op": "delete-node", "node_id": int(args.node_id),
+                            "reconnect_children": bool(args.reconnect_children)},
+                    message=f"geometry delete-node id={args.node_id} reconnect={bool(args.reconnect_children)}",
+                ) as op:
+                    in_bytes = op.input_bytes if op.input_bytes is not None else file_path.read_bytes()
+                    in_df = parse_swc_text_preserve_tokens(in_bytes.decode("utf-8", errors="ignore"))
+                    out_df = geometry_delete_node(in_df, int(args.node_id),
+                                                  reconnect_children=bool(args.reconnect_children))
+                    op.set_output(write_swc_to_bytes_preserve_tokens(out_df))
                 _print_json({
                     "operation": "delete-node",
                     "node_id": int(args.node_id),
                     "reconnect_children": bool(args.reconnect_children),
-                    "output_path": output_path,
-                    "operation_log_path": operation_log_path,
+                    "output_path": str(current_swc_path_for(file_path)),
+                    "operation_log_path": None,
+                    "commit_sha": op.result.commit_sha, "branch": op.result.branch,
+                    "input_sha": op.result.input_sha, "output_sha": op.result.output_sha,
+                    "diff_ref": op.result.diff_ref,
                 })
                 return 0
 
             if args.feature == "delete-subtree":
-                subtree_size = int(len(subtree_node_ids(df, int(args.root_id))))
-                out_df = geometry_delete_subtree(df, int(args.root_id))
-                output_path = _write_geometry_output(
+                from swcstudio.core.provenance import OpKind, current_swc_path_for, tracked_op
+                with tracked_op(
                     file_path,
-                    out_df,
-                    operation_name="geometry_delete_subtree",
-                )
-                operation_log_path = _write_cli_operation_report(
-                    file_path,
-                    operation_name="geometry_delete_subtree",
-                    title="Delete Subtree",
-                    summary=f"Deleted subtree rooted at node {int(args.root_id)}.",
-                    details=[
-                        f"Subtree root ID: {int(args.root_id)}",
-                        f"Removed node count: {subtree_size}",
-                        "Remaining node IDs preserved; no automatic renumbering.",
-                    ],
-                    old_df=df,
-                    new_df=out_df,
-                    output_dir=Path(output_path).parent,
-                )
+                    kind=OpKind.GEOMETRY_EDIT,
+                    params={"op": "delete-subtree", "root_id": int(args.root_id)},
+                    message=f"geometry delete-subtree root={args.root_id}",
+                ) as op:
+                    in_bytes = op.input_bytes if op.input_bytes is not None else file_path.read_bytes()
+                    in_df = parse_swc_text_preserve_tokens(in_bytes.decode("utf-8", errors="ignore"))
+                    out_df = geometry_delete_subtree(in_df, int(args.root_id))
+                    op.set_output(write_swc_to_bytes_preserve_tokens(out_df))
                 _print_json({
                     "operation": "delete-subtree",
                     "root_id": int(args.root_id),
-                    "output_path": output_path,
-                    "operation_log_path": operation_log_path,
+                    "output_path": str(current_swc_path_for(file_path)),
+                    "operation_log_path": None,
+                    "commit_sha": op.result.commit_sha, "branch": op.result.branch,
+                    "input_sha": op.result.input_sha, "output_sha": op.result.output_sha,
+                    "diff_ref": op.result.diff_ref,
                 })
                 return 0
 
             if args.feature == "insert":
-                end_row = None
-                if int(args.end_id) >= 0:
-                    end_row = df.loc[df["id"].astype(int) == int(args.end_id)].iloc[0]
-                inserted_node_id = int(df["id"].astype(int).max()) + 1
-                out_df = geometry_insert_node_between(
-                    df,
-                    int(args.start_id),
-                    int(args.end_id),
-                    x=float(args.x),
-                    y=float(args.y),
-                    z=float(args.z),
-                    radius=args.radius,
-                    type_id=args.type_id,
-                )
-                output_path = _write_geometry_output(
+                from swcstudio.core.provenance import OpKind, current_swc_path_for, tracked_op
+                with tracked_op(
                     file_path,
-                    out_df,
-                    operation_name="geometry_insert",
-                )
-                operation_log_path = _write_cli_operation_report(
-                    file_path,
-                    operation_name="geometry_insert",
-                    title="Insert Node",
-                    summary=(
-                        f"Inserted a node between {int(args.start_id)} and {int(args.end_id)}."
-                        if int(args.end_id) >= 0
-                        else f"Inserted a child node under {int(args.start_id)}."
-                    ),
-                    details=[
-                        f"Start node ID: {int(args.start_id)}",
-                        f"End node ID: {int(args.end_id)}" if int(args.end_id) >= 0 else "End node ID: None",
-                        f"Inserted node ID: {inserted_node_id}",
-                        (
-                            f"End node type: {label_for_type(int(end_row['type']))} ({int(end_row['type'])})"
-                            if end_row is not None
-                            else "Inserted node has no child; end node was not provided."
-                        ),
-                        f"Inserted XYZ: ({float(args.x):.5g}, {float(args.y):.5g}, {float(args.z):.5g})",
-                        "Existing node IDs preserved; inserted node uses max(existing ID)+1.",
-                    ],
-                    old_df=df,
-                    new_df=out_df,
-                    output_dir=Path(output_path).parent,
-                )
+                    kind=OpKind.GEOMETRY_EDIT,
+                    params={"op": "insert", "start_id": int(args.start_id), "end_id": int(args.end_id),
+                            "x": float(args.x), "y": float(args.y), "z": float(args.z),
+                            "radius": args.radius, "type_id": args.type_id},
+                    message=f"geometry insert between {args.start_id} and {args.end_id}",
+                ) as op:
+                    in_bytes = op.input_bytes if op.input_bytes is not None else file_path.read_bytes()
+                    in_df = parse_swc_text_preserve_tokens(in_bytes.decode("utf-8", errors="ignore"))
+                    out_df = geometry_insert_node_between(
+                        in_df,
+                        int(args.start_id), int(args.end_id),
+                        x=float(args.x), y=float(args.y), z=float(args.z),
+                        radius=args.radius, type_id=args.type_id,
+                    )
+                    op.set_output(write_swc_to_bytes_preserve_tokens(out_df))
                 _print_json({
                     "operation": "insert",
-                    "start_id": int(args.start_id),
-                    "end_id": int(args.end_id),
-                    "output_path": output_path,
-                    "operation_log_path": operation_log_path,
+                    "start_id": int(args.start_id), "end_id": int(args.end_id),
+                    "output_path": str(current_swc_path_for(file_path)),
+                    "operation_log_path": None,
+                    "commit_sha": op.result.commit_sha, "branch": op.result.branch,
+                    "input_sha": op.result.input_sha, "output_sha": op.result.output_sha,
+                    "diff_ref": op.result.diff_ref,
                 })
                 return 0
 
