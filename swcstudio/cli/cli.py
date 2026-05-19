@@ -850,44 +850,57 @@ def main(argv: list[str] | None = None) -> int:
             return 0
 
         if args.tool == "validation" and args.feature == "radii-clean":
+            # Converted to provenance layer (rewire checklist item 1.1 #6)
+            # for FILE mode. Folder/batch mode (checklist item 1.2 #18) is
+            # untouched here — it falls through to validation_clean_radii_path
+            # below.
+            target = Path(args.target)
+            if target.exists() and target.is_file():
+                from swcstudio.core.provenance import (
+                    OpKind,
+                    current_swc_path_for,
+                    tracked_op,
+                )
+                from swcstudio.tools.batch_processing.features.radii_cleaning import (
+                    clean_swc_text,
+                )
+
+                cfg_overrides = _parse_config_overrides(args.config_json)
+
+                with tracked_op(
+                    target,
+                    kind=OpKind.RADII_CLEAN,
+                    params={"config_overrides": cfg_overrides or None},
+                    message="radii-clean (auto)",
+                ) as op:
+                    in_bytes = op.input_bytes if op.input_bytes is not None else target.read_bytes()
+                    in_text = in_bytes.decode("utf-8", errors="ignore")
+                    result = clean_swc_text(in_text, config_overrides=cfg_overrides)
+                    op.set_output(result["bytes"])
+
+                out_print = {
+                    "mode":               "file",
+                    "input_path":         str(target),
+                    "output_path":        str(current_swc_path_for(target)),
+                    "operation_log_path": None,
+                    "passes":             int(result.get("passes", 0)),
+                    "radius_changes":     int(result.get("changes", 0)),
+                    "change_count":       int(len(result.get("change_details", []) or [])),
+                    "commit_sha":         op.result.commit_sha,
+                    "branch":             op.result.branch,
+                    "input_sha":          op.result.input_sha,
+                    "output_sha":         op.result.output_sha,
+                    "diff_ref":           op.result.diff_ref,
+                }
+                _print_json(out_print)
+                return 0
+
+            # Folder / batch mode — untouched until checklist item 1.2 #18.
             out = validation_clean_radii_path(
                 str(args.target),
                 write_file_report=False,
                 config_overrides=_parse_config_overrides(args.config_json),
             )
-            if Path(args.target).is_file() and str(out.get("mode", "")) == "file":
-                target_path = Path(args.target)
-                old_df = parse_swc_text_preserve_tokens(target_path.read_text(encoding="utf-8", errors="ignore"))
-                new_df = out.get("dataframe")
-                change_rows = []
-                for row in list(out.get("change_details", []) or []):
-                    node_id = int(row.get("node_id", -1))
-                    if node_id < 0:
-                        continue
-                    change_rows.append(
-                        {
-                            "node_id": str(node_id),
-                            "changed_keys": ["radius"],
-                            "old_values": {"radius": f"{float(row.get('old_radius', 0.0)):.10g}"},
-                            "new_values": {"radius": f"{float(row.get('new_radius', 0.0)):.10g}"},
-                            "old_parameters": f"radius={float(row.get('old_radius', 0.0)):.10g}",
-                            "new_parameters": f"radius={float(row.get('new_radius', 0.0)):.10g}",
-                        }
-                    )
-                out["operation_log_path"] = _write_cli_operation_report(
-                    target_path,
-                    operation_name="radii_cleaning",
-                    title="Auto Radii Editing",
-                    summary=(
-                        "Applied automatic radii cleaning to current SWC; "
-                        f"passes={int(out.get('passes', 0))}; "
-                        f"radius_changes={int(out.get('radius_changes', 0))}."
-                    ),
-                    details=[],
-                    old_df=old_df,
-                    new_df=new_df,
-                    change_rows=change_rows,
-                )
             out_print = {
                 k: v
                 for k, v in out.items()
@@ -898,8 +911,6 @@ def main(argv: list[str] | None = None) -> int:
             _print_json(out_print)
             if out.get("log_path"):
                 print(f"\nReport file: {out.get('log_path')}")
-            if out.get("operation_log_path"):
-                print(f"Operation report: {out.get('operation_log_path')}")
             return 0
 
         if args.tool == "validation" and args.feature == "auto-fix":

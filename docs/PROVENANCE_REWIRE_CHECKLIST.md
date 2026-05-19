@@ -26,8 +26,8 @@ your scripts depend on.
 | 2 | ✅ | `swcstudio morphology set-radius` | 1076 | `SET_RADIUS` | no | Done. Byte-identical to bare feature on real SWC; node 1.radius: 2.5390625 → 9.9 round-trips; chain + verify clean. |
 | 3 | ⬜ | `swcstudio morphology dendrogram-edit` | 1051 | `DENDROGRAM_EDIT` | no | Subtree reassignment |
 | 4 | ✅ | `swcstudio validation auto-fix` | 905 | `AUTO_FIX` | no | Done. 1.3 MB byte-identical output on real SWC; 27 issues, validation results still printed to stdout; report_summary embedded in commit params. |
-| 5 | ⬜ | `swcstudio validation auto-label` | 953 | `AUTO_LABEL` | **yes** | Set `is_ai=True` (auto-detected) |
-| 6 | ⬜ | `swcstudio validation radii-clean` | 852 | `RADII_CLEAN` | no | File or folder; file-mode here |
+| 5 | 🟦 | `swcstudio validation auto-label` | 953 | `AUTO_LABEL` | **yes** | **Blocked**: pickle/numpy incompat in dev env (`MT19937 not a known BitGenerator`). Original handler also fails here — not a conversion regression. Resume on machine with working sklearn 1.5 + matching numpy. |
+| 6 | ✅ | `swcstudio validation radii-clean` | 852 | `RADII_CLEAN` | no | Done (file mode only). Byte-identical 1.6 MB output on real SWC; 16 passes, 8,039 radius changes. Folder/batch mode still falls through to old path (item 1.2 #18). |
 | 7 | ✅ | `swcstudio validation index-clean` | 1004 | `INDEX_CLEAN` | no | Done. Byte-identical reordering verified on a deliberately disordered 5-node SWC; remapped_id_count=2, id_map_size=5 preserved. |
 | 8 | ⬜ | `swcstudio geometry simplify` | 1131 | `SIMPLIFICATION` | no | Geometry-aware simplify |
 | 9 | ⬜ | `swcstudio geometry move-node` | 1183 | `GEOMETRY_EDIT` | no | params: `{op: move-node, ...}` |
