@@ -135,22 +135,55 @@ Mutation handlers in main_window not in my original inventory:
 
 ---
 
-## 3. Final deletion commit (after 1.1 + 1.2 + 2 are done)
+## 3. Final deletion commit — DEFERRED
 
-| Status | Action |
-|---|---|
-| ⬜ | `git rm swcstudio/core/reporting.py` |
-| ⬜ | Remove every `from swcstudio.core.reporting import ...` line across the tree |
-| ⬜ | Update `docs/LOGS_AND_REPORTS.md` to point at `provenance.render` |
+After completing 34 conversions, an honest audit reveals the M9
+"drop the reporting module entirely" plan is not feasible today.
+Specifically:
 
-Files currently importing `swcstudio.core.reporting` (all 14 must be cleaned before deletion):
+* The text-formatter family (`format_*_report_text`, 7 functions) is
+  still used by:
+  - Feature modules' `*_file` / `*_folder` entry points that write
+    a text report as part of their contract (used by deferred GUI
+    batch paths + external Python API callers).
+  - `swcstudio.gui.validation_tab` (its own report generation).
+  - `swcstudio.core.auto_typing.runner` (batch runner).
+  - `_record_session_operation` in main_window (the deferred
+    in-memory session log mechanism).
+* `write_text_report` and `write_operation_report_for_file` are
+  similarly entwined with feature-module file/folder entry points.
+* The path helpers (`operation_output_path_for_file`,
+  `timestamp_slug`, `resolve_requested_output_path_for_file`, etc.)
+  are legitimate infrastructure that the new design also benefits
+  from. These should be **preserved**, not deleted.
 
-- `swcstudio/cli/cli.py`
-- `swcstudio/gui/main_window.py`
-- `swcstudio/gui/validation_tab.py`
-- `swcstudio/tools/batch_processing/features/{radii_cleaning,index_clean,simplification,batch_validation,swc_splitter}.py`
-- `swcstudio/tools/morphology_editing/features/{manual_radii,manual_label,dendrogram_editing,simplification}.py`
-- `swcstudio/tools/validation/features/{auto_fix,auto_typing,index_clean}.py`
+To enable a full deletion of the text-formatter family, the
+following deferred items must first be addressed:
+
+1. **Stage-2 session model** — convert `_on_save` / `_on_save_as`
+   and `_record_session_operation` to use `tracked_session` instead
+   of in-memory session logs.
+2. **Feature module file/folder cleanup** — change the contract of
+   `clean_file`, `clean_folder`, `simplify_file`, etc. so they no
+   longer write text reports by default. External Python API
+   callers will need to opt in.
+3. **GUI folder-batch paths** (G15 in radii_cleaning_panel) — route
+   through `_tracked_batch` instead of the legacy `clean_path`.
+4. **validation_tab.py text-report writers** — replace with
+   `swcstudio.core.provenance.render` calls.
+5. **auto_typing/runner.py** — same conversion as the CLI batch
+   handler (deferred behind the same env-block as #5 / #17 / G1).
+
+**Current state:** `swcstudio.core.reporting` remains in place. The
+new converted code paths do not depend on it; the deferred /
+env-blocked paths still do. The 12 truly-unused private helpers in
+`reporting.py` are inert dead weight but kept for now since their
+removal yields no behavioral improvement.
+
+**Recommendation:** revisit Section 3 after the env-blocked items
+(CLI #5, #17, GUI G1) and the Stage-2 session model are addressed.
+At that point a proper deletion (or surgical removal of just the
+text-formatter family) becomes safe.
 
 ---
 
