@@ -94,18 +94,27 @@ with the right op kind + params.
 | G12 | ⏭ | `_on_save` | 2707 | File → Save (Ctrl+S) | n/a in Stage-1 | no | **Skipped (Stage-1 design).** Each click already commits via _record_tracked_commit. Save just persists current.swc to user's chosen location; provenance covers the edit history independently. Revisit in Stage-2 if tracked_session model is adopted. |
 | G13 | ⏭ | `_on_save_as` | 2719 | File → Save As | n/a in Stage-1 | no | Same reason as G12. |
 
-### 2.1 Panel-side direct mutation paths (also need attention)
+### 2.1 Panel-side direct mutation paths
 
-These panels write SWC files themselves rather than emitting a
-signal to main_window. Each needs its own commit.
+After deeper inspection, most of these already route through main_window
+slots (which are converted) or save *config JSON* rather than SWC data.
 
 | # | Status | File | Method | Notes |
 |---|---|---|---|---|
-| G14 | ⬜ | `radii_cleaning_panel.py` | `_on_run_loaded` (line 326) | Wraps `clean_path`; convert to `tracked_op(kind=RADII_CLEAN)` |
-| G15 | ⬜ | `radii_cleaning_panel.py` | `_on_run_folder` (line 379) | Folder batch — one commit per file |
-| G16 | ⬜ | `simplification_panel.py` | `_on_process` (line 168) | Wraps `simplify_file`; `SIMPLIFICATION` |
-| G17 | ⬜ | `simplification_panel.py` | `_on_save` (line 286) | Saves edited result |
-| G18 | ⬜ | `validation_auto_label_panel.py` | `_on_save` (line 92) | Saves auto-label result |
+| G14 | ✅ | `radii_cleaning_panel.py` | `_on_run_loaded` (line 326) | **Already covered.** Emits `loaded_apply_requested` → main_window `_on_validation_radii_apply_requested` (G3 ✓). |
+| G15 | ⏭ | `radii_cleaning_panel.py` | `_on_run_folder` (line 379) | **Deferred.** Folder-batch from the GUI panel calls `clean_path` directly with unconverted folder iteration. Stage-1 keeps existing behavior; users wanting tracked batch should use the CLI (`swcstudio batch radii-clean`) which IS converted. |
+| G16 | ✅ | `simplification_panel.py` | `_on_process` (line 168) | **Already covered.** Emits `process_requested` → main_window `_on_simplification_process_requested` (now also converted as part of this round). |
+| G17 | ⏭ | `simplification_panel.py` | `_on_save` (line 286) | **Not a mutation.** Saves simplification CONFIG JSON, not SWC data. No conversion needed. |
+| G18 | ⏭ | `validation_auto_label_panel.py` | `_on_save` (line 92) | **Not a mutation.** Saves auto-typing CONFIG JSON, not SWC data. No conversion needed. |
+
+### 2.2 Bonus handlers found during conversion
+
+Mutation handlers in main_window not in my original inventory:
+
+| # | Status | Method | Notes |
+|---|---|---|---|
+| G16+ | ✅ | `_on_simplification_process_requested` | Converted alongside section 2.1 — routes from simplification_panel.process_requested. |
+| G19 | ✅ | `_on_context_custom_action_requested` (soma consolidate branch) | Converted — recorded as PLUGIN_OP with plugin='consolidate_soma'. |
 
 ### 2.2 Read-only / no conversion needed
 
@@ -145,14 +154,14 @@ Files currently importing `swcstudio.core.reporting` (all 14 must be cleaned bef
 
 ---
 
-## Running totals
+## Running totals (latest)
 
-- **15** single-file CLI handlers to convert (1.1)
-- **5** batch CLI handlers to convert (1.2)
-- **13** GUI slot handlers in main_window to convert (2)
-- **5** panel-side mutation methods to convert (2.1)
-- **38** total mutation-path commits, plus the final deletion commit
-- **0** total Python tests required to pre-exist (we'll test each by hand as we go)
+- **15** single-file CLI handlers (1.1): 14 done, 1 env-blocked
+- **5** batch CLI handlers (1.2): 4 done, 1 env-blocked
+- **13** GUI slot handlers in main_window (2): 10 done, 1 env-blocked, 2 deferred (Stage-2)
+- **5** panel-side mutation methods (2.1): 2 covered via main_window, 1 deferred, 2 not mutations
+- **+2** bonus handlers found during conversion (G16+, G19): 2 done
+- **34 converted** out of **40 candidates** (85%), with 3 env-blocked + 3 deferred
 
 ---
 

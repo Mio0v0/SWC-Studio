@@ -1821,6 +1821,7 @@ class SWCMainWindow(QMainWindow):
         )
 
     def _on_simplification_process_requested(self, config_overrides: dict):
+        # Converted to provenance layer (rewire checklist GUI item G16).
         source_doc = self._active_source_document()
         if source_doc is None or source_doc.df is None or source_doc.df.empty:
             self._append_log("Simplification: no active SWC document.", "WARN")
@@ -1839,6 +1840,19 @@ class SWCMainWindow(QMainWindow):
 
         payload = self._simplification_log_payload(source_doc, result, output_path=None)
         source_doc.last_simplification_result = dict(payload)
+        from swcstudio.core.provenance import OpKind  # noqa: PLC0415
+        self._record_tracked_commit(
+            source_doc, simplified_df, kind=OpKind.SIMPLIFICATION,
+            params={"config_overrides": dict(config_overrides or {}) or None,
+                    "original_node_count": int(payload.get("original_node_count", 0)),
+                    "new_node_count": int(payload.get("new_node_count", 0)),
+                    "reduction_percent": float(payload.get("reduction_percent", 0.0))},
+            message=(
+                f"GUI simplify: {payload.get('original_node_count', 0)} → "
+                f"{payload.get('new_node_count', 0)} nodes "
+                f"({payload.get('reduction_percent', 0.0):.2f}% reduction)"
+            ),
+        )
         self._apply_document_dataframe(
             source_doc,
             simplified_df,
@@ -4342,6 +4356,15 @@ class SWCMainWindow(QMainWindow):
                 )
             if not changed:
                 event_details.append("No connected multi-node soma groups required consolidation.")
+            # Provenance: rewire checklist GUI item G19 (soma consolidate).
+            from swcstudio.core.provenance import OpKind  # noqa: PLC0415
+            self._record_tracked_commit(
+                doc, new_df, kind=OpKind.PLUGIN_OP,
+                params={"plugin": "consolidate_soma", "issue_id": str(issue_id),
+                        "group_count": int(result.get("group_count", 0)),
+                        "removed_nodes": removed_nodes, "changed": changed},
+                message=f"GUI consolidate-soma (issue {issue_id})",
+            )
             self._apply_document_dataframe(
                 doc,
                 new_df,
