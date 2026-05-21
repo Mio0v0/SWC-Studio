@@ -2991,6 +2991,11 @@ class SWCMainWindow(QMainWindow):
 
     # --------------------------------------------------- Sync from editor
     def _on_editor_df_changed(self, editor: EditorTab, df: pd.DataFrame):
+        # Converted to provenance layer (rewire checklist bonus item G20).
+        # This fires for any direct in-table edit — labeling a node by
+        # changing its type cell, editing a radius cell, dragging a node
+        # in the 3D view, etc. The structured diff inside the commit
+        # accurately captures whatever fields changed.
         doc = self._documents.get(editor)
         if doc is None:
             return
@@ -3000,6 +3005,15 @@ class SWCMainWindow(QMainWindow):
         doc.validation_report = None
         doc.issues = []
         if not doc.is_preview:
+            # Provenance: every direct editor change is one commit. We
+            # mark the source so a future filter can pick out "edits
+            # made directly in the table" vs panel-driven mutations.
+            from swcstudio.core.provenance import OpKind  # noqa: PLC0415
+            self._record_tracked_commit(
+                doc, doc.df, kind=OpKind.PLUGIN_OP,
+                params={"source": "editor_table", "title": "Manual Label Edit"},
+                message="GUI editor: direct in-table edit",
+            )
             self._record_session_operation(
                 doc,
                 title="Manual Label Edit",
