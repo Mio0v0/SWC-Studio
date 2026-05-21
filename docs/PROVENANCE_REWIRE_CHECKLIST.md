@@ -80,7 +80,7 @@ with the right op kind + params.
 
 | # | Status | Slot method | line | Triggered by | Op kind | AI? |
 |---|---|---|---|---|---|---|
-| G1 | 🟦 | `_on_validation_auto_label_process_requested` | 1894 | validation_auto_label_panel | `AUTO_LABEL` | **yes** | **Blocked** by same numpy pickle issue as CLI #5 / #17. Convert together when env fixed. |
+| G1 | ✅ | `_on_validation_auto_label_process_requested` → `_apply_validation_auto_label_result` | 2046 / 2173 | validation_auto_label_panel | `AUTO_LABEL` | **yes** | Done. Wired through `_record_tracked_commit` with `OpKind.AUTO_LABEL` (auto-detects AI → env fingerprint + AI-run blob recorded). Env-block was a false positive — testing env had numpy 2.x, user's `.venv` has compatible numpy 1.x and AI ops run fine there. **Requires user click-test in live GUI to verify.** |
 | G2 | ✅ | `_on_manual_radii_apply_requested` | 2125 | manual_radii_panel | `SET_RADIUS` | no | Done. Headless verified. **Requires user click-test in live GUI.** |
 | G3 | ✅ | `_on_validation_radii_apply_requested` | 2159 | validation_tab radii fix | `RADII_CLEAN` | no | Done. Records passes + radius_changes counts in params. |
 | G4 | ✅ | `_on_geometry_move_selection_requested` | 2245 | geometry_editing_panel | `GEOMETRY_EDIT` | no | Done. Records anchor_id, selected_node_ids, xyz. |

@@ -2217,6 +2217,27 @@ class SWCMainWindow(QMainWindow):
                 f"{out_counts.get(1, 0)}/{out_counts.get(2, 0)}/{out_counts.get(3, 0)}/{out_counts.get(4, 0)}"
             ),
         ]
+        # Provenance: this is an AI op. tracked_op auto-detects
+        # OpKind.AUTO_LABEL as AI, captures the full env fingerprint
+        # (every installed package + system info), records an
+        # AI-run blob with model params + metrics. After this lands,
+        # `swcstudio history reproduce <sha>` produces a reproduce.yaml.
+        from swcstudio.core.provenance import OpKind  # noqa: PLC0415
+        self._record_tracked_commit(
+            source_doc,
+            preview_df,
+            kind=OpKind.AUTO_LABEL,
+            params={
+                "options":         opts_dict,
+                "nodes_total":     int(result_payload.get("nodes_total", 0)),
+                "type_changes":    int(result_payload.get("type_changes", 0)),
+                "out_type_counts": {str(k): int(v) for k, v in out_counts.items()},
+            },
+            message=(
+                f"GUI auto-label: {int(result_payload.get('type_changes', 0))} "
+                f"type changes / {int(result_payload.get('nodes_total', 0))} nodes"
+            ),
+        )
         self._apply_document_dataframe(
             source_doc,
             preview_df.copy(),
