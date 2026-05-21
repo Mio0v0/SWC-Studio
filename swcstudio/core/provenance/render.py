@@ -271,7 +271,7 @@ def _render_op(i: int, op: dict[str, Any]) -> list[str]:
     if params:
         out.append("      params:")
         for k, v in sorted(params.items()):
-            out.append(f"        {k}: {v}")
+            out.append(f"        {k}: {_format_param_value(v)}")
     summary = op.get("summary") or {}
     if summary:
         # one-line
@@ -280,6 +280,45 @@ def _render_op(i: int, op: dict[str, Any]) -> list[str]:
     if op.get("ai_run_ref"):
         out.append(f"      ai_run_ref: {op['ai_run_ref']}")
     return out
+
+
+# Param values larger than this threshold are summarized in the inline
+# display (single line: shape + sha) instead of dumped in full. The
+# full content is still on disk in the commit's JSONL line — users can
+# read it raw via `swcstudio history show <sha> --format=json` or by
+# opening events.jsonl directly. This keeps the human-readable detail
+# view scannable when configs are sprawling (radii_cleaning's
+# DEFAULT_CONFIG, for example, is ~1.5 KB of nested dicts).
+_PARAM_INLINE_LIMIT = 240  # chars; tuned so most simple configs fit
+
+
+def _format_param_value(v: Any) -> str:
+    """Render a single param value, summarizing huge ones."""
+    rendered = str(v) if not isinstance(v, (dict, list)) else _short_repr_of_collection(v)
+    if len(rendered) <= _PARAM_INLINE_LIMIT:
+        return rendered
+    # Too big to inline. Compute a compact descriptor + content sha.
+    import json as _json
+    import hashlib as _hashlib
+    try:
+        blob = _json.dumps(v, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+    except Exception:
+        return rendered[:_PARAM_INLINE_LIMIT - 4] + " …"
+    sha = _hashlib.sha256(blob).hexdigest()[:12]
+    if isinstance(v, dict):
+        return f"<dict, {len(v)} keys, {len(blob)} bytes, sha256:{sha}> (use --format=json for full content)"
+    if isinstance(v, list):
+        return f"<list, {len(v)} items, {len(blob)} bytes, sha256:{sha}> (use --format=json for full content)"
+    return f"<{type(v).__name__}, {len(blob)} bytes, sha256:{sha}> (use --format=json for full content)"
+
+
+def _short_repr_of_collection(v: Any) -> str:
+    """str(v) but more compact for nested structures."""
+    import json as _json
+    try:
+        return _json.dumps(v, sort_keys=True, ensure_ascii=False, separators=(", ", ": "))
+    except Exception:
+        return str(v)
 
 
 def _ops_one_line(conn: sqlite3.Connection, commit_sha: str) -> str:

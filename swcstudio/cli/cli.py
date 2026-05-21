@@ -1172,10 +1172,7 @@ def main(argv: list[str] | None = None) -> int:
                 with tracked_op(
                     target,
                     kind=OpKind.RADII_CLEAN,
-                    params={
-                        "effective_config": _radii_effective,
-                        "config_overrides": cfg_overrides or None,
-                    },
+                    params=_config_params(cfg_overrides, _radii_effective),
                     message="radii-clean (auto)",
                 ) as op:
                     in_bytes = op.input_bytes if op.input_bytes is not None else target.read_bytes()
