@@ -30,7 +30,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Optional
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt, Signal, Slot
 from PySide6.QtWidgets import (
     QComboBox,
     QDialog,
@@ -73,6 +73,7 @@ class HistoryPanel(QWidget):
     """Self-contained provenance browser for a single SWC file."""
 
     commit_selected = Signal(str)  # emits commit_sha when user clicks a row
+    reverted_to_state = Signal(str, bytes)  # (target_sha, new_swc_bytes) — emitted after Revert
 
     def __init__(self, swc_path: str | Path, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
@@ -150,6 +151,32 @@ class HistoryPanel(QWidget):
         rlayout.addWidget(self._detail, 1)
 
         row_buttons = QHBoxLayout()
+        # Primary action: revert to the selected commit. Creates a new
+        # commit on the current branch whose content equals the selected
+        # past commit, then emits reverted_to_state so the main window
+        # can reload the document.
+        self._revert_btn = QPushButton("Revert to this commit…")
+        self._revert_btn.setToolTip(
+            "Materialize the selected commit's state, record a new commit "
+            "on the active branch capturing the revert, and reload the "
+            "open document. Nothing is lost — the intervening commits "
+            "stay in history."
+        )
+        self._revert_btn.clicked.connect(self._on_revert_clicked)
+        self._revert_btn.setEnabled(False)
+        row_buttons.addWidget(self._revert_btn)
+
+        # Read-only alternative: write the past state to a chosen file
+        # path WITHOUT touching the open document or history.
+        self._checkout_btn = QPushButton("Checkout to file…")
+        self._checkout_btn.setToolTip(
+            "Materialize the selected commit's state to a separate .swc "
+            "file. Does NOT change history or the active document."
+        )
+        self._checkout_btn.clicked.connect(self._on_checkout_clicked)
+        self._checkout_btn.setEnabled(False)
+        row_buttons.addWidget(self._checkout_btn)
+
         self._checkpoint_btn = QPushButton("Mark as checkpoint…")
         self._checkpoint_btn.clicked.connect(self._on_checkpoint_clicked)
         self._checkpoint_btn.setEnabled(False)
@@ -230,6 +257,8 @@ class HistoryPanel(QWidget):
         self._detail.clear()
         self._checkpoint_btn.setEnabled(False)
         self._tag_btn.setEnabled(False)
+        self._revert_btn.setEnabled(False)
+        self._checkout_btn.setEnabled(False)
 
     # ------------------------------------------------------------------
     # signal handlers
@@ -249,6 +278,8 @@ class HistoryPanel(QWidget):
         self._detail.setPlainText(text)
         self._checkpoint_btn.setEnabled(True)
         self._tag_btn.setEnabled(True)
+        self._revert_btn.setEnabled(True)
+        self._checkout_btn.setEnabled(True)
         self.commit_selected.emit(sha)
 
     def _on_switch_clicked(self) -> None:
@@ -290,6 +321,96 @@ class HistoryPanel(QWidget):
             f"Created branch {name.strip()!r} at {sha[:19]}.",
         )
         self.refresh()
+
+    def _on_revert_clicked(self) -> None:
+        """Revert to the selected commit's state.
+
+        Creates a NEW commit on the active branch whose content equals
+        the selected past commit, then emits ``reverted_to_state`` so
+        the host main window can reload the open document.
+
+        Nothing is destroyed: the intervening commits stay in
+        ``events.jsonl`` and are still reachable. The new commit just
+        sits at the active branch's tip with the past state.
+        """
+        sha = self._current_selection_sha()
+        if not sha:
+            return
+        # Confirm — this changes the active branch.
+        reply = QMessageBox.question(
+            self,
+            "Revert to this commit?",
+            (
+                f"Revert the open document to commit {sha[:19]}…?\n\n"
+                "A NEW commit will be added on the active branch "
+                "capturing this revert. Intervening commits are kept "
+                "in history and can be reached again later.\n\n"
+                "Any unsaved in-memory edits in the GUI will be lost."
+            ),
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if reply != QMessageBox.Yes:
+            return
+
+        try:
+            from swcstudio.cli.history_cli import _materialize_state_at  # noqa: PLC0415
+            from swcstudio.core.provenance import OpKind, tracked_op  # noqa: PLC0415
+
+            # Reconstruct the past state's bytes.
+            past_bytes = _materialize_state_at(self._hist, sha)
+
+            # Record a new commit on the active branch capturing the revert.
+            with tracked_op(
+                self._swc_path,
+                kind=OpKind.PLUGIN_OP,
+                params={"action": "revert", "target_sha": sha},
+                message=f"revert to {sha.removeprefix('sha256:')[:12]}",
+            ) as op:
+                op.set_output(past_bytes)
+        except Exception as e:
+            QMessageBox.warning(self, "Revert", f"Could not revert: {e}")
+            return
+
+        # Notify the host so it can reload the open document.
+        self.reverted_to_state.emit(sha, past_bytes)
+        QMessageBox.information(
+            self,
+            "Reverted",
+            f"Reverted to commit {sha[:19]}…\n\n"
+            f"A new commit was added on the active branch.\n"
+            f"The open document has been reloaded.",
+        )
+        self.refresh()
+
+    def _on_checkout_clicked(self) -> None:
+        """Materialize the selected commit's state to a chosen file.
+
+        Pure read-only operation: does NOT touch history, refs, the
+        active document, or current.swc.
+        """
+        sha = self._current_selection_sha()
+        if not sha:
+            return
+        short = sha.removeprefix("sha256:")[:12]
+        default = str(self._swc_path.parent / f"{self._swc_path.stem}_{short}.swc")
+        from PySide6.QtWidgets import QFileDialog  # noqa: PLC0415
+        path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Checkout commit to file",
+            default,
+            "SWC Files (*.swc);;All Files (*)",
+        )
+        if not path:
+            return
+        try:
+            from swcstudio.cli.history_cli import _materialize_state_at  # noqa: PLC0415
+            body = _materialize_state_at(self._hist, sha)
+            Path(path).write_bytes(body)
+        except Exception as e:
+            QMessageBox.warning(self, "Checkout", f"Could not check out: {e}")
+            return
+        QMessageBox.information(self, "Checkout", f"Wrote {path}")
 
     def _on_checkpoint_clicked(self) -> None:
         sha = self._current_selection_sha()
@@ -354,10 +475,25 @@ def open_history_dialog(parent: Optional[QWidget], swc_path: str | Path) -> None
 
     The main window can add a single ``View → History…`` action
     that calls this. No other GUI wiring is required.
+
+    If ``parent`` has a public method ``reload_swc_from_disk(path)``,
+    the panel's Revert action wires through it so the GUI's open
+    document refreshes after a revert. Without such a method, the
+    revert still lands in .history/ + current.swc; the user just has
+    to close and reopen the file to see the reverted state.
     """
     dlg = QDialog(parent)
     dlg.setWindowTitle(f"History — {Path(swc_path).name}")
     dlg.resize(1100, 600)
     layout = QVBoxLayout(dlg)
-    layout.addWidget(HistoryPanel(swc_path, parent=dlg))
+    panel = HistoryPanel(swc_path, parent=dlg)
+    layout.addWidget(panel)
+
+    # Wire revert to a host reload method if available.
+    reload_method = getattr(parent, "reload_swc_from_disk", None) if parent else None
+    if callable(reload_method):
+        # _target_sha, _body: the bytes are already on disk via current.swc;
+        # reload from disk so the GUI picks up the new state + @PROV header.
+        panel.reverted_to_state.connect(lambda _sha, _body: reload_method(str(swc_path)))
+
     dlg.exec()

@@ -2784,6 +2784,75 @@ class SWCMainWindow(QMainWindow):
         self._append_log(f"Render mode set to {self._render_combo.currentText()}.", "INFO")
 
     # --------------------------------------------------------- File loading
+    def reload_swc_from_disk(self, path: str) -> None:
+        """Reload an open document's in-memory dataframe from its
+        on-disk current.swc (or fall back to ``path`` if no
+        current.swc exists yet).
+
+        Called by the history panel after a Revert action so the GUI
+        immediately reflects the reverted state without requiring the
+        user to close and reopen the file.
+
+        Idempotent and safe — if no open document matches ``path``
+        the call is a no-op.
+        """
+        try:
+            from swcstudio.core.provenance import current_swc_path_for  # noqa: PLC0415
+        except Exception:
+            current_swc_path_for = None  # type: ignore[assignment]
+
+        target = Path(path).resolve()
+        match_doc = None
+        for ed, doc in self._documents.items():
+            if doc.is_preview:
+                continue
+            try:
+                if Path(doc.file_path).resolve() == target:
+                    match_doc = doc
+                    break
+            except Exception:
+                continue
+        if match_doc is None:
+            return
+
+        # Prefer current.swc (latest state) if it exists; otherwise
+        # fall back to the source file.
+        src_path = Path(path)
+        if current_swc_path_for is not None:
+            cur = current_swc_path_for(src_path)
+            if cur.exists():
+                src_path = cur
+
+        try:
+            new_text = src_path.read_text(encoding="utf-8", errors="ignore")
+            new_df = parse_swc_text_preserve_tokens(new_text)
+            if new_df.empty:
+                return
+            for col in ("id", "type", "parent"):
+                new_df[col] = new_df[col].astype(int)
+            new_df = new_df.loc[:, SWC_COLS].copy()
+        except Exception as e:
+            self._append_log(f"Reload failed: {e}", "WARN")
+            return
+
+        # Reset in-memory document state to the reloaded df. Push a
+        # history snapshot so the user can still Undo if they didn't
+        # mean to revert; clear the recovery copy so we don't leak a
+        # stale unsaved-changes marker.
+        match_doc.df = new_df
+        match_doc.validation_report = None
+        match_doc.issues = []
+        match_doc.history_snapshots = [new_df.copy()]
+        match_doc.history_index = 0
+        match_doc.editor.load_swc(match_doc.df, match_doc.filename)
+        self._clear_recovery_copy(match_doc)
+        if match_doc is self._active_document():
+            self._sync_from_active_document(auto_run_validation=True)
+        self._append_log(
+            f"Reloaded {match_doc.filename} from {src_path.name}.",
+            "INFO",
+        )
+
     def _on_open(self):
         path, _ = QFileDialog.getOpenFileName(
             self, "Open SWC file", "", "SWC Files (*.swc);;All Files (*)"
