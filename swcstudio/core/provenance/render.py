@@ -119,8 +119,13 @@ def render_commit_text(
     Sections rendered (in order, omitted if empty):
       - Header (sha, parent, branch, ts, actor, tool, message)
       - Ops (kind, params, summary counts, ai_run_ref if any)
-      - Diff details (node-level + topology, from the diff blob)
-      - AI runs (params, metrics, env_hash, artifacts)
+      - AI runs (params, metrics, env_hash, artifacts) — placed
+        BEFORE Changes so the AI metadata is visible without
+        scrolling past thousands of node-level diff lines.
+      - Derived from (cross-file lineage)
+      - Changes (node-level + topology, from the diff blob).
+        Capped to a reasonable number of entries with a tail count
+        so the panel stays scannable for huge diffs.
     """
     hist = Path(history_dir)
     event = _find_event_by_sha(hist, commit_sha)
@@ -136,17 +141,9 @@ def render_commit_text(
         for i, op in enumerate(event.ops):
             out.extend(_render_op(i, op))
 
-    # Diff detail (from blob).
-    if event.diff_ref:
-        out.append("")
-        out.append("Changes:")
-        diff = _read_blob_json(hist, event.diff_ref)
-        if diff is None:
-            out.append("  (diff blob unavailable)")
-        else:
-            out.extend("  " + line for line in render_diff_text(diff).splitlines())
-
-    # AI run detail.
+    # AI run detail (moved above Changes — the diff section for AI
+    # ops is typically huge, and AI metadata is the high-signal
+    # part the reader most wants to see).
     ai_refs = [op.get("ai_run_ref") for op in event.ops if op.get("ai_run_ref")]
     if ai_refs:
         out.append("")
@@ -158,6 +155,18 @@ def render_commit_text(
                 continue
             out.append(f"  ref={_short(ref)}")
             out.extend("    " + line for line in render_ai_run_text(blob).splitlines())
+            # Also expand the env fingerprint that the AI-run blob
+            # references — packages/system info, deduplicated across
+            # runs but still useful to surface inline once.
+            env_hash = blob.get("env_hash")
+            if env_hash:
+                env_blob = _read_blob_json(hist, env_hash)
+                if env_blob is not None:
+                    out.append(f"    env: ref={_short(env_hash)}")
+                    out.extend(
+                        "      " + line
+                        for line in render_env_text(env_blob).splitlines()
+                    )
 
     if event.derived_from:
         out.append("")
@@ -168,11 +177,63 @@ def render_commit_text(
         if df.get("path"):
             out.append(f"  source file:   {df['path']}")
 
+    # Diff detail last, capped to keep the panel readable for huge diffs.
+    if event.diff_ref:
+        out.append("")
+        out.append("Changes:")
+        diff = _read_blob_json(hist, event.diff_ref)
+        if diff is None:
+            out.append("  (diff blob unavailable)")
+        else:
+            out.extend("  " + line for line in render_diff_text(diff).splitlines())
+
+    return "\n".join(out) + "\n"
+
+
+# Cap the number of per-row changes displayed inline. With AI ops
+# the diff can have thousands of entries; printing them all swamps
+# the panel. The full content is still in the diff blob — accessible
+# via `swcstudio history show <sha> --format=json` or by decompressing
+# objects/<diff_ref>.zst directly.
+_DIFF_INLINE_LIMIT = 25
+
+
+def render_env_text(env_blob: dict[str, Any]) -> str:
+    """Pretty-print one decoded env-fingerprint blob.
+
+    Shows the system block in full and a compact summary of the
+    packages block (count + a handful of high-signal entries:
+    numpy, scipy, sklearn, torch, swcstudio). The full per-package
+    list is in the blob — reachable via --format=json.
+    """
+    out: list[str] = []
+    system = env_blob.get("system") or {}
+    if system:
+        out.append("system:")
+        for k in ("os", "os_version", "python_version", "machine",
+                  "cpu_count", "cuda_version", "gpu"):
+            if k in system:
+                out.append(f"  {k}: {system[k]}")
+    pkgs = env_blob.get("packages") or {}
+    if pkgs:
+        out.append(f"packages: ({len(pkgs)} total)")
+        # Highlight the ones that matter most for reproducibility.
+        for name in ("numpy", "scipy", "scikit-learn", "torch",
+                     "torch-geometric", "morphio", "neurom", "swcstudio"):
+            if name in pkgs:
+                out.append(f"  {name}: {pkgs[name]}")
+        out.append(f"  …and {len(pkgs) - 8} other packages (use --format=json for full list)")
     return "\n".join(out) + "\n"
 
 
 def render_diff_text(diff_blob: dict[str, Any]) -> str:
-    """Pretty-print one decoded diff blob."""
+    """Pretty-print one decoded diff blob.
+
+    Caps the per-row listing to ``_DIFF_INLINE_LIMIT`` entries so the
+    detail panel stays readable for AI ops that touch thousands of
+    nodes. The trimmed entries are still in the blob and the SQLite
+    ``node_changes`` table for `swcstudio history` queries.
+    """
     out: list[str] = []
     nodes = list(diff_blob.get("node_changes", []))
     topo = list(diff_blob.get("topology_changes", []))
@@ -181,8 +242,9 @@ def render_diff_text(diff_blob: dict[str, Any]) -> str:
         return "(no changes)\n"
 
     if topo:
-        out.append("Topology:")
-        for c in topo:
+        out.append(f"Topology: ({len(topo)} change(s))")
+        shown_topo = topo[:_DIFF_INLINE_LIMIT]
+        for c in shown_topo:
             kind = c.get("kind")
             nid = c.get("id")
             if kind == "add":
@@ -191,15 +253,23 @@ def render_diff_text(diff_blob: dict[str, Any]) -> str:
                 out.append(f"  - node {nid}")
             elif kind == "reparent":
                 out.append(f"  ~ node {nid}: parent {c.get('before')} -> {c.get('after')}")
+        if len(topo) > _DIFF_INLINE_LIMIT:
+            out.append(f"  …and {len(topo) - _DIFF_INLINE_LIMIT} more topology change(s)")
 
     if nodes:
         if topo:
             out.append("")
-        out.append("Fields:")
-        for c in nodes:
+        out.append(f"Fields: ({len(nodes)} change(s))")
+        shown = nodes[:_DIFF_INLINE_LIMIT]
+        for c in shown:
             out.append(
                 f"  node {c.get('id')}.{c.get('field')}: "
                 f"{c.get('before')} -> {c.get('after')}"
+            )
+        if len(nodes) > _DIFF_INLINE_LIMIT:
+            out.append(
+                f"  …and {len(nodes) - _DIFF_INLINE_LIMIT} more field change(s) "
+                "(use --format=json or query the index for the full list)"
             )
 
     return "\n".join(out) + "\n"
