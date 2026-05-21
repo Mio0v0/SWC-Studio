@@ -74,6 +74,26 @@ def _print_json(payload) -> None:
     print(json.dumps(payload, indent=2, sort_keys=True, default=str))
 
 
+def _config_params(overrides: dict | None, effective: dict | None) -> dict:
+    """Build the {effective_config, config_overrides} portion of an op's
+    params, deduplicating when the two would be byte-identical.
+
+    Rules:
+      * Always include effective_config (the full set of values that
+        actually controlled the algorithm).
+      * Only include config_overrides when it's a non-trivial delta
+        (non-empty AND not equal to effective_config). When the user
+        passed nothing OR passed the entire effective config, the
+        delta carries no extra information and we drop it.
+    """
+    out: dict = {}
+    if effective is not None:
+        out["effective_config"] = effective
+    if overrides and overrides != effective:
+        out["config_overrides"] = overrides
+    return out
+
+
 def _tracked_batch(
     folder: Path,
     *,
@@ -988,10 +1008,7 @@ def main(argv: list[str] | None = None) -> int:
                 effective_cfg = _merge_radii(_radii_default_config(), cfg_overrides or {})
                 with tracked_op(
                     target, kind=OpKind.RADII_CLEAN,
-                    params={
-                        "effective_config": effective_cfg,
-                        "config_overrides": cfg_overrides or None,
-                    },
+                    params=_config_params(cfg_overrides, effective_cfg),
                     message="batch radii-clean (single file mode)",
                 ) as op:
                     in_bytes = op.input_bytes if op.input_bytes is not None else target.read_bytes()
@@ -1033,10 +1050,7 @@ def main(argv: list[str] | None = None) -> int:
                 target,
                 op_kind=OpKind.RADII_CLEAN,
                 mutate_text=_mutate,
-                params_for=lambda _: {
-                    "effective_config": _radii_effective,
-                    "config_overrides": cfg_overrides or None,
-                },
+                params_for=lambda _: _config_params(cfg_overrides, _radii_effective),
                 message="batch radii-clean",
                 per_file_summary=_summary,
             )
@@ -1073,10 +1087,7 @@ def main(argv: list[str] | None = None) -> int:
                 folder,
                 op_kind=OpKind.SIMPLIFICATION,
                 mutate_text=_mutate,
-                params_for=lambda _: {
-                    "effective_config": _simp_effective,
-                    "config_overrides": cfg_overrides or None,
-                },
+                params_for=lambda _: _config_params(cfg_overrides, _simp_effective),
                 message="batch simplify",
                 per_file_summary=_summary,
             )
@@ -1248,15 +1259,13 @@ def main(argv: list[str] | None = None) -> int:
             )
             _af_effective = _merge_af(_af_default_config(), cfg_overrides or {})
 
+            _af_params = _config_params(cfg_overrides, _af_effective)
+            _af_params["result_count"]   = len(pre_rows)
+            _af_params["report_summary"] = pre_summary
             with tracked_op(
                 src,
                 kind=OpKind.AUTO_FIX,
-                params={
-                    "effective_config":  _af_effective,
-                    "config_overrides":  cfg_overrides or None,
-                    "result_count":      len(pre_rows),
-                    "report_summary":    pre_summary,
-                },
+                params=_af_params,
                 message=f"auto-fix ({len(pre_rows)} issue(s); {pre_summary})",
             ) as op:
                 in_bytes = op.input_bytes if op.input_bytes is not None else src.read_bytes()
@@ -1573,10 +1582,7 @@ def main(argv: list[str] | None = None) -> int:
                 with tracked_op(
                     src,
                     kind=OpKind.SIMPLIFICATION,
-                    params={
-                        "effective_config": cfg_effective,
-                        "config_overrides": cfg_overrides or None,
-                    },
+                    params=_config_params(cfg_overrides, cfg_effective),
                     message="geometry simplify",
                 ) as op:
                     in_bytes = op.input_bytes if op.input_bytes is not None else src.read_bytes()
