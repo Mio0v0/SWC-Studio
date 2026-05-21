@@ -92,6 +92,62 @@ from swcstudio.tools.morphology_editing.features.simplification import simplify_
 from swcstudio.tools.validation.features.auto_typing import BatchOptions, run_file as run_validation_auto_typing_file
 
 
+# ---------------------------------------------------------------------------
+# Token-fidelity helper for GUI-side provenance commits.
+# ---------------------------------------------------------------------------
+#
+# The GUI's pandas dataframes don't carry the per-cell *_str token columns
+# that swc_io's writer uses to round-trip exact number formatting (e.g.
+# "2.5390625000000e+00"). Without those, the writer falls back to Python's
+# default float repr ("2.5390625"), and the provenance diff then flags every
+# numeric cell as "changed" — even rows the user never touched.
+#
+# This helper merges the original tokens from the previous on-disk state
+# (op.input_bytes inside tracked_op) into the GUI's new_df, by node id,
+# whenever the typed value still matches the original. That makes the
+# diff faithful: only fields the user actually changed get a fresh repr.
+
+_TOKEN_COLS = ("id_str", "type_str", "x_str", "y_str", "z_str",
+               "radius_str", "parent_str")
+
+
+def _enrich_df_with_original_tokens(new_df: pd.DataFrame,
+                                    input_bytes: bytes | None) -> pd.DataFrame:
+    """Return ``new_df`` augmented with original *_str token columns.
+
+    For each row whose id matches a row in the parsed input bytes, the
+    original token strings are attached as the corresponding *_str columns.
+    Rows whose id didn't exist before, or rows lacking an id, simply don't
+    receive token columns — the writer will format them with default repr,
+    which is the correct behavior for genuinely new content.
+    """
+    if input_bytes is None or new_df is None or new_df.empty:
+        return new_df
+    if all(c in new_df.columns for c in _TOKEN_COLS):
+        return new_df  # GUI already supplied tokens; nothing to do
+    if "id" not in new_df.columns:
+        return new_df
+    try:
+        from swcstudio.core.swc_io import parse_swc_text_preserve_tokens  # noqa: PLC0415
+        prev = parse_swc_text_preserve_tokens(
+            input_bytes.decode("utf-8", errors="ignore")
+        )
+    except Exception:
+        return new_df
+    if prev is None or prev.empty:
+        return new_df
+    # Build a lookup table id → original token columns.
+    have = [c for c in _TOKEN_COLS if c in prev.columns]
+    if not have:
+        return new_df
+    lookup = prev.set_index(prev["id"].astype(int))[have]
+    out = new_df.copy()
+    ids = out["id"].astype(int)
+    for col in have:
+        out[col] = ids.map(lookup[col])
+    return out
+
+
 @dataclass
 class _DocumentState:
     """Open SWC document state bound to one editor tab/window."""
@@ -1395,12 +1451,26 @@ class SWCMainWindow(QMainWindow):
         on-disk path yet (untitled / preview docs are not tracked).
         Failures are logged and swallowed — provenance must never
         block a GUI edit from being applied to the in-memory display.
+
+        Token-fidelity note: GUI dataframes don't carry the original
+        per-cell ``*_str`` columns that the SWC writer uses to
+        round-trip exact number formatting. Without that, the writer
+        would reformat every number using Python's default float repr
+        (e.g. ``2.5390625000000e+00`` → ``2.5390625``), which makes
+        the structured diff flag every node as "changed" even when
+        nothing actually moved. We re-attach the original tokens from
+        the previous on-disk state before writing, so only fields
+        whose typed values genuinely changed get reformatted.
         """
         if doc.is_preview or not getattr(doc, "file_path", ""):
             return None
         try:
             from swcstudio.core.provenance import OpKind, tracked_op  # noqa: PLC0415
-            from swcstudio.core.swc_io import write_swc_to_bytes_preserve_tokens  # noqa: PLC0415
+            from swcstudio.core.swc_io import (  # noqa: PLC0415
+                parse_swc_text_preserve_tokens,
+                write_swc_to_bytes_preserve_tokens,
+            )
+
             kind_value = kind.value if isinstance(kind, OpKind) else str(kind)
             with tracked_op(
                 doc.file_path,
@@ -1408,7 +1478,12 @@ class SWCMainWindow(QMainWindow):
                 params=dict(params or {}),
                 message=message or f"GUI {kind_value}",
             ) as op:
-                op.set_output(write_swc_to_bytes_preserve_tokens(new_df))
+                # Re-attach original *_str token columns from the
+                # previous state for byte-faithful round-trip.
+                enriched = _enrich_df_with_original_tokens(
+                    new_df, op.input_bytes
+                )
+                op.set_output(write_swc_to_bytes_preserve_tokens(enriched))
             return op.result
         except Exception as e:  # noqa: BLE001
             # Never block a GUI edit because the history layer failed.
