@@ -978,10 +978,20 @@ def main(argv: list[str] | None = None) -> int:
             if target.is_file():
                 # Reuse the converted single-file 'validation radii-clean' path.
                 from swcstudio.core.provenance import OpKind, current_swc_path_for, tracked_op
-                from swcstudio.tools.batch_processing.features.radii_cleaning import clean_swc_text
+                # NOTE: alias the import to avoid shadowing the top-level
+                # merge_config (re-binding it as a local in main() would
+                # break the geometry-simplify branch that uses the global).
+                from swcstudio.core.config import merge_config as _merge_radii
+                from swcstudio.tools.batch_processing.features.radii_cleaning import (
+                    clean_swc_text, get_config as _radii_default_config,
+                )
+                effective_cfg = _merge_radii(_radii_default_config(), cfg_overrides or {})
                 with tracked_op(
                     target, kind=OpKind.RADII_CLEAN,
-                    params={"config_overrides": cfg_overrides or None},
+                    params={
+                        "effective_config": effective_cfg,
+                        "config_overrides": cfg_overrides or None,
+                    },
                     message="batch radii-clean (single file mode)",
                 ) as op:
                     in_bytes = op.input_bytes if op.input_bytes is not None else target.read_bytes()
@@ -1014,11 +1024,19 @@ def main(argv: list[str] | None = None) -> int:
                     f"radius_changes={int(result.get('changes', 0))}"
                 )
 
+            from swcstudio.core.config import merge_config as _merge_radii
+            from swcstudio.tools.batch_processing.features.radii_cleaning import (
+                get_config as _radii_default_config,
+            )
+            _radii_effective = _merge_radii(_radii_default_config(), cfg_overrides or {})
             out = _tracked_batch(
                 target,
                 op_kind=OpKind.RADII_CLEAN,
                 mutate_text=_mutate,
-                params_for=lambda _: {"config_overrides": cfg_overrides or None},
+                params_for=lambda _: {
+                    "effective_config": _radii_effective,
+                    "config_overrides": cfg_overrides or None,
+                },
                 message="batch radii-clean",
                 per_file_summary=_summary,
             )
@@ -1029,12 +1047,17 @@ def main(argv: list[str] | None = None) -> int:
         if args.tool == "batch" and args.feature == "simplify":
             # Converted to provenance layer (rewire checklist item 1.2 #19).
             from swcstudio.core.provenance import OpKind
-            from swcstudio.tools.morphology_editing.features.simplification import simplify_swc_text
+            from swcstudio.core.config import merge_config as _merge_simp
+            from swcstudio.tools.morphology_editing.features.simplification import (
+                get_config as _simp_default_config,
+                simplify_swc_text,
+            )
 
             folder = Path(args.folder)
             if not folder.is_dir():
                 raise NotADirectoryError(str(folder))
             cfg_overrides = _parse_config_overrides(args.config_json)
+            _simp_effective = _merge_simp(_simp_default_config(), cfg_overrides or {})
 
             def _mutate(text: str):
                 return simplify_swc_text(text, config_overrides=cfg_overrides)
@@ -1050,7 +1073,10 @@ def main(argv: list[str] | None = None) -> int:
                 folder,
                 op_kind=OpKind.SIMPLIFICATION,
                 mutate_text=_mutate,
-                params_for=lambda _: {"config_overrides": cfg_overrides or None},
+                params_for=lambda _: {
+                    "effective_config": _simp_effective,
+                    "config_overrides": cfg_overrides or None,
+                },
                 message="batch simplify",
                 per_file_summary=_summary,
             )
@@ -1123,16 +1149,22 @@ def main(argv: list[str] | None = None) -> int:
                     current_swc_path_for,
                     tracked_op,
                 )
+                from swcstudio.core.config import merge_config as _merge_radii
                 from swcstudio.tools.batch_processing.features.radii_cleaning import (
                     clean_swc_text,
+                    get_config as _radii_default_config,
                 )
 
                 cfg_overrides = _parse_config_overrides(args.config_json)
+                _radii_effective = _merge_radii(_radii_default_config(), cfg_overrides or {})
 
                 with tracked_op(
                     target,
                     kind=OpKind.RADII_CLEAN,
-                    params={"config_overrides": cfg_overrides or None},
+                    params={
+                        "effective_config": _radii_effective,
+                        "config_overrides": cfg_overrides or None,
+                    },
                     message="radii-clean (auto)",
                 ) as op:
                     in_bytes = op.input_bytes if op.input_bytes is not None else target.read_bytes()
@@ -1208,13 +1240,22 @@ def main(argv: list[str] | None = None) -> int:
             pre_rows = list(pre_run.get("rows", []) or [])
             pre_report = pre_run.get("report") if isinstance(pre_run.get("report"), dict) else {}
             pre_summary = dict((pre_report or {}).get("summary", {}))
+            # Effective config (defaults merged with --config-json overrides)
+            # so the recorded params fully describe what controlled the run.
+            from swcstudio.core.config import merge_config as _merge_af
+            from swcstudio.tools.validation.features.auto_fix import (
+                get_config as _af_default_config,
+            )
+            _af_effective = _merge_af(_af_default_config(), cfg_overrides or {})
 
             with tracked_op(
                 src,
                 kind=OpKind.AUTO_FIX,
                 params={
-                    "result_count":   len(pre_rows),
-                    "report_summary": pre_summary,
+                    "effective_config":  _af_effective,
+                    "config_overrides":  cfg_overrides or None,
+                    "result_count":      len(pre_rows),
+                    "report_summary":    pre_summary,
                 },
                 message=f"auto-fix ({len(pre_rows)} issue(s); {pre_summary})",
             ) as op:
@@ -1532,7 +1573,10 @@ def main(argv: list[str] | None = None) -> int:
                 with tracked_op(
                     src,
                     kind=OpKind.SIMPLIFICATION,
-                    params={"config_overrides": cfg_overrides or None},
+                    params={
+                        "effective_config": cfg_effective,
+                        "config_overrides": cfg_overrides or None,
+                    },
                     message="geometry simplify",
                 ) as op:
                     in_bytes = op.input_bytes if op.input_bytes is not None else src.read_bytes()

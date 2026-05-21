@@ -1916,12 +1916,28 @@ class SWCMainWindow(QMainWindow):
         payload = self._simplification_log_payload(source_doc, result, output_path=None)
         source_doc.last_simplification_result = dict(payload)
         from swcstudio.core.provenance import OpKind  # noqa: PLC0415
+        # Effective config = panel-default thresholds merged with whatever
+        # the user changed in the panel (epsilon, radius_tolerance,
+        # keep_tips, keep_bifurcations, …). Captures every numeric knob
+        # that actually controlled this simplification run.
+        from swcstudio.core.config import merge_config as _merge_simp  # noqa: PLC0415
+        from swcstudio.tools.morphology_editing.features.simplification import (  # noqa: PLC0415
+            get_config as _simp_default_config,
+        )
+        _simp_effective = _merge_simp(_simp_default_config(), dict(config_overrides or {}))
+        # If the algorithm reports the params it actually used, prefer
+        # that (it can include derived/internal values too).
+        _simp_actual_params = dict(payload.get("params_used", {}) or {})
         self._record_tracked_commit(
             source_doc, simplified_df, kind=OpKind.SIMPLIFICATION,
-            params={"config_overrides": dict(config_overrides or {}) or None,
-                    "original_node_count": int(payload.get("original_node_count", 0)),
-                    "new_node_count": int(payload.get("new_node_count", 0)),
-                    "reduction_percent": float(payload.get("reduction_percent", 0.0))},
+            params={
+                "effective_config":  _simp_effective,
+                "params_used":       _simp_actual_params or None,
+                "config_overrides":  dict(config_overrides or {}) or None,
+                "original_node_count": int(payload.get("original_node_count", 0)),
+                "new_node_count":      int(payload.get("new_node_count", 0)),
+                "reduction_percent":   float(payload.get("reduction_percent", 0.0)),
+            },
             message=(
                 f"GUI simplify: {payload.get('original_node_count', 0)} → "
                 f"{payload.get('new_node_count', 0)} nodes "
@@ -2337,13 +2353,27 @@ class SWCMainWindow(QMainWindow):
 
         # Provenance: the auto-radii pass that produced `result` ran on
         # the current in-memory doc.df, so this commit records exactly
-        # that mutation as one RADII_CLEAN op.
+        # that mutation as one RADII_CLEAN op. The full effective config
+        # (defaults merged with whatever the panel was set to) is
+        # captured under "effective_config" so reruns can reproduce
+        # the same thresholds/rules.
         from swcstudio.core.provenance import OpKind  # noqa: PLC0415
+        from swcstudio.core.config import merge_config as _merge_radii  # noqa: PLC0415
+        from swcstudio.tools.batch_processing.features.radii_cleaning import (  # noqa: PLC0415
+            get_config as _radii_default_config,
+        )
+        _radii_panel_overrides = dict((payload.get("config_used") or {}))
+        _radii_effective = _merge_radii(_radii_default_config(), _radii_panel_overrides)
         self._record_tracked_commit(
             doc,
             new_df_final,
             kind=OpKind.RADII_CLEAN,
-            params={"passes": passes_used, "radius_changes": total_changes},
+            params={
+                "effective_config": _radii_effective,
+                "config_overrides": _radii_panel_overrides or None,
+                "passes": passes_used,
+                "radius_changes": total_changes,
+            },
             message=(
                 f"GUI auto radii: passes={passes_used}, "
                 f"radius_changes={total_changes}"
