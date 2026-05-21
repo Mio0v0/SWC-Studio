@@ -332,16 +332,50 @@ class HistoryPanel(QWidget):
         Nothing is destroyed: the intervening commits stay in
         ``events.jsonl`` and are still reachable. The new commit just
         sits at the active branch's tip with the past state.
+
+        Two no-op cases are detected and surfaced as friendly
+        messages instead of silently creating phantom commits:
+          * Selecting the active branch's tip (the current state
+            itself — there's nothing to revert).
+          * Selecting a commit whose content equals the current state
+            (rare: e.g., reverting twice in a row to the same target).
         """
+        from swcstudio.cli.history_cli import _materialize_state_at  # noqa: PLC0415
+        from swcstudio.core.provenance import OpKind, tracked_op  # noqa: PLC0415
+        from swcstudio.core.provenance import read_branch, read_head  # noqa: PLC0415
+
         sha = self._current_selection_sha()
         if not sha:
             return
+
+        # Detect "revert to current tip" — refuse with a clear message.
+        try:
+            head = read_head(self._hist)
+            tip = read_branch(self._hist, head)
+        except Exception:
+            tip = None
+        if tip and tip == sha:
+            QMessageBox.information(
+                self,
+                "Revert",
+                f"Commit {sha.removeprefix('sha256:')[:12]} is already "
+                f"the tip of '{head}' — it IS your current state, so "
+                f"there's nothing to revert to.\n\n"
+                f"To see revert in action, make a few more edits first "
+                f"(each one becomes its own commit), then come back here "
+                f"and click an EARLIER commit to revert to.\n\n"
+                f"Tip: 'Mark as checkpoint…' on this commit if you want "
+                f"to save the current state as a separate labeled .swc.",
+            )
+            return
+
         # Confirm — this changes the active branch.
         reply = QMessageBox.question(
             self,
             "Revert to this commit?",
             (
-                f"Revert the open document to commit {sha[:19]}…?\n\n"
+                f"Revert the open document to commit "
+                f"{sha.removeprefix('sha256:')[:12]}?\n\n"
                 "A NEW commit will be added on the active branch "
                 "capturing this revert. Intervening commits are kept "
                 "in history and can be reached again later.\n\n"
@@ -354,13 +388,37 @@ class HistoryPanel(QWidget):
             return
 
         try:
-            from swcstudio.cli.history_cli import _materialize_state_at  # noqa: PLC0415
-            from swcstudio.core.provenance import OpKind, tracked_op  # noqa: PLC0415
-
-            # Reconstruct the past state's bytes.
             past_bytes = _materialize_state_at(self._hist, sha)
+        except Exception as e:
+            QMessageBox.warning(self, "Revert", f"Could not materialize past state: {e}")
+            return
 
-            # Record a new commit on the active branch capturing the revert.
+        # Second no-op guard: if the past state is byte-identical to the
+        # current state (rare but possible — e.g., user changed value
+        # then changed it back), warn instead of writing a phantom commit.
+        from swcstudio.core.provenance import (  # noqa: PLC0415
+            canonical_swc,
+            current_swc_path_for,
+            sha256_hex,
+            strip_prov_lines,
+        )
+        cur_path = current_swc_path_for(self._swc_path)
+        if cur_path.exists():
+            cur_canon = sha256_hex(canonical_swc(strip_prov_lines(cur_path.read_bytes())))
+            past_canon = sha256_hex(canonical_swc(past_bytes))
+            if cur_canon == past_canon:
+                QMessageBox.information(
+                    self, "Revert",
+                    f"Commit {sha.removeprefix('sha256:')[:12]} has the SAME "
+                    f"content as your current state — nothing would change.\n\n"
+                    f"This usually means the selected commit is logically "
+                    f"equivalent to the tip even though it has a different sha "
+                    f"(e.g., the file was already in this state earlier).",
+                )
+                return
+
+        # Record a new commit on the active branch capturing the revert.
+        try:
             with tracked_op(
                 self._swc_path,
                 kind=OpKind.PLUGIN_OP,
@@ -369,7 +427,7 @@ class HistoryPanel(QWidget):
             ) as op:
                 op.set_output(past_bytes)
         except Exception as e:
-            QMessageBox.warning(self, "Revert", f"Could not revert: {e}")
+            QMessageBox.warning(self, "Revert", f"Could not record revert commit: {e}")
             return
 
         # Notify the host so it can reload the open document.
@@ -377,7 +435,7 @@ class HistoryPanel(QWidget):
         QMessageBox.information(
             self,
             "Reverted",
-            f"Reverted to commit {sha[:19]}…\n\n"
+            f"Reverted to commit {sha.removeprefix('sha256:')[:12]}.\n\n"
             f"A new commit was added on the active branch.\n"
             f"The open document has been reloaded.",
         )
