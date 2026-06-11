@@ -1,0 +1,673 @@
+# Provenance & Versioning Spec (v1)
+
+**Status:** draft, locked design decisions; pending implementation.
+
+This document specifies the provenance, versioning, and reproducibility
+system for SWC-Studio. It replaces the current sidecar-text-report
+behavior described in `LOGS_AND_REPORTS.md`.
+
+The goals (in priority order):
+
+1. **Provenance** — for any SWC, answer "what app, whom, did what, to
+   this dataset" with no ambiguity.
+2. **Revertability** — go back to any past state and optionally branch
+   from there to redo work without losing the original path.
+3. **AI reproducibility** — record AI parameters and environment well
+   enough that a colleague can recompute the same result.
+4. **Compactness** — delta-encoded, content-addressed, compressed; the
+   sidecar must not balloon as edits accumulate.
+5. **Cleanliness** — human-readable event log; SQL-queryable index;
+   self-describing files.
+
+The design is "JSON-Lines event log + content-addressed blob store +
+SQLite index", inspired by:
+
+- **CAVE / PyChunkedGraph** (typed operations, time-travel queries)
+- **DVID** (named-branch DAG)
+- **SAM/BAM `@PG` chain** (self-describing file headers)
+- **MLflow** (`Run` schema for AI ops)
+- **DataLad** (`run` wrapper pattern for capture-by-wrapping)
+- **W3C PROV-O / RO-Crate** (interop vocabulary, export bundle)
+
+## 1. On-disk layout
+
+History lives **per file**, in the existing output directory, plus a
+**project-level index** at the parent folder root.
+
+```
+neuron_001.swc
+neuron_001_swc_studio_output/
+    neuron_001_current.swc          # latest materialized state
+    <user-marked checkpoints>.swc   # optional, see §7
+    .history/
+        version                     # integer; starts at 1
+        events.jsonl                # append-only event log (source of truth)
+        objects/<sha[:2]>/<sha>.zst # zstd-compressed content-addressed blobs
+        refs/
+            HEAD                    # name of currently-active branch
+            branches/<name>         # commit sha at the tip of each branch
+            tags/<name>             # optional immutable named pointers
+        index.sqlite                # rebuildable cache of events.jsonl
+        lock                        # OS advisory lockfile (see §10)
+
+<project_root>/
+    .swcstudio/
+        index.sqlite                # aggregated index across all files in this tree
+        version
+```
+
+- Per-file `.history/` is the **source of truth**. Move the SWC and its
+  output dir together and provenance survives.
+- Project-level `.swcstudio/` is a **derived index** rebuilt from the
+  per-file logs. Useful for project-wide queries ("every AI run by
+  Alice on this dataset") but never authoritative.
+
+## 2. Identity model
+
+### Dataset root identity
+
+`root_sha = SHA-256(canonicalize(original_swc_bytes))`
+
+Canonicalization — the single most important spec, because every hash
+depends on it:
+
+| Aspect | Rule |
+|---|---|
+| Line endings | normalize to `\n` |
+| Trailing whitespace | strip per line |
+| Float format | pass-through (do not round or reformat) |
+| Comment lines (`#`) | included in hash, **except** lines beginning with `# @PROV` |
+| Node ordering | as-written, do not sort |
+| Hash algorithm | SHA-256 |
+
+Reference implementation:
+
+```python
+def canonical_swc(b: bytes) -> bytes:
+    text = b.decode("utf-8", errors="strict")
+    out_lines = []
+    for line in text.splitlines():
+        line = line.rstrip()
+        if line.startswith("# @PROV"):
+            continue
+        out_lines.append(line)
+    return ("\n".join(out_lines) + "\n").encode("utf-8")
+
+def root_sha(b: bytes) -> str:
+    return hashlib.sha256(canonical_swc(b)).hexdigest()
+```
+
+### Actor identity
+
+Every event carries:
+
+- `os_user` — `getpass.getuser()`. Required.
+- (`lab_user` is not collected in v1; reserved for a future minor.)
+
+### Tool identity
+
+Every event carries:
+
+- `tool` — fixed string `"swcstudio"`
+- `tool_version` — value of `swcstudio.__version__`
+- `tool_git_sha` — git short SHA if available (best-effort; absent in pip installs)
+
+## 3. Operation taxonomy (v1)
+
+Closed list. Each op has a typed `params` schema (defined in
+`swcstudio.core.provenance.ops`).
+
+| Op kind | Mutating? | Recorded? | Params (summary) |
+|---|---|---|---|
+| `set_type` | yes | yes | node_ids, type |
+| `set_radius` | yes | yes | node_ids, radius |
+| `manual_radii` | yes | yes | edits[] |
+| `auto_fix` | yes | yes | rule_set, threshold |
+| `auto_label` (AI) | yes | yes | model_sha, model_version, params |
+| `dendrogram_edit` | yes | yes | edit_kind, anchors |
+| `geometry_edit` | yes | yes | op_kind, params |
+| `radii_clean` | yes | yes | params |
+| `simplification` | yes | yes | params |
+| `index_clean` | yes | yes | (none) |
+| `split` | yes | yes | split_spec |
+| `plugin_op` | yes | yes | plugin_id, plugin_version, params |
+| `validation_run` | no | optional audit only | rule_set |
+| `visualization` | no | no | — |
+
+Read-only operations (`validation_run`, `visualization`) are not part
+of the chain. `validation_run` may be appended to a separate
+`audit.jsonl` if the user enables it.
+
+## 4. Event format
+
+`events.jsonl` is append-only. One JSON object per line. UTF-8, `\n`
+line endings, sorted keys for byte-stable output.
+
+### Common envelope
+
+```json
+{
+  "schema_version": 1,
+  "kind": "commit",
+  "id": "sha256:g7h8i9j0k1l2...",
+  "parent": "sha256:d4e5f6a7b8c9...",
+  "branch": "main",
+  "ts": "2024-01-01T11:45:22Z",
+  "actor": {"os_user": "tuo"},
+  "tool": {"name": "swcstudio", "version": "0.2.0", "git_sha": "a1b2c3d"},
+  "session_id": "01HX2K3MZRSTQK9WD6YCNQEXAM",
+  "message": "Auto-label + manual cleanup of axon",
+  "ops": [ ... ],
+  "input_sha": "sha256:...",
+  "output_sha": "sha256:...",
+  "diff_ref": "sha256:..."
+}
+```
+
+`id` is computed as
+`SHA-256(canonical_json({parent, branch, ops, input_sha, output_sha}))`
+so the chain is cryptographically linked.
+
+### Sub-op shape
+
+```json
+{
+  "kind": "set_radius",
+  "params": {"node_ids": [5, 7], "radius": 0.4},
+  "summary": {"nodes_modified": 2}
+}
+```
+
+For AI ops the sub-op also carries an `ai_run_ref` blob hash:
+
+```json
+{
+  "kind": "auto_label",
+  "params": {"model_version": "v9", "rng_seed": 42},
+  "summary": {"nodes_modified": 1283},
+  "ai_run_ref": "sha256:..."
+}
+```
+
+### Diff blob (referenced by `diff_ref`)
+
+Stored in `objects/<sha>.zst`. JSON shape:
+
+```json
+{
+  "schema_version": 1,
+  "from": "sha256:...",
+  "to": "sha256:...",
+  "node_changes": [
+    {"id": 5, "field": "radius", "before": 0.3, "after": 0.5},
+    {"id": 7, "field": "type",   "before": 0,   "after": 3}
+  ],
+  "topology_changes": [
+    {"kind": "add",      "id": 12, "row": "12 3 1.0 2.0 0.0 0.4 5"},
+    {"kind": "remove",   "id": 99},
+    {"kind": "reparent", "id": 14, "before": 13, "after": 15}
+  ]
+}
+```
+
+### AI-run blob (referenced by `ai_run_ref`)
+
+MLflow-compatible field names. Stored in `objects/<sha>.zst`.
+
+```json
+{
+  "schema_version": 1,
+  "run_id": "ulid",
+  "started_at": "2024-01-01T11:45:00Z",
+  "finished_at": "2024-01-01T11:45:22Z",
+  "status": "FINISHED",
+  "params":  {"model_version": "v9", "rng_seed": 42, "stage": "all"},
+  "metrics": {"nodes_labeled": 1283, "low_conf_count": 17},
+  "artifacts": [
+    {"name": "model.pkl", "sha256": "..."},
+    {"name": "input.swc", "sha256": "..."},
+    {"name": "output.swc", "sha256": "..."}
+  ],
+  "source_version": {"tool": "swcstudio", "version": "0.2.0", "git_sha": "a1b2c3d"},
+  "env_hash": "sha256:..."
+}
+```
+
+### Env fingerprint blob (referenced by `env_hash`)
+
+Stored once per unique environment, deduplicated.
+
+```json
+{
+  "schema_version": 1,
+  "system": {
+    "os": "Darwin", "os_version": "23.5.0",
+    "python_version": "3.12.3", "machine": "arm64",
+    "cpu_count": 12, "cuda_version": null, "gpu": null
+  },
+  "packages": {
+    "numpy": "1.26.4", "scipy": "1.13.0", "scikit-learn": "1.5.2",
+    "torch": "2.3.1", "torch-geometric": "2.6.1",
+    "swcstudio": "0.2.0"
+    /* full importlib.metadata snapshot */
+  }
+}
+```
+
+## 5. SWC header — bounded `@PROV` business card
+
+Every materialized SWC carries exactly **two** `@PROV` comment lines at
+the top:
+
+```
+# @PROV root=a1b2c3d4 file=neuron_001.swc created=2024-01-01T09:00:00Z
+# @PROV tip=g7h8i9j0 parent=d4e5f6a7 ops=20 tool=swcstudio@0.2.0 actor=tuo updated=2024-01-01T11:45:22Z sidecar=.history/
+```
+
+- **Line 1 (root)** — written once, never modified.
+- **Line 2 (tip)** — overwritten on every save.
+
+Both lines are excluded from `canonical_swc()` so updating the tip
+line does not change the file's hash.
+
+A SWC without these lines is treated as an external file with no
+SWC-Studio history; first edit creates a new root.
+
+## 6. Branching
+
+Full DAG with named branches.
+
+- `refs/HEAD` is a text file containing the active branch name (default
+  `"main"`).
+- `refs/branches/<name>` is a text file containing one commit sha.
+- `refs/tags/<name>` is a text file containing one commit sha
+  (immutable; CLI rejects overwrite).
+
+Verbs:
+
+| Verb | Effect |
+|---|---|
+| `checkout <sha>` | materializes a read-only SWC at the requested state; HEAD is unchanged |
+| `branch <name> [from=<sha>]` | creates a new branch at the given sha (default: HEAD) |
+| `switch <name>` | sets HEAD to the named branch |
+| `tag <name> [<sha>]` | creates an immutable named pointer |
+| `revert <sha>` | shortcut: branches from `<sha>` with auto-name `revert-<short>-<ts>` and switches |
+
+Mutating ops always commit on the active branch. To mutate from a past
+state, branch first.
+
+## 7. Output-file model (hybrid)
+
+Per output directory:
+
+- `<stem>_current.swc` — always present, overwritten on each commit on
+  the active branch.
+- `<stem>_<label>.swc` — optional, materialized only when the user
+  marks a commit as a checkpoint via `swcstudio history checkpoint
+  <sha> --label <label>` or the GUI's "Mark as checkpoint" action.
+
+No automatic timestamped per-op output files. The full set of past
+states is always retrievable via `checkout`.
+
+## 8. The `tracked_op()` API
+
+Single mandatory entry point for any code that mutates an SWC. CLI
+handlers, GUI actions, and plugins all go through this — no other path
+is sanctioned.
+
+```python
+from swcstudio.core.provenance import tracked_op, OpKind
+
+with tracked_op(
+    dataset_path="/path/to/neuron_001.swc",
+    kind=OpKind.AUTO_LABEL,
+    params={"model_version": "v9", "rng_seed": 42},
+    message="Auto-label apical/basal",
+    is_ai=True,
+) as op:
+    new_swc_bytes = run_auto_label(op.input_swc_bytes, ...)
+    op.set_output(new_swc_bytes)
+    op.add_metric("nodes_labeled", 1283)
+```
+
+Lifecycle:
+
+1. Acquire `.history/lock`. Fail loudly if already held.
+2. Read the active branch tip. Snapshot input.
+3. If `is_ai=True`, snapshot env fingerprint (or reference an existing one).
+4. Run the body.
+5. Validate output was set; compute `output_sha`.
+6. Compute structured diff vs input; write diff blob.
+7. If `is_ai=True`, finalize and write AI-run blob.
+8. Write commit event to `events.jsonl` (atomic append).
+9. Update `refs/branches/<active>` to new commit sha (atomic rename).
+10. If commit count on this branch is a multiple of 50, write a snapshot blob.
+11. Update SQLite index (within same SQLite transaction).
+12. Rewrite `<stem>_current.swc` with updated `@PROV` tip line.
+13. Release lock.
+
+Errors at any step roll back: no partial events, no orphan blobs are
+referenced, lock is released in `finally`.
+
+GUI sessions wrap a long-lived `tracked_session()` context; sub-ops
+are appended to a single commit on `tracked_session.__exit__`.
+
+## 9. Snapshots
+
+A full canonicalized SWC blob is written to `objects/` every 50 ops on
+each branch, and unconditionally for the first commit on a branch.
+Snapshot blobs are tagged in the event with `kind: "snapshot"`.
+
+`checkout(sha)` algorithm:
+
+1. Walk parents from `sha` to find the nearest snapshot ≤ `sha`.
+2. Replay diffs forward from snapshot to `sha`.
+3. Return the materialized bytes.
+
+Worst case replay: 49 diffs.
+
+## 10. Concurrency
+
+`.history/lock` is an OS-level advisory lock (`fcntl.flock` on POSIX,
+`msvcrt.locking` on Windows). Acquired by `tracked_op()`,
+`tracked_session()`, and any maintenance verb. Held only for the
+duration of one op or session.
+
+If acquisition fails, the verb exits with a clear error naming the
+holding PID and start time. No silent retry.
+
+The SQLite index is opened in WAL mode and updated within the same
+critical section as the event-log append.
+
+## 11. SQLite index schema (rebuildable)
+
+`.history/index.sqlite`:
+
+```sql
+CREATE TABLE meta (
+    key TEXT PRIMARY KEY, value TEXT
+);  -- 'schema_version', 'last_event_offset', 'rebuilt_at'
+
+CREATE TABLE commits (
+    sha          TEXT PRIMARY KEY,
+    parent       TEXT,
+    branch       TEXT,
+    ts           TEXT,
+    os_user      TEXT,
+    tool_version TEXT,
+    tool_git_sha TEXT,
+    session_id   TEXT,
+    message      TEXT,
+    input_sha    TEXT,
+    output_sha   TEXT,
+    diff_ref     TEXT,
+    is_snapshot  INTEGER
+);
+CREATE INDEX commits_parent ON commits(parent);
+CREATE INDEX commits_ts     ON commits(ts);
+CREATE INDEX commits_user   ON commits(os_user);
+
+CREATE TABLE ops (
+    op_id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    commit_sha    TEXT REFERENCES commits(sha),
+    op_index      INTEGER,
+    kind          TEXT,
+    params_json   TEXT,
+    summary_json  TEXT,
+    ai_run_ref    TEXT
+);
+CREATE INDEX ops_commit ON ops(commit_sha);
+CREATE INDEX ops_kind   ON ops(kind);
+
+CREATE TABLE node_changes (
+    op_id    INTEGER REFERENCES ops(op_id),
+    node_id  INTEGER,
+    field    TEXT,
+    before   TEXT,
+    after    TEXT
+);
+CREATE INDEX node_changes_node ON node_changes(node_id);
+CREATE INDEX node_changes_op   ON node_changes(op_id);
+
+CREATE TABLE ai_runs (
+    ai_run_ref     TEXT PRIMARY KEY,
+    commit_sha     TEXT REFERENCES commits(sha),
+    model_sha      TEXT,
+    model_version  TEXT,
+    started_at     TEXT,
+    finished_at    TEXT,
+    env_hash       TEXT,
+    metrics_json   TEXT,
+    params_json    TEXT
+);
+CREATE INDEX ai_runs_model ON ai_runs(model_sha);
+
+CREATE TABLE refs (
+    name TEXT PRIMARY KEY,   -- 'HEAD', 'branches/main', 'tags/v1'
+    sha  TEXT
+);
+```
+
+The project-level `.swcstudio/index.sqlite` has the same schema plus
+a `dataset` column on `commits`, `ops`, `ai_runs` keyed by the
+per-file `root_sha`.
+
+The index is **always rebuildable** from the per-file `events.jsonl`
+files. `swcstudio history reindex` does this.
+
+## 12. Reproduction (`reproduce.yaml`)
+
+For any AI op, `swcstudio history reproduce <sha>` emits a small
+`reproduce.yaml`:
+
+```yaml
+schema_version: 1
+op:        auto_label
+input:     {sha256: ..., path: "neuron_001.swc"}
+output:    {sha256: ...}
+params:    {model_version: v9, rng_seed: 42}
+model:     {sha256: ..., url: "https://github.com/.../models/v9/cell_type_classifier.pkl"}
+env_hash:  sha256:...
+command:   "swcstudio auto-label --rng-seed 42 --model-version v9 input.swc"
+```
+
+A colleague with `swcstudio reproduce reproduce.yaml`:
+
+1. Verifies their env matches `env_hash`; warns on mismatch.
+2. Downloads the referenced model if not cached.
+3. Runs the command on a file matching `input.sha256`.
+4. Compares produced output to `output.sha256`.
+
+## 13. CLI surface (v1)
+
+Full v1: all 12 commands ship in the first release.
+
+```
+swcstudio history log [<file>] [--branch=<n>] [--actor=<u>] [--limit=N]
+swcstudio history show <sha> [--format=text|json|diff]
+swcstudio history checkout <sha> [-o <path>]
+swcstudio history branch <name> [--from=<sha>]
+swcstudio history switch <name>
+swcstudio history tag <name> [<sha>]
+swcstudio history checkpoint <sha> --label <label>
+swcstudio history reproduce <sha> [-o reproduce.yaml]
+swcstudio history reindex [<file>|--project=<dir>]
+swcstudio history verify [<file>]
+swcstudio history gc [<file>]              # remove unreachable blobs
+swcstudio history export-crate <file> -o <dir>   # RO-Crate bundle
+```
+
+| Command | Purpose |
+|---|---|
+| `log` | Chronological list of commits on the active branch (or a chosen one). |
+| `show` | Detailed view of one commit (ops, params, diff summary, AI metadata). |
+| `checkout` | Materialize a past state as a read-only `.swc`. HEAD untouched. |
+| `branch` | Create a named branch at a chosen commit (default HEAD). |
+| `switch` | Set HEAD to an existing branch. |
+| `tag` | Bookmark a commit with an immutable name. |
+| `checkpoint` | Materialize a past commit as a labeled `.swc` next to `current.swc`. |
+| `reproduce` | Emit a `reproduce.yaml` so a colleague can recompute an AI result. |
+| `reindex` | Rebuild `index.sqlite` from `events.jsonl`. |
+| `verify` | Hash-check every blob; report mismatches. |
+| `gc` | Remove unreferenced blobs from `objects/`. |
+| `export-crate` | Bundle file + history + AI metadata as an RO-Crate directory. |
+
+## 14. GUI surface (v1)
+
+- **Timeline panel** — chronological list of commits on the active
+  branch. Each row shows ts, actor, op kinds, summary counts. Click
+  for detail.
+- **Branch picker** — dropdown of branches; "create branch from this
+  commit" action on any commit.
+- **Detail view** — for a selected commit: ops, sub-op params, diff
+  summary; for AI ops, env + reproduce.yaml export.
+
+GUI v1 does **not** include: in-app three-way diff viewer, merge UI,
+visual DAG renderer. Those are v2.
+
+## 15. Replacement of the existing reporting layer
+
+The current `format_*_report_text` helpers in
+`swcstudio.core.reporting` are **removed in v1**. The text-report
+files produced by the old code path are no longer generated.
+
+Their replacement is `swcstudio history show <sha> --format=text`,
+implemented inside `swcstudio.core.provenance.render` as a single
+generic renderer over commits, ops, and AI-run blobs (one renderer,
+not one per op kind).
+
+Removal plan:
+
+1. Implement the new `provenance.render` module.
+2. Delete every `format_*_report_text` symbol from
+   `swcstudio.core.reporting` and every call site (CLI handlers, GUI
+   panels, batch features). Imports become hard errors so nothing
+   silently falls back to the old code path.
+3. Plugins that imported the old helpers must migrate to
+   `provenance.render.commit_text(commit_sha)`. This is a breaking
+   change announced in the v0.3.0 release notes.
+
+## 16. Migration from existing output dirs
+
+On first encounter with an existing `*_swc_studio_output/` directory:
+
+1. Initialize `.history/` with a single synthetic `import` commit
+   whose `output_sha` is the canonical hash of the most recent
+   `_closed_*.swc` (if any), or of the original SWC otherwise.
+2. The synthetic commit's message: `"Imported from pre-history sidecar
+   at <ts>"`.
+3. Old `_closed_*.swc` and text reports are **left in place**, not
+   deleted, but excluded from future writes.
+4. The user is told once, in CLI/GUI, that history is now tracked.
+
+## 17. Format versioning
+
+Two complementary mechanisms — directory-level and per-event:
+
+**Directory-level** — `.history/version` contains a single integer.
+v1 is `1`. On open:
+
+- If the file is missing → treat as fresh; create with `1`.
+- If the integer equals the current build's max supported version →
+  open read-write.
+- If the integer is **higher** than the current build's max → open
+  **read-only** and surface a clear message: *"This history was
+  written by a newer SWC-Studio (format v{N}); please upgrade."*
+  Never silently downgrade or overwrite.
+- If the integer is **lower** than the current build's max → open
+  read-write at the lower version's semantics; future writes use the
+  current build's compatible additions only.
+
+**Per-event** — every JSONL event, every blob, and the SQLite `meta`
+table carry `schema_version`. Readers must:
+
+- Process events with `schema_version` ≤ the build's max.
+- **Skip** events with `schema_version` > the build's max, preserving
+  them on rewrite. Unknown future event kinds therefore round-trip
+  through old readers without loss.
+
+**Strict v1 freeze policy** — v1 is frozen on first release. Allowed
+changes within v1.x:
+
+- Adding **new optional fields** to existing event/blob shapes
+  (readers ignore unknown fields).
+- Adding **new event kinds** (older readers skip them).
+
+Forbidden within v1.x:
+
+- Renaming or removing existing fields.
+- Changing the meaning, type, or canonicalization rules of any
+  existing field.
+- Changing the canonical SWC rules (§2) or the hash algorithm.
+
+Anything forbidden requires a v2 bump: a parallel `events.v2.jsonl`
+file is created alongside `events.jsonl`, plus a one-shot migration
+tool (`swcstudio history migrate v1 v2`) that produces the v2 store
+from the v1 store. The v1 store is kept untouched as the source of
+truth until the user opts to discard it.
+
+## 18. Garbage collection
+
+`swcstudio history gc`:
+
+1. Walks all branch and tag tips, marks reachable commits.
+2. From each commit, marks reachable blobs (diff_ref, ai_run_ref,
+   env_hash, snapshot blobs, AI artifacts).
+3. Removes unreferenced blobs from `objects/`.
+4. Reports bytes reclaimed.
+
+Never automatic in v1.
+
+## 19. Cross-file lineage
+
+Whenever a new SWC is created from an existing one through any
+SWC-Studio path — `split`, `checkout -o other.swc`, derivation in a
+plugin, or any other tool that ends up calling `tracked_op()` — the
+new file's first commit records its source as a parent:
+
+```json
+"derived_from": {
+  "root_sha":   "sha256:<source root>",
+  "commit_sha": "sha256:<source state at time of derivation>",
+  "path":       "neuron_001.swc"
+}
+```
+
+The new file gets its own `root_sha` and its own `.history/`. The
+`derived_from` field links the two histories. The project-level index
+joins on `derived_from.root_sha` to walk inter-file lineage:
+"everything that came from `neuron_001.swc`".
+
+If a user copies an SWC outside of SWC-Studio (`cp`, drag-and-drop,
+email attachment), lineage is lost — the new file appears as a fresh
+root on first edit. This is unavoidable: the file system gives us no
+hook to capture the copy. If the user wants lineage preserved, they
+must use `swcstudio history checkout -o new.swc` (or its GUI
+equivalent) instead.
+
+## 20. Privacy and export
+
+`swcstudio history export-crate` produces an
+[RO-Crate](https://www.researchobject.org/ro-crate/) directory:
+
+```
+<crate>/
+    ro-crate-metadata.json   # JSON-LD provenance graph (PROV-O vocab)
+    data/<files>.swc
+    history/<events.jsonl, blobs>
+    reproduce/<reproduce.yaml per AI run>
+```
+
+By default the export **strips**: hostnames, absolute filesystem
+paths, OS usernames (replaced by stable opaque IDs). `--with-pii`
+opts in to including them.
+
+---
+
+## Open items deferred to implementation
+
+- **Compression level** — start at zstd level 3, revisit after measuring.
+- **Snapshot interval** — fixed at 50 ops; tunable via config later.
+- **GC policy** — manual only in v1; auto-gc deferred.
+- **RNG seed handling** — capture-only in v1; enforced-set deferred.
+- **`lab_user`** — reserved field, not collected in v1.

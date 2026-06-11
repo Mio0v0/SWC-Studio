@@ -74,6 +74,91 @@ def _print_json(payload) -> None:
     print(json.dumps(payload, indent=2, sort_keys=True, default=str))
 
 
+def _config_params(overrides: dict | None, effective: dict | None) -> dict:
+    """Build the {effective_config, config_overrides} portion of an op's
+    params, deduplicating when the two would be byte-identical.
+
+    Rules:
+      * Always include effective_config (the full set of values that
+        actually controlled the algorithm).
+      * Only include config_overrides when it's a non-trivial delta
+        (non-empty AND not equal to effective_config). When the user
+        passed nothing OR passed the entire effective config, the
+        delta carries no extra information and we drop it.
+    """
+    out: dict = {}
+    if effective is not None:
+        out["effective_config"] = effective
+    if overrides and overrides != effective:
+        out["config_overrides"] = overrides
+    return out
+
+
+def _tracked_batch(
+    folder: Path,
+    *,
+    op_kind,
+    mutate_text,
+    params_for=lambda swc: {},
+    message="",
+    per_file_summary=None,
+) -> dict:
+    """Per-file tracked_op loop for batch CLI handlers.
+
+    For each .swc in ``folder``, opens a tracked_op on that file's own
+    .history/ and runs ``mutate_text`` on op.input_bytes. One commit per
+    file. Errors per file are caught so a single bad file doesn't stop
+    the batch; they show up in the returned ``failures`` list.
+
+    The new design produces NO separate batch output folder — every
+    output lands as a commit on its input file's own .history/. The
+    summary dict matches the legacy shape (folder, files_total,
+    files_processed, files_failed, per_file, failures) plus a new
+    ``commits`` list mapping each processed file to its commit sha.
+    """
+    from swcstudio.core.provenance import tracked_op
+
+    swcs = sorted(
+        [p for p in folder.iterdir() if p.is_file() and p.suffix.lower() == ".swc"],
+        key=lambda p: p.name.lower(),
+    )
+    if not swcs:
+        raise FileNotFoundError(f"No .swc files found in: {folder}")
+
+    processed = 0
+    failures: list[str] = []
+    per_file: list[str] = []
+    commits: list[dict] = []
+
+    for swc in swcs:
+        try:
+            with tracked_op(
+                swc,
+                kind=op_kind,
+                params=params_for(swc),
+                message=message or f"batch {op_kind.value if hasattr(op_kind, 'value') else op_kind} on {swc.name}",
+            ) as op:
+                in_bytes = op.input_bytes if op.input_bytes is not None else swc.read_bytes()
+                result = mutate_text(in_bytes.decode("utf-8", errors="ignore"))
+                op.set_output(result["bytes"])
+            processed += 1
+            commits.append({"file": swc.name, "commit_sha": op.result.commit_sha})
+            if per_file_summary is not None:
+                per_file.append(per_file_summary(swc, result, op.result))
+        except Exception as e:  # noqa: BLE001
+            failures.append(f"{swc.name}: {e}")
+
+    return {
+        "folder":          str(folder),
+        "files_total":     len(swcs),
+        "files_processed": processed,
+        "files_failed":    len(failures),
+        "per_file":        per_file,
+        "failures":        failures,
+        "commits":         commits,
+    }
+
+
 def _summarize_batch_radii_output(out: dict) -> dict:
     mode = str(out.get("mode", ""))
     if mode == "file":
@@ -679,6 +764,12 @@ def build_parser() -> argparse.ArgumentParser:
     plugins_load = plugins_sub.add_parser("load", help="Load plugin module by import path")
     plugins_load.add_argument("module", help="Python module path, e.g. my_plugins.brain_globe")
 
+    # ------------------------------ history (provenance)
+    # New 'history' tool group from PROVENANCE_SPEC §13. Self-contained
+    # in cli/history_cli.py to keep this file's footprint tiny.
+    from swcstudio.cli.history_cli import add_history_subparser
+    add_history_subparser(sub)
+
     return p
 
 
@@ -784,6 +875,13 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     try:
+        if args.tool == "history":
+            # New provenance tool group (PROVENANCE_SPEC §13). Lives in
+            # its own module so it doesn't entangle with the rest of
+            # this dispatcher.
+            from swcstudio.cli.history_cli import dispatch_history
+            return dispatch_history(args)
+
         if args.tool == "check":
             file_path = Path(args.file)
             if not file_path.exists():
@@ -813,13 +911,117 @@ def main(argv: list[str] | None = None) -> int:
             return 0
 
         if args.tool == "batch" and args.feature == "split":
-            out = split_folder(
-                str(args.folder),
-                config_overrides=_parse_config_overrides(args.config_json),
+            # Converted to provenance layer (rewire checklist item 1.2 #16).
+            # Split is structurally unlike the other batch verbs: each
+            # input SWC produces N output SWCs (one per soma root).
+            #
+            # New provenance shape:
+            #   * No commit on the input file (it is read, not modified).
+            #   * Each output file is a NEW dataset with its own .history/.
+            #     Its first commit records derived_from = {root_sha,
+            #     commit_sha, path} pointing back to the source — when
+            #     present, the source's tracked history; otherwise the
+            #     raw input hash + a sentinel.
+            #   * Outputs land at <input_stem>/<input_stem>_tree_<N>.swc
+            #     in a per-batch timestamped folder, matching the legacy
+            #     "single_output_subdir" structure so users keep familiar
+            #     folder layouts.
+            from swcstudio.core.provenance import (
+                OpKind,
+                canonical_swc,
+                derived_from_for_swc_path,
+                derived_from_payload,
+                sha256_hex,
+                tracked_op,
             )
-            _print_json(out)
-            if out.get("log_path"):
-                print(f"\nReport file: {out.get('log_path')}")
+            from swcstudio.tools.batch_processing.features.swc_splitter import (
+                split_swc_text,
+            )
+            import time
+
+            folder = Path(args.folder)
+            if not folder.is_dir():
+                raise NotADirectoryError(str(folder))
+
+            cfg_overrides = _parse_config_overrides(args.config_json)
+            run_ts = time.strftime("%Y%m%d_%H%M%S")
+            out_dir = folder / f"{folder.name}_batch_split_{run_ts}"
+            out_dir.mkdir(parents=True, exist_ok=True)
+
+            swcs = sorted(
+                [p for p in folder.iterdir() if p.is_file() and p.suffix.lower() == ".swc"],
+                key=lambda p: p.name.lower(),
+            )
+            if not swcs:
+                raise FileNotFoundError(f"No .swc files found in: {folder}")
+
+            files_total = len(swcs)
+            files_split = files_skipped = trees_saved = 0
+            failures: list[str] = []
+            output_files: list[str] = []
+            output_commits: list[dict] = []
+
+            for fp in swcs:
+                try:
+                    text = fp.read_text(encoding="utf-8", errors="ignore")
+                    trees = split_swc_text(text, config_overrides=cfg_overrides)
+                    if len(trees) <= 1:
+                        files_skipped += 1
+                        continue
+                    files_split += 1
+                    # Use the input file's root hash + (if available) its
+                    # current branch tip as the derived_from anchor.
+                    src_payload = derived_from_for_swc_path(fp)
+                    if src_payload is None:
+                        src_payload = derived_from_payload(
+                            source_root_sha=sha256_hex(canonical_swc(fp.read_bytes())),
+                            source_commit_sha="sha256:" + ("0" * 64),  # sentinel: no commit yet
+                            source_path=fp.name,
+                        )
+
+                    file_out_dir = out_dir / fp.stem
+                    file_out_dir.mkdir(parents=True, exist_ok=True)
+                    for idx, (_root_id, sub_text, _node_count) in enumerate(trees, start=1):
+                        out_path = file_out_dir / f"{fp.stem}_tree_{idx}.swc"
+                        # First, create the new file with the split bytes.
+                        out_path.write_bytes(sub_text.encode("utf-8"))
+                        # Now record a derived_from commit on its history.
+                        try:
+                            with tracked_op(
+                                out_path,
+                                kind=OpKind.SPLIT,
+                                params={"source": fp.name, "tree_index": idx,
+                                        "tree_count": len(trees)},
+                                message=f"split: tree {idx}/{len(trees)} from {fp.name}",
+                                derived_from=src_payload,
+                            ) as op:
+                                # No-op edit relative to the just-written file —
+                                # this records the commit + derived_from with
+                                # input_sha == output_sha.
+                                op.set_output(out_path.read_bytes())
+                            output_commits.append({
+                                "file":       str(out_path.relative_to(out_dir)),
+                                "commit_sha": op.result.commit_sha,
+                            })
+                        except Exception as e:  # noqa: BLE001
+                            failures.append(f"{out_path.name}: history record failed: {e}")
+                        output_files.append(str(out_path.relative_to(out_dir)))
+                        trees_saved += 1
+                except Exception as e:  # noqa: BLE001
+                    failures.append(f"{fp.name}: {e}")
+
+            result = {
+                "folder":         str(folder),
+                "out_dir":        str(out_dir),
+                "files_total":    files_total,
+                "files_split":    files_split,
+                "files_skipped":  files_skipped,
+                "trees_saved":    trees_saved,
+                "output_files":   output_files,
+                "output_commits": output_commits,
+                "failures":       failures,
+            }
+            _print_json(result)
             return 0
 
         if args.tool == "batch" and args.feature == "auto-typing":
@@ -856,33 +1058,143 @@ def main(argv: list[str] | None = None) -> int:
             return 0
 
         if args.tool == "batch" and args.feature == "radii-clean":
-            out = batch_clean_radii_path(
-                str(args.target),
-                config_overrides=_parse_config_overrides(args.config_json),
+            # Converted to provenance layer (rewire checklist item 1.2 #18).
+            # The 'target' arg can be a file or a folder. File mode delegates
+            # to the already-converted single-file path. Folder mode iterates
+            # via _tracked_batch.
+            target = Path(args.target)
+            cfg_overrides = _parse_config_overrides(args.config_json)
+            if target.is_file():
+                # Reuse the converted single-file 'validation radii-clean' path.
+                from swcstudio.core.provenance import OpKind, current_swc_path_for, tracked_op
+                # NOTE: alias the import to avoid shadowing the top-level
+                # merge_config (re-binding it as a local in main() would
+                # break the geometry-simplify branch that uses the global).
+                from swcstudio.core.config import merge_config as _merge_radii
+                from swcstudio.tools.batch_processing.features.radii_cleaning import (
+                    clean_swc_text, get_config as _radii_default_config,
+                )
+                effective_cfg = _merge_radii(_radii_default_config(), cfg_overrides or {})
+                with tracked_op(
+                    target, kind=OpKind.RADII_CLEAN,
+                    params=_config_params(cfg_overrides, effective_cfg),
+                    message="batch radii-clean (single file mode)",
+                ) as op:
+                    in_bytes = op.input_bytes if op.input_bytes is not None else target.read_bytes()
+                    result = clean_swc_text(in_bytes.decode("utf-8", errors="ignore"),
+                                            config_overrides=cfg_overrides)
+                    op.set_output(result["bytes"])
+                _print_json({
+                    "mode": "file",
+                    "input_path": str(target),
+                    "output_path": str(current_swc_path_for(target)),
+                    "passes": int(result.get("passes", 0)),
+                    "radius_changes": int(result.get("changes", 0)),
+                    "change_count": int(len(result.get("change_details", []) or [])),
+                    "commit_sha": op.result.commit_sha,
+                    "branch": op.result.branch,
+                })
+                return 0
+            if not target.is_dir():
+                raise NotADirectoryError(str(target))
+
+            from swcstudio.core.provenance import OpKind
+            from swcstudio.tools.batch_processing.features.radii_cleaning import clean_swc_text
+
+            def _mutate(text: str):
+                return clean_swc_text(text, config_overrides=cfg_overrides)
+
+            def _summary(swc, result, op_result):
+                return (
+                    f"{swc.name}: passes={int(result.get('passes', 0))}, "
+                    f"radius_changes={int(result.get('changes', 0))}"
+                )
+
+            from swcstudio.core.config import merge_config as _merge_radii
+            from swcstudio.tools.batch_processing.features.radii_cleaning import (
+                get_config as _radii_default_config,
             )
-            _print_json(_summarize_batch_radii_output(out))
-            if out.get("log_path"):
-                print(f"\nReport file: {out.get('log_path')}")
+            _radii_effective = _merge_radii(_radii_default_config(), cfg_overrides or {})
+            out = _tracked_batch(
+                target,
+                op_kind=OpKind.RADII_CLEAN,
+                mutate_text=_mutate,
+                params_for=lambda _: _config_params(cfg_overrides, _radii_effective),
+                message="batch radii-clean",
+                per_file_summary=_summary,
+            )
+            out["mode"] = "folder"
+            _print_json(out)
             return 0
 
         if args.tool == "batch" and args.feature == "simplify":
-            out = batch_simplify_folder(
-                str(args.folder),
-                config_overrides=_parse_config_overrides(args.config_json),
+            # Converted to provenance layer (rewire checklist item 1.2 #19).
+            from swcstudio.core.provenance import OpKind
+            from swcstudio.core.config import merge_config as _merge_simp
+            from swcstudio.tools.morphology_editing.features.simplification import (
+                get_config as _simp_default_config,
+                simplify_swc_text,
+            )
+
+            folder = Path(args.folder)
+            if not folder.is_dir():
+                raise NotADirectoryError(str(folder))
+            cfg_overrides = _parse_config_overrides(args.config_json)
+            _simp_effective = _merge_simp(_simp_default_config(), cfg_overrides or {})
+
+            def _mutate(text: str):
+                return simplify_swc_text(text, config_overrides=cfg_overrides)
+
+            def _summary(swc, result, op_result):
+                return (
+                    f"{swc.name}: {int(result.get('original_node_count', 0))} -> "
+                    f"{int(result.get('new_node_count', 0))} nodes "
+                    f"({float(result.get('reduction_percent', 0.0)):.2f}% reduction)"
+                )
+
+            out = _tracked_batch(
+                folder,
+                op_kind=OpKind.SIMPLIFICATION,
+                mutate_text=_mutate,
+                params_for=lambda _: _config_params(cfg_overrides, _simp_effective),
+                message="batch simplify",
+                per_file_summary=_summary,
             )
             _print_json(out)
-            if out.get("log_path"):
-                print(f"\nReport file: {out.get('log_path')}")
             return 0
 
         if args.tool == "batch" and args.feature == "index-clean":
-            out = batch_index_clean_folder(
-                str(args.folder),
-                config_overrides=_parse_config_overrides(args.config_json),
+            # Converted to provenance layer (rewire checklist item 1.2 #20).
+            # NEW: each input SWC gets one commit on its own .history/;
+            # no separate batch output folder is created. Outputs land at
+            # <each>_swc_studio_output/<stem>_current.swc.
+            from swcstudio.core.provenance import OpKind
+            from swcstudio.tools.validation.features.index_clean import index_clean_text
+
+            folder = Path(args.folder)
+            if not folder.is_dir():
+                raise NotADirectoryError(str(folder))
+            cfg_overrides = _parse_config_overrides(args.config_json)
+
+            def _mutate(text: str):
+                return index_clean_text(text, config_overrides=cfg_overrides)
+
+            def _summary(swc, result, op_result):
+                return (
+                    f"{swc.name}: {int(result.get('original_node_count', 0))} nodes -> "
+                    f"{int(result.get('new_node_count', 0))} nodes, "
+                    f"remapped IDs: {int(result.get('remapped_id_count', 0))}"
+                )
+
+            out = _tracked_batch(
+                folder,
+                op_kind=OpKind.INDEX_CLEAN,
+                mutate_text=_mutate,
+                params_for=lambda _: {},
+                message="batch index-clean",
+                per_file_summary=_summary,
             )
             _print_json(out)
-            if out.get("log_path"):
-                print(f"\nReport file: {out.get('log_path')}")
             return 0
 
         # -------- validation
@@ -906,44 +1218,60 @@ def main(argv: list[str] | None = None) -> int:
             return 0
 
         if args.tool == "validation" and args.feature == "radii-clean":
+            # Converted to provenance layer (rewire checklist item 1.1 #6)
+            # for FILE mode. Folder/batch mode (checklist item 1.2 #18) is
+            # untouched here — it falls through to validation_clean_radii_path
+            # below.
+            target = Path(args.target)
+            if target.exists() and target.is_file():
+                from swcstudio.core.provenance import (
+                    OpKind,
+                    current_swc_path_for,
+                    tracked_op,
+                )
+                from swcstudio.core.config import merge_config as _merge_radii
+                from swcstudio.tools.batch_processing.features.radii_cleaning import (
+                    clean_swc_text,
+                    get_config as _radii_default_config,
+                )
+
+                cfg_overrides = _parse_config_overrides(args.config_json)
+                _radii_effective = _merge_radii(_radii_default_config(), cfg_overrides or {})
+
+                with tracked_op(
+                    target,
+                    kind=OpKind.RADII_CLEAN,
+                    params=_config_params(cfg_overrides, _radii_effective),
+                    message="radii-clean (auto)",
+                ) as op:
+                    in_bytes = op.input_bytes if op.input_bytes is not None else target.read_bytes()
+                    in_text = in_bytes.decode("utf-8", errors="ignore")
+                    result = clean_swc_text(in_text, config_overrides=cfg_overrides)
+                    op.set_output(result["bytes"])
+
+                out_print = {
+                    "mode":               "file",
+                    "input_path":         str(target),
+                    "output_path":        str(current_swc_path_for(target)),
+                    "operation_log_path": None,
+                    "passes":             int(result.get("passes", 0)),
+                    "radius_changes":     int(result.get("changes", 0)),
+                    "change_count":       int(len(result.get("change_details", []) or [])),
+                    "commit_sha":         op.result.commit_sha,
+                    "branch":             op.result.branch,
+                    "input_sha":          op.result.input_sha,
+                    "output_sha":         op.result.output_sha,
+                    "diff_ref":           op.result.diff_ref,
+                }
+                _print_json(out_print)
+                return 0
+
+            # Folder / batch mode — untouched until checklist item 1.2 #18.
             out = validation_clean_radii_path(
                 str(args.target),
                 write_file_report=False,
                 config_overrides=_parse_config_overrides(args.config_json),
             )
-            if Path(args.target).is_file() and str(out.get("mode", "")) == "file":
-                target_path = Path(args.target)
-                old_df = parse_swc_text_preserve_tokens(target_path.read_text(encoding="utf-8", errors="ignore"))
-                new_df = out.get("dataframe")
-                change_rows = []
-                for row in list(out.get("change_details", []) or []):
-                    node_id = int(row.get("node_id", -1))
-                    if node_id < 0:
-                        continue
-                    change_rows.append(
-                        {
-                            "node_id": str(node_id),
-                            "changed_keys": ["radius"],
-                            "old_values": {"radius": f"{float(row.get('old_radius', 0.0)):.10g}"},
-                            "new_values": {"radius": f"{float(row.get('new_radius', 0.0)):.10g}"},
-                            "old_parameters": f"radius={float(row.get('old_radius', 0.0)):.10g}",
-                            "new_parameters": f"radius={float(row.get('new_radius', 0.0)):.10g}",
-                        }
-                    )
-                out["operation_log_path"] = _write_cli_operation_report(
-                    target_path,
-                    operation_name="radii_cleaning",
-                    title="Auto Radii Editing",
-                    summary=(
-                        "Applied automatic radii cleaning to current SWC; "
-                        f"passes={int(out.get('passes', 0))}; "
-                        f"radius_changes={int(out.get('radius_changes', 0))}."
-                    ),
-                    details=[],
-                    old_df=old_df,
-                    new_df=new_df,
-                    change_rows=change_rows,
-                )
             out_print = {
                 k: v
                 for k, v in out.items()
@@ -954,56 +1282,82 @@ def main(argv: list[str] | None = None) -> int:
             _print_json(out_print)
             if out.get("log_path"):
                 print(f"\nReport file: {out.get('log_path')}")
-            if out.get("operation_log_path"):
-                print(f"Operation report: {out.get('operation_log_path')}")
             return 0
 
         if args.tool == "validation" and args.feature == "auto-fix":
-            old_df = parse_swc_text_preserve_tokens(Path(args.file).read_text(encoding="utf-8", errors="ignore"))
-            out = auto_fix_file(
-                str(args.file),
-                out_path=None,
-                write_output=True,
-                config_overrides=_parse_config_overrides(args.config_json),
+            # Converted to provenance layer (rewire checklist item 1.1 #4).
+            # Auto-fix carries extra metadata beyond the diff (which rules
+            # fired, what issues were found). We:
+            #   * print the validation results to stdout (user-visible),
+            #   * embed a summary of those results into the commit's params
+            #     so it's queryable later via 'history show',
+            #   * drop the separate validation_auto_fix_<ts>.txt sidecar
+            #     (per spec M9 — equivalent text available via
+            #     'history show <sha> --format=text' plus the validation
+            #     results we just printed).
+            from swcstudio.core.provenance import (
+                OpKind,
+                current_swc_path_for,
+                tracked_op,
             )
-            report = out.get("report", {})
-            if isinstance(report, dict):
-                _print_validation_results(report)
-                report_path = write_text_report(
-                    operation_report_path_for_file(args.file, "validation_auto_fix"),
-                    format_validation_report_text(report),
-                )
-                out["report_path"] = report_path
-                print("\nReport file: " + report_path + "\n")
-            try:
-                new_df = parse_swc_text_preserve_tokens(str(out.get("sanitized_text", "") or ""))
-                out["operation_log_path"] = _write_cli_operation_report(
-                    Path(args.file),
-                    operation_name="validation_auto_fix",
-                    title="Validation Auto Fix",
-                    summary="Validated and sanitized one SWC file.",
-                    details=[
-                        f"Input: {args.file}",
-                        f"Output: {out.get('output_path') or ''}",
-                        f"Result count: {len(list(out.get('rows', []) or []))}",
-                    ],
-                    old_df=old_df,
-                    new_df=new_df,
-                )
-            except Exception:
-                pass
-            # Avoid dumping full sanitized SWC content in terminal.
+            from swcstudio.tools.validation.features.auto_fix import auto_fix_text
+
+            src = Path(args.file)
+            if not src.exists():
+                raise FileNotFoundError(str(src))
+
+            # Run auto-fix once up front so we can include the result count
+            # in the op's params before opening the tracked_op block. The
+            # function is deterministic given the same input + config, so
+            # we'll re-run it inside the block on the same bytes for the
+            # actual mutation. (Cheap; auto-fix is in-memory only.)
+            cfg_overrides = _parse_config_overrides(args.config_json)
+            pre_text = src.read_text(encoding="utf-8", errors="ignore")
+            pre_run = auto_fix_text(pre_text, config_overrides=cfg_overrides)
+            pre_rows = list(pre_run.get("rows", []) or [])
+            pre_report = pre_run.get("report") if isinstance(pre_run.get("report"), dict) else {}
+            pre_summary = dict((pre_report or {}).get("summary", {}))
+            # Effective config (defaults merged with --config-json overrides)
+            # so the recorded params fully describe what controlled the run.
+            from swcstudio.core.config import merge_config as _merge_af
+            from swcstudio.tools.validation.features.auto_fix import (
+                get_config as _af_default_config,
+            )
+            _af_effective = _merge_af(_af_default_config(), cfg_overrides or {})
+
+            _af_params = _config_params(cfg_overrides, _af_effective)
+            _af_params["result_count"]   = len(pre_rows)
+            _af_params["report_summary"] = pre_summary
+            with tracked_op(
+                src,
+                kind=OpKind.AUTO_FIX,
+                params=_af_params,
+                message=f"auto-fix ({len(pre_rows)} issue(s); {pre_summary})",
+            ) as op:
+                in_bytes = op.input_bytes if op.input_bytes is not None else src.read_bytes()
+                in_text = in_bytes.decode("utf-8", errors="ignore")
+                result = auto_fix_text(in_text, config_overrides=cfg_overrides)
+                op.set_output(result["sanitized_bytes"])
+
+            # Print validation results so users still see what was fixed,
+            # exactly like the old handler did.
+            if isinstance(result.get("report"), dict):
+                _print_validation_results(result["report"])
+
             out_print = {
-                "input_path": out.get("input_path"),
-                "output_path": out.get("output_path"),
-                "report_path": out.get("report_path"),
-                "operation_log_path": out.get("operation_log_path"),
-                "result_count": len(list(out.get("rows", []) or [])),
-                "sanitized_text_length": len(str(out.get("sanitized_text", "") or "")),
+                "input_path":            str(src),
+                "output_path":           str(current_swc_path_for(src)),
+                "report_path":           None,  # dropped — see 'history show' + stdout output above
+                "operation_log_path":    None,
+                "result_count":          len(list(result.get("rows", []) or [])),
+                "sanitized_text_length": len(str(result.get("sanitized_text", "") or "")),
+                "commit_sha":            op.result.commit_sha,
+                "branch":                op.result.branch,
+                "input_sha":             op.result.input_sha,
+                "output_sha":            op.result.output_sha,
+                "diff_ref":              op.result.diff_ref,
             }
             _print_json(out_print)
-            if out.get("operation_log_path"):
-                print(f"Operation report: {out.get('operation_log_path')}")
             return 0
 
         if args.tool == "validation" and args.feature == "auto-label":
@@ -1067,39 +1421,49 @@ def main(argv: list[str] | None = None) -> int:
             return 0
 
         if args.tool == "validation" and args.feature == "index-clean":
-            old_df = parse_swc_text_preserve_tokens(Path(args.file).read_text(encoding="utf-8", errors="ignore"))
-            out = validation_index_clean_file(
-                str(args.file),
-                out_path=None,
-                write_output=True,
-                write_report=False,
-                config_overrides=_parse_config_overrides(args.config_json),
+            # Converted to provenance layer (rewire checklist item 1.1 #7).
+            from swcstudio.core.provenance import (
+                OpKind,
+                current_swc_path_for,
+                tracked_op,
             )
-            out["operation_log_path"] = _write_cli_operation_report(
-                Path(args.file),
-                operation_name="validation_index_clean",
-                title="Validation Index Clean",
-                summary="Reordered and reindexed the SWC for clean parent-before-child indexing.",
-                details=validation_index_clean_detail_lines(
-                    input_path=str(args.file),
-                    output_path=str(out.get("output_path") or ""),
-                    original_node_count=int(out.get("original_node_count", 0)),
-                    new_node_count=int(out.get("new_node_count", 0)),
-                    remapped_id_count=int(out.get("remapped_id_count", 0)),
-                ),
-                old_df=old_df,
-                new_df=out.get("dataframe"),
-                id_map=dict(out.get("id_map", {}) or {}),
+            from swcstudio.tools.validation.features.index_clean import (
+                index_clean_text,
             )
-            out_print = {k: v for k, v in out.items() if k not in {"bytes", "dataframe", "id_map", "config_used"}}
-            if not out_print.get("log_path"):
-                out_print.pop("log_path", None)
-            out_print["id_map_size"] = len(dict(out.get("id_map", {})))
+
+            src = Path(args.file)
+            if not src.exists():
+                raise FileNotFoundError(str(src))
+
+            with tracked_op(
+                src,
+                kind=OpKind.INDEX_CLEAN,
+                params={},
+                message="index-clean (reorder + reindex)",
+            ) as op:
+                in_bytes = op.input_bytes if op.input_bytes is not None else src.read_bytes()
+                in_text = in_bytes.decode("utf-8", errors="ignore")
+                result = index_clean_text(
+                    in_text,
+                    config_overrides=_parse_config_overrides(args.config_json),
+                )
+                op.set_output(result["bytes"])
+
+            out_print = {
+                "original_node_count": int(result.get("original_node_count", 0)),
+                "new_node_count":      int(result.get("new_node_count", 0)),
+                "remapped_id_count":   int(result.get("remapped_id_count", 0)),
+                "id_map_size":         len(dict(result.get("id_map", {}))),
+                "input_path":          str(src),
+                "output_path":         str(current_swc_path_for(src)),
+                "operation_log_path":  None,
+                "commit_sha":          op.result.commit_sha,
+                "branch":              op.result.branch,
+                "input_sha":           op.result.input_sha,
+                "output_sha":          op.result.output_sha,
+                "diff_ref":            op.result.diff_ref,
+            }
             _print_json(out_print)
-            if out.get("log_path"):
-                print(f"\nReport file: {out.get('log_path')}")
-            if out.get("operation_log_path"):
-                print(f"Operation report: {out.get('operation_log_path')}")
             return 0
 
         # -------- visualization
@@ -1114,388 +1478,402 @@ def main(argv: list[str] | None = None) -> int:
 
         # -------- morphology
         if args.tool == "morphology" and args.feature == "dendrogram-edit":
-            old_df = parse_swc_text_preserve_tokens(Path(args.file).read_text(encoding="utf-8", errors="ignore"))
-            out = reassign_subtree_types_in_file(
-                str(args.file),
-                node_id=int(args.node_id),
-                new_type=int(args.new_type),
-                out_path=None,
-                write_output=True,
-                config_overrides=_parse_config_overrides(args.config_json),
+            # Converted to provenance layer (rewire checklist item 1.1 #3).
+            from swcstudio.core.provenance import (
+                OpKind,
+                current_swc_path_for,
+                tracked_op,
             )
-            out["operation_log_path"] = _write_cli_operation_report(
-                Path(args.file),
-                operation_name="morphology_dendrogram_edit",
-                title="Manual Label Edit",
-                summary="Applied labeling edits in Morphology Editing.",
-                details=[],
-                    old_df=old_df,
-                    new_df=out.get("dataframe"),
+            from swcstudio.tools.morphology_editing.features.dendrogram_editing import (
+                reassign_subtree_types,
             )
-            out_print = _summarize_dendrogram_edit_output(out)
+
+            src = Path(args.file)
+            if not src.exists():
+                raise FileNotFoundError(str(src))
+
+            with tracked_op(
+                src,
+                kind=OpKind.DENDROGRAM_EDIT,
+                params={
+                    "node_id":  int(args.node_id),
+                    "new_type": int(args.new_type),
+                },
+                message=f"dendrogram-edit subtree at node={args.node_id} → type={args.new_type}",
+            ) as op:
+                in_bytes = op.input_bytes if op.input_bytes is not None else src.read_bytes()
+                in_text = in_bytes.decode("utf-8", errors="ignore")
+                result = reassign_subtree_types(
+                    in_text,
+                    node_id=int(args.node_id),
+                    new_type=int(args.new_type),
+                    config_overrides=_parse_config_overrides(args.config_json),
+                )
+                op.set_output(result["bytes"])
+
+            changed_ids = list(result.get("changed_node_ids", []) or [])
+            out_print = {
+                "changes":                int(result.get("changes", 0)),
+                "changed_node_count":     len(changed_ids),
+                "input_path":             str(src),
+                "output_path":            str(current_swc_path_for(src)),
+                "operation_log_path":     None,
+                "commit_sha":             op.result.commit_sha,
+                "branch":                 op.result.branch,
+                "input_sha":              op.result.input_sha,
+                "output_sha":             op.result.output_sha,
+                "diff_ref":               op.result.diff_ref,
+            }
+            if changed_ids:
+                out_print["changed_node_id_preview"] = changed_ids[:10]
             _print_json(out_print)
-            if out.get("operation_log_path"):
-                print(f"\nOperation report: {out.get('operation_log_path')}")
             return 0
 
         if args.tool == "morphology" and args.feature == "set-radius":
-            old_df = parse_swc_text_preserve_tokens(Path(args.file).read_text(encoding="utf-8", errors="ignore"))
-            out = set_node_radius_file(
-                str(args.file),
-                node_id=int(args.node_id),
-                radius=float(args.radius),
-                out_path=None,
-                write_output=True,
-                config_overrides=_parse_config_overrides(args.config_json),
+            # Converted to provenance layer (rewire checklist item 1.1 #2).
+            # Same pattern as morphology set-type — see commit 990ee714.
+            from swcstudio.core.provenance import (
+                OpKind,
+                current_swc_path_for,
+                tracked_op,
             )
-            out["operation_log_path"] = _write_cli_operation_report(
-                Path(args.file),
-                operation_name="morphology_set_radius",
-                title="Manual Radius Edit",
-                summary=(
-                    f"Updated node {int(args.node_id)} radius from "
-                    f"{float(out.get('old_radius', 0.0)):.6g} to {float(out.get('new_radius', 0.0)):.6g}."
-                ),
-                details=[],
-                old_df=old_df,
-                new_df=out.get("dataframe"),
+            from swcstudio.tools.morphology_editing.features.manual_radii import (
+                set_node_radius_text,
             )
-            out_print = {k: v for k, v in out.items() if k not in {"bytes", "dataframe", "config_used"}}
+
+            src = Path(args.file)
+            if not src.exists():
+                raise FileNotFoundError(str(src))
+
+            with tracked_op(
+                src,
+                kind=OpKind.SET_RADIUS,
+                params={"node_id": int(args.node_id), "radius": float(args.radius)},
+                message=f"set-radius node={args.node_id} radius={args.radius}",
+            ) as op:
+                in_bytes = op.input_bytes if op.input_bytes is not None else src.read_bytes()
+                in_text = in_bytes.decode("utf-8", errors="ignore")
+                result = set_node_radius_text(
+                    in_text,
+                    node_id=int(args.node_id),
+                    radius=float(args.radius),
+                    config_overrides=_parse_config_overrides(args.config_json),
+                )
+                op.set_output(result["bytes"])
+
+            out_print = {
+                "node_id":            int(args.node_id),
+                "old_radius":         float(result.get("old_radius", 0.0)),
+                "new_radius":         float(result.get("new_radius", 0.0)),
+                "input_path":         str(src),
+                "output_path":        str(current_swc_path_for(src)),
+                "operation_log_path": None,
+                "commit_sha":         op.result.commit_sha,
+                "branch":             op.result.branch,
+                "input_sha":          op.result.input_sha,
+                "output_sha":         op.result.output_sha,
+                "diff_ref":           op.result.diff_ref,
+            }
             _print_json(out_print)
-            if out.get("operation_log_path"):
-                print(f"\nOperation report: {out.get('operation_log_path')}")
             return 0
 
         if args.tool == "morphology" and args.feature == "set-type":
-            old_df = parse_swc_text_preserve_tokens(Path(args.file).read_text(encoding="utf-8", errors="ignore"))
-            out = set_node_type_file(
-                str(args.file),
-                node_id=int(args.node_id),
-                new_type=int(args.new_type),
-                out_path=None,
-                write_output=True,
-                config_overrides=_parse_config_overrides(args.config_json),
+            # Converted to provenance layer per PROVENANCE_CONVERSION_GUIDE.md
+            # (rewire checklist item 1.1 #1). The mutation now flows through
+            # tracked_op so the edit is recorded as a commit in .history/;
+            # the old timestamped output file + text report path is replaced
+            # by a refreshed <stem>_current.swc with @PROV header.
+            from swcstudio.core.provenance import (
+                OpKind,
+                current_swc_path_for,
+                tracked_op,
             )
-            out["operation_log_path"] = _write_cli_operation_report(
-                Path(args.file),
-                operation_name="morphology_set_type",
-                title="Manual Label Edit",
-                summary="Applied labeling edits in Morphology Editing.",
-                details=[],
-                old_df=old_df,
-                new_df=out.get("dataframe"),
+            from swcstudio.tools.morphology_editing.features.manual_label import (
+                set_node_type_text,
             )
-            out_print = {k: v for k, v in out.items() if k not in {"bytes", "dataframe", "config_used"}}
+
+            src = Path(args.file)
+            if not src.exists():
+                raise FileNotFoundError(str(src))
+
+            with tracked_op(
+                src,
+                kind=OpKind.SET_TYPE,
+                params={"node_id": int(args.node_id), "new_type": int(args.new_type)},
+                message=f"set-type node={args.node_id} type={args.new_type}",
+            ) as op:
+                # op.input_bytes is the latest committed state (falls back to
+                # the original file on the first commit). Always edit from
+                # there so chained commits build on each other.
+                in_bytes = op.input_bytes if op.input_bytes is not None else src.read_bytes()
+                in_text = in_bytes.decode("utf-8", errors="ignore")
+                result = set_node_type_text(
+                    in_text,
+                    node_id=int(args.node_id),
+                    new_type=int(args.new_type),
+                    config_overrides=_parse_config_overrides(args.config_json),
+                )
+                op.set_output(result["bytes"])
+
+            # JSON contract: keep every key the old handler emitted, plus the
+            # new provenance fields scripts can opt into.
+            out_print = {
+                "node_id":            int(args.node_id),
+                "new_type":           int(args.new_type),
+                "old_type":           int(result.get("old_type", 0)),
+                "input_path":         str(src),
+                "output_path":        str(current_swc_path_for(src)),
+                "operation_log_path": None,  # no per-op text report under the new design
+                "commit_sha":         op.result.commit_sha,
+                "branch":             op.result.branch,
+                "input_sha":          op.result.input_sha,
+                "output_sha":         op.result.output_sha,
+                "diff_ref":           op.result.diff_ref,
+            }
             _print_json(out_print)
-            if out.get("operation_log_path"):
-                print(f"\nOperation report: {out.get('operation_log_path')}")
             return 0
 
         # -------- geometry
         if args.tool == "geometry" and args.feature:
             if args.feature == "simplify":
-                old_df = parse_swc_text_preserve_tokens(Path(args.file).read_text(encoding="utf-8", errors="ignore"))
+                # Converted to provenance layer (rewire checklist item 1.1 #8).
+                from swcstudio.core.provenance import (
+                    OpKind,
+                    current_swc_path_for,
+                    tracked_op,
+                )
+                from swcstudio.tools.morphology_editing.features.simplification import (
+                    simplify_swc_text,
+                )
+
+                src = Path(args.file)
+                if not src.exists():
+                    raise FileNotFoundError(str(src))
+
                 cfg_overrides = _parse_config_overrides(args.config_json)
                 cfg_effective = merge_config(get_simplification_config(), cfg_overrides or {})
                 _print_simplification_rule_guide(cfg_effective)
-                out = simplify_morphology_file(
-                    str(args.file),
-                    out_path=None,
-                    write_output=True,
-                    write_report=False,
-                    config_overrides=cfg_overrides,
-                )
+
+                with tracked_op(
+                    src,
+                    kind=OpKind.SIMPLIFICATION,
+                    params=_config_params(cfg_overrides, cfg_effective),
+                    message="geometry simplify",
+                ) as op:
+                    in_bytes = op.input_bytes if op.input_bytes is not None else src.read_bytes()
+                    in_text = in_bytes.decode("utf-8", errors="ignore")
+                    result = simplify_swc_text(in_text, config_overrides=cfg_overrides)
+                    op.set_output(result["bytes"])
+
                 out_print = {
-                    k: v
-                    for k, v in out.items()
-                    if k not in {"bytes", "dataframe", "kept_node_ids", "removed_node_ids", "summary"}
+                    "input_path":          str(src),
+                    "output_path":         str(current_swc_path_for(src)),
+                    "operation_log_path":  None,
+                    "original_node_count": int(result.get("original_node_count", 0)),
+                    "new_node_count":      int(result.get("new_node_count", 0)),
+                    "reduction_percent":   float(result.get("reduction_percent", 0.0)),
+                    "kept_node_count":     len(list(result.get("kept_node_ids", []) or [])),
+                    "removed_node_count":  len(list(result.get("removed_node_ids", []) or [])),
+                    "protected_counts":    dict(result.get("protected_counts", {}) or {}),
+                    "params_used":         dict(result.get("params_used", {}) or {}),
+                    "commit_sha":          op.result.commit_sha,
+                    "branch":              op.result.branch,
+                    "input_sha":           op.result.input_sha,
+                    "output_sha":          op.result.output_sha,
+                    "diff_ref":            op.result.diff_ref,
                 }
-                out["operation_log_path"] = _write_cli_operation_report(
-                    Path(args.file),
-                    operation_name="geometry_simplify",
-                    title="Simplification",
-                    summary=(
-                        f"Simplified the current SWC from {int(out.get('original_node_count', 0))} "
-                        f"to {int(out.get('new_node_count', 0))} nodes."
-                    ),
-                    details=[
-                        f"Reduction (%): {float(out.get('reduction_percent', 0.0)):.2f}",
-                        f"Removed nodes: {len(list(out.get('removed_node_ids', []) or []))}",
-                        f"Protected counts: {dict(out.get('protected_counts', {}))}",
-                        f"Parameters used: {dict(out.get('params_used', {}))}",
-                    ],
-                    old_df=old_df,
-                    new_df=out.get("dataframe"),
-                )
-                out_print["kept_node_count"] = len(list(out.get("kept_node_ids", [])))
-                out_print["removed_node_count"] = len(list(out.get("removed_node_ids", [])))
-                if not out_print.get("log_path"):
-                    out_print.pop("log_path", None)
-                out_print["operation_log_path"] = out.get("operation_log_path")
                 _print_json(out_print)
-                if out.get("log_path"):
-                    print(f"\nReport file: {out.get('log_path')}")
-                if out.get("operation_log_path"):
-                    print(f"Operation report: {out.get('operation_log_path')}")
                 return 0
 
             file_path = Path(args.file)
             if not file_path.exists():
                 raise FileNotFoundError(str(file_path))
-            text = file_path.read_text(encoding="utf-8", errors="ignore")
-            df = parse_swc_text_preserve_tokens(text)
+            # NOTE: each geometry sub-handler below uses tracked_op to read
+            # op.input_bytes (latest committed state) rather than re-reading
+            # the source file. The old pre-parse of `df` is unnecessary now.
 
             if args.feature == "move-node":
-                out_df = geometry_move_node_absolute(df, int(args.node_id), float(args.x), float(args.y), float(args.z))
-                output_path = _write_geometry_output(
+                # Converted to provenance layer (rewire checklist item 1.1 #9).
+                from swcstudio.core.provenance import OpKind, current_swc_path_for, tracked_op
+                with tracked_op(
                     file_path,
-                    out_df,
-                    operation_name="geometry_move_node",
-                )
-                operation_log_path = _write_cli_operation_report(
-                    file_path,
-                    operation_name="geometry_move_node",
-                    title="Move Node",
-                    summary=f"Moved node {int(args.node_id)} to absolute coordinates.",
-                    details=[
-                        f"Node ID: {int(args.node_id)}",
-                        f"New XYZ: ({float(args.x):.5g}, {float(args.y):.5g}, {float(args.z):.5g})",
-                        f"Output: {output_path or '(not written)'}",
-                    ],
-                    old_df=df,
-                    new_df=out_df,
-                    output_dir=Path(output_path).parent,
-                )
-                _print_json({"operation": "move-node", "node_id": int(args.node_id), "output_path": output_path, "operation_log_path": operation_log_path})
+                    kind=OpKind.GEOMETRY_EDIT,
+                    params={"op": "move-node", "node_id": int(args.node_id),
+                            "x": float(args.x), "y": float(args.y), "z": float(args.z)},
+                    message=f"geometry move-node id={args.node_id} → ({args.x},{args.y},{args.z})",
+                ) as op:
+                    in_bytes = op.input_bytes if op.input_bytes is not None else file_path.read_bytes()
+                    in_df = parse_swc_text_preserve_tokens(in_bytes.decode("utf-8", errors="ignore"))
+                    out_df = geometry_move_node_absolute(
+                        in_df, int(args.node_id),
+                        float(args.x), float(args.y), float(args.z),
+                    )
+                    op.set_output(write_swc_to_bytes_preserve_tokens(out_df))
+                _print_json({
+                    "operation":          "move-node",
+                    "node_id":            int(args.node_id),
+                    "output_path":        str(current_swc_path_for(file_path)),
+                    "operation_log_path": None,
+                    "commit_sha":         op.result.commit_sha,
+                    "branch":             op.result.branch,
+                    "input_sha":          op.result.input_sha,
+                    "output_sha":         op.result.output_sha,
+                    "diff_ref":           op.result.diff_ref,
+                })
                 return 0
 
             if args.feature == "move-subtree":
-                out_df = geometry_move_subtree_absolute(df, int(args.root_id), float(args.x), float(args.y), float(args.z))
-                output_path = _write_geometry_output(
+                from swcstudio.core.provenance import OpKind, current_swc_path_for, tracked_op
+                with tracked_op(
                     file_path,
-                    out_df,
-                    operation_name="geometry_move_subtree",
-                )
-                operation_log_path = _write_cli_operation_report(
-                    file_path,
-                    operation_name="geometry_move_subtree",
-                    title="Move Subtree",
-                    summary=f"Moved subtree rooted at node {int(args.root_id)} to absolute coordinates.",
-                    details=[
-                        f"Root node ID: {int(args.root_id)}",
-                        f"New XYZ: ({float(args.x):.5g}, {float(args.y):.5g}, {float(args.z):.5g})",
-                        f"Output: {output_path or '(not written)'}",
-                    ],
-                    old_df=df,
-                    new_df=out_df,
-                    output_dir=Path(output_path).parent,
-                )
-                _print_json({"operation": "move-subtree", "root_id": int(args.root_id), "output_path": output_path, "operation_log_path": operation_log_path})
+                    kind=OpKind.GEOMETRY_EDIT,
+                    params={"op": "move-subtree", "root_id": int(args.root_id),
+                            "x": float(args.x), "y": float(args.y), "z": float(args.z)},
+                    message=f"geometry move-subtree root={args.root_id} → ({args.x},{args.y},{args.z})",
+                ) as op:
+                    in_bytes = op.input_bytes if op.input_bytes is not None else file_path.read_bytes()
+                    in_df = parse_swc_text_preserve_tokens(in_bytes.decode("utf-8", errors="ignore"))
+                    out_df = geometry_move_subtree_absolute(
+                        in_df, int(args.root_id),
+                        float(args.x), float(args.y), float(args.z),
+                    )
+                    op.set_output(write_swc_to_bytes_preserve_tokens(out_df))
+                _print_json({
+                    "operation": "move-subtree", "root_id": int(args.root_id),
+                    "output_path": str(current_swc_path_for(file_path)),
+                    "operation_log_path": None,
+                    "commit_sha": op.result.commit_sha, "branch": op.result.branch,
+                    "input_sha": op.result.input_sha, "output_sha": op.result.output_sha,
+                    "diff_ref": op.result.diff_ref,
+                })
                 return 0
 
             if args.feature == "connect":
-                end_row = df.loc[df["id"].astype(int) == int(args.end_id)].iloc[0]
-                old_parent = int(end_row["parent"])
-                out_df = geometry_reconnect_branch(df, int(args.start_id), int(args.end_id))
-                output_path = _write_geometry_output(
+                from swcstudio.core.provenance import OpKind, current_swc_path_for, tracked_op
+                with tracked_op(
                     file_path,
-                    out_df,
-                    operation_name="geometry_connect",
-                )
-                operation_log_path = _write_cli_operation_report(
-                    file_path,
-                    operation_name="geometry_connect",
-                    title="Reconnect Branch",
-                    summary=f"Connected end node {int(args.end_id)} to start node {int(args.start_id)}.",
-                    details=[
-                        f"Start node ID: {int(args.start_id)}",
-                        f"End node ID: {int(args.end_id)}",
-                        f"End node old parent ID: {old_parent}",
-                        f"End node new parent ID: {int(args.start_id)}",
-                        "Node IDs preserved; no automatic renumbering.",
-                    ],
-                    old_df=df,
-                    new_df=out_df,
-                    output_dir=Path(output_path).parent,
-                )
+                    kind=OpKind.GEOMETRY_EDIT,
+                    params={"op": "connect", "start_id": int(args.start_id), "end_id": int(args.end_id)},
+                    message=f"geometry connect end={args.end_id} → parent={args.start_id}",
+                ) as op:
+                    in_bytes = op.input_bytes if op.input_bytes is not None else file_path.read_bytes()
+                    in_df = parse_swc_text_preserve_tokens(in_bytes.decode("utf-8", errors="ignore"))
+                    out_df = geometry_reconnect_branch(in_df, int(args.start_id), int(args.end_id))
+                    op.set_output(write_swc_to_bytes_preserve_tokens(out_df))
                 _print_json({
                     "operation": "connect",
-                    "start_id": int(args.start_id),
-                    "end_id": int(args.end_id),
-                    "output_path": output_path,
-                    "operation_log_path": operation_log_path,
+                    "start_id": int(args.start_id), "end_id": int(args.end_id),
+                    "output_path": str(current_swc_path_for(file_path)),
+                    "operation_log_path": None,
+                    "commit_sha": op.result.commit_sha, "branch": op.result.branch,
+                    "input_sha": op.result.input_sha, "output_sha": op.result.output_sha,
+                    "diff_ref": op.result.diff_ref,
                 })
                 return 0
 
             if args.feature == "disconnect":
-                parent_by_id = {
-                    int(row["id"]): int(row["parent"])
-                    for _, row in df[["id", "parent"]].iterrows()
-                }
-                path = path_between_nodes(df, int(args.start_id), int(args.end_id))
-                if len(path) < 2:
-                    raise ValueError("Start and end nodes are not connected.")
-                disconnected_children: list[int] = []
-                old_edges: list[str] = []
-                for left, right in zip(path[:-1], path[1:]):
-                    left = int(left)
-                    right = int(right)
-                    if int(parent_by_id.get(left, -1)) == right:
-                        disconnected_children.append(left)
-                        old_edges.append(f"{right} -> {left}")
-                    elif int(parent_by_id.get(right, -1)) == left:
-                        disconnected_children.append(right)
-                        old_edges.append(f"{left} -> {right}")
-                    else:
-                        raise ValueError("Encountered a non-parent-child step while disconnecting the selected path.")
-                out_df = geometry_disconnect_branch(df, int(args.start_id), int(args.end_id))
-                output_path = _write_geometry_output(
+                from swcstudio.core.provenance import OpKind, current_swc_path_for, tracked_op
+                with tracked_op(
                     file_path,
-                    out_df,
-                    operation_name="geometry_disconnect",
-                )
-                operation_log_path = _write_cli_operation_report(
-                    file_path,
-                    operation_name="geometry_disconnect",
-                    title="Disconnect Branch",
-                    summary=f"Disconnected the path between {int(args.start_id)} and {int(args.end_id)}.",
-                    details=[
-                        f"Start node ID: {int(args.start_id)}",
-                        f"End node ID: {int(args.end_id)}",
-                        f"Path nodes: {', '.join(str(v) for v in path)}",
-                        f"Disconnected child node IDs: {', '.join(str(v) for v in disconnected_children)}",
-                        f"Disconnected edges: {', '.join(old_edges)}",
-                        "New parent IDs on disconnected child nodes: -1",
-                        "Node IDs preserved; no automatic renumbering.",
-                    ],
-                    old_df=df,
-                    new_df=out_df,
-                    output_dir=Path(output_path).parent,
-                )
+                    kind=OpKind.GEOMETRY_EDIT,
+                    params={"op": "disconnect", "start_id": int(args.start_id), "end_id": int(args.end_id)},
+                    message=f"geometry disconnect path {args.start_id} … {args.end_id}",
+                ) as op:
+                    in_bytes = op.input_bytes if op.input_bytes is not None else file_path.read_bytes()
+                    in_df = parse_swc_text_preserve_tokens(in_bytes.decode("utf-8", errors="ignore"))
+                    # Sanity check the path exists (raises if not connected)
+                    path = path_between_nodes(in_df, int(args.start_id), int(args.end_id))
+                    if len(path) < 2:
+                        raise ValueError("Start and end nodes are not connected.")
+                    out_df = geometry_disconnect_branch(in_df, int(args.start_id), int(args.end_id))
+                    op.set_output(write_swc_to_bytes_preserve_tokens(out_df))
                 _print_json({
                     "operation": "disconnect",
-                    "start_id": int(args.start_id),
-                    "end_id": int(args.end_id),
-                    "output_path": output_path,
-                    "operation_log_path": operation_log_path,
+                    "start_id": int(args.start_id), "end_id": int(args.end_id),
+                    "output_path": str(current_swc_path_for(file_path)),
+                    "operation_log_path": None,
+                    "commit_sha": op.result.commit_sha, "branch": op.result.branch,
+                    "input_sha": op.result.input_sha, "output_sha": op.result.output_sha,
+                    "diff_ref": op.result.diff_ref,
                 })
                 return 0
 
             if args.feature == "delete-node":
-                row = df.loc[df["id"].astype(int) == int(args.node_id)].iloc[0]
-                child_count = int((df["parent"].astype(int) == int(args.node_id)).sum())
-                out_df = geometry_delete_node(df, int(args.node_id), reconnect_children=bool(args.reconnect_children))
-                output_path = _write_geometry_output(
+                from swcstudio.core.provenance import OpKind, current_swc_path_for, tracked_op
+                with tracked_op(
                     file_path,
-                    out_df,
-                    operation_name="geometry_delete_node",
-                )
-                operation_log_path = _write_cli_operation_report(
-                    file_path,
-                    operation_name="geometry_delete_node",
-                    title="Delete Node" if not bool(args.reconnect_children) else "Delete Node + Reconnect Children",
-                    summary=f"Deleted node {int(args.node_id)}.",
-                    details=[
-                        f"Node ID: {int(args.node_id)}",
-                        f"Type: {label_for_type(int(row['type']))} ({int(row['type'])})",
-                        f"Child count: {child_count}",
-                        f"Reconnect children: {'yes' if bool(args.reconnect_children) else 'no'}",
-                        "Remaining node IDs preserved; no automatic renumbering.",
-                    ],
-                    old_df=df,
-                    new_df=out_df,
-                    output_dir=Path(output_path).parent,
-                )
+                    kind=OpKind.GEOMETRY_EDIT,
+                    params={"op": "delete-node", "node_id": int(args.node_id),
+                            "reconnect_children": bool(args.reconnect_children)},
+                    message=f"geometry delete-node id={args.node_id} reconnect={bool(args.reconnect_children)}",
+                ) as op:
+                    in_bytes = op.input_bytes if op.input_bytes is not None else file_path.read_bytes()
+                    in_df = parse_swc_text_preserve_tokens(in_bytes.decode("utf-8", errors="ignore"))
+                    out_df = geometry_delete_node(in_df, int(args.node_id),
+                                                  reconnect_children=bool(args.reconnect_children))
+                    op.set_output(write_swc_to_bytes_preserve_tokens(out_df))
                 _print_json({
                     "operation": "delete-node",
                     "node_id": int(args.node_id),
                     "reconnect_children": bool(args.reconnect_children),
-                    "output_path": output_path,
-                    "operation_log_path": operation_log_path,
+                    "output_path": str(current_swc_path_for(file_path)),
+                    "operation_log_path": None,
+                    "commit_sha": op.result.commit_sha, "branch": op.result.branch,
+                    "input_sha": op.result.input_sha, "output_sha": op.result.output_sha,
+                    "diff_ref": op.result.diff_ref,
                 })
                 return 0
 
             if args.feature == "delete-subtree":
-                subtree_size = int(len(subtree_node_ids(df, int(args.root_id))))
-                out_df = geometry_delete_subtree(df, int(args.root_id))
-                output_path = _write_geometry_output(
+                from swcstudio.core.provenance import OpKind, current_swc_path_for, tracked_op
+                with tracked_op(
                     file_path,
-                    out_df,
-                    operation_name="geometry_delete_subtree",
-                )
-                operation_log_path = _write_cli_operation_report(
-                    file_path,
-                    operation_name="geometry_delete_subtree",
-                    title="Delete Subtree",
-                    summary=f"Deleted subtree rooted at node {int(args.root_id)}.",
-                    details=[
-                        f"Subtree root ID: {int(args.root_id)}",
-                        f"Removed node count: {subtree_size}",
-                        "Remaining node IDs preserved; no automatic renumbering.",
-                    ],
-                    old_df=df,
-                    new_df=out_df,
-                    output_dir=Path(output_path).parent,
-                )
+                    kind=OpKind.GEOMETRY_EDIT,
+                    params={"op": "delete-subtree", "root_id": int(args.root_id)},
+                    message=f"geometry delete-subtree root={args.root_id}",
+                ) as op:
+                    in_bytes = op.input_bytes if op.input_bytes is not None else file_path.read_bytes()
+                    in_df = parse_swc_text_preserve_tokens(in_bytes.decode("utf-8", errors="ignore"))
+                    out_df = geometry_delete_subtree(in_df, int(args.root_id))
+                    op.set_output(write_swc_to_bytes_preserve_tokens(out_df))
                 _print_json({
                     "operation": "delete-subtree",
                     "root_id": int(args.root_id),
-                    "output_path": output_path,
-                    "operation_log_path": operation_log_path,
+                    "output_path": str(current_swc_path_for(file_path)),
+                    "operation_log_path": None,
+                    "commit_sha": op.result.commit_sha, "branch": op.result.branch,
+                    "input_sha": op.result.input_sha, "output_sha": op.result.output_sha,
+                    "diff_ref": op.result.diff_ref,
                 })
                 return 0
 
             if args.feature == "insert":
-                end_row = None
-                if int(args.end_id) >= 0:
-                    end_row = df.loc[df["id"].astype(int) == int(args.end_id)].iloc[0]
-                inserted_node_id = int(df["id"].astype(int).max()) + 1
-                out_df = geometry_insert_node_between(
-                    df,
-                    int(args.start_id),
-                    int(args.end_id),
-                    x=float(args.x),
-                    y=float(args.y),
-                    z=float(args.z),
-                    radius=args.radius,
-                    type_id=args.type_id,
-                )
-                output_path = _write_geometry_output(
+                from swcstudio.core.provenance import OpKind, current_swc_path_for, tracked_op
+                with tracked_op(
                     file_path,
-                    out_df,
-                    operation_name="geometry_insert",
-                )
-                operation_log_path = _write_cli_operation_report(
-                    file_path,
-                    operation_name="geometry_insert",
-                    title="Insert Node",
-                    summary=(
-                        f"Inserted a node between {int(args.start_id)} and {int(args.end_id)}."
-                        if int(args.end_id) >= 0
-                        else f"Inserted a child node under {int(args.start_id)}."
-                    ),
-                    details=[
-                        f"Start node ID: {int(args.start_id)}",
-                        f"End node ID: {int(args.end_id)}" if int(args.end_id) >= 0 else "End node ID: None",
-                        f"Inserted node ID: {inserted_node_id}",
-                        (
-                            f"End node type: {label_for_type(int(end_row['type']))} ({int(end_row['type'])})"
-                            if end_row is not None
-                            else "Inserted node has no child; end node was not provided."
-                        ),
-                        f"Inserted XYZ: ({float(args.x):.5g}, {float(args.y):.5g}, {float(args.z):.5g})",
-                        "Existing node IDs preserved; inserted node uses max(existing ID)+1.",
-                    ],
-                    old_df=df,
-                    new_df=out_df,
-                    output_dir=Path(output_path).parent,
-                )
+                    kind=OpKind.GEOMETRY_EDIT,
+                    params={"op": "insert", "start_id": int(args.start_id), "end_id": int(args.end_id),
+                            "x": float(args.x), "y": float(args.y), "z": float(args.z),
+                            "radius": args.radius, "type_id": args.type_id},
+                    message=f"geometry insert between {args.start_id} and {args.end_id}",
+                ) as op:
+                    in_bytes = op.input_bytes if op.input_bytes is not None else file_path.read_bytes()
+                    in_df = parse_swc_text_preserve_tokens(in_bytes.decode("utf-8", errors="ignore"))
+                    out_df = geometry_insert_node_between(
+                        in_df,
+                        int(args.start_id), int(args.end_id),
+                        x=float(args.x), y=float(args.y), z=float(args.z),
+                        radius=args.radius, type_id=args.type_id,
+                    )
+                    op.set_output(write_swc_to_bytes_preserve_tokens(out_df))
                 _print_json({
                     "operation": "insert",
-                    "start_id": int(args.start_id),
-                    "end_id": int(args.end_id),
-                    "output_path": output_path,
-                    "operation_log_path": operation_log_path,
+                    "start_id": int(args.start_id), "end_id": int(args.end_id),
+                    "output_path": str(current_swc_path_for(file_path)),
+                    "operation_log_path": None,
+                    "commit_sha": op.result.commit_sha, "branch": op.result.branch,
+                    "input_sha": op.result.input_sha, "output_sha": op.result.output_sha,
+                    "diff_ref": op.result.diff_ref,
                 })
                 return 0
 

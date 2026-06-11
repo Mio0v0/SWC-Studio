@@ -1,6 +1,30 @@
 """Plugin contract models for swcstudio.
 
 This module defines a minimal, versioned contract for external plugins.
+
+Provenance requirement (PROVENANCE_SPEC.md M13)
+------------------------------------------------
+Any plugin that mutates SWC bytes MUST do so inside a
+:func:`swcstudio.core.provenance.tracked_op` context (or
+:func:`tracked_session` for multi-op interactive flows). Direct file
+writes bypass the provenance chain and are unsupported.
+
+The canonical pattern::
+
+    from swcstudio.core.provenance import tracked_op
+
+    def my_plugin_op(swc_path, *, my_param):
+        with tracked_op(swc_path, kind="plugin_op",
+                        params={"plugin": "my-plugin", "my_param": my_param},
+                        message="my plugin description") as op:
+            new_bytes = mutate(op.input_bytes, my_param)
+            op.set_output(new_bytes)
+        return op.result
+
+The ``plugin_op`` op kind is reserved for this purpose and accepts
+arbitrary ``params``. Plugins that need a richer typed op kind should
+request an addition to ``OpKind`` in a future v1.x bump (additive
+only per spec §17).
 """
 
 from __future__ import annotations

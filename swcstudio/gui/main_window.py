@@ -93,6 +93,62 @@ from swcstudio.tools.morphology_editing.features.simplification import simplify_
 from swcstudio.tools.validation.features.auto_typing import BatchOptions, run_file as run_validation_auto_typing_file
 
 
+# ---------------------------------------------------------------------------
+# Token-fidelity helper for GUI-side provenance commits.
+# ---------------------------------------------------------------------------
+#
+# The GUI's pandas dataframes don't carry the per-cell *_str token columns
+# that swc_io's writer uses to round-trip exact number formatting (e.g.
+# "2.5390625000000e+00"). Without those, the writer falls back to Python's
+# default float repr ("2.5390625"), and the provenance diff then flags every
+# numeric cell as "changed" — even rows the user never touched.
+#
+# This helper merges the original tokens from the previous on-disk state
+# (op.input_bytes inside tracked_op) into the GUI's new_df, by node id,
+# whenever the typed value still matches the original. That makes the
+# diff faithful: only fields the user actually changed get a fresh repr.
+
+_TOKEN_COLS = ("id_str", "type_str", "x_str", "y_str", "z_str",
+               "radius_str", "parent_str")
+
+
+def _enrich_df_with_original_tokens(new_df: pd.DataFrame,
+                                    input_bytes: bytes | None) -> pd.DataFrame:
+    """Return ``new_df`` augmented with original *_str token columns.
+
+    For each row whose id matches a row in the parsed input bytes, the
+    original token strings are attached as the corresponding *_str columns.
+    Rows whose id didn't exist before, or rows lacking an id, simply don't
+    receive token columns — the writer will format them with default repr,
+    which is the correct behavior for genuinely new content.
+    """
+    if input_bytes is None or new_df is None or new_df.empty:
+        return new_df
+    if all(c in new_df.columns for c in _TOKEN_COLS):
+        return new_df  # GUI already supplied tokens; nothing to do
+    if "id" not in new_df.columns:
+        return new_df
+    try:
+        from swcstudio.core.swc_io import parse_swc_text_preserve_tokens  # noqa: PLC0415
+        prev = parse_swc_text_preserve_tokens(
+            input_bytes.decode("utf-8", errors="ignore")
+        )
+    except Exception:
+        return new_df
+    if prev is None or prev.empty:
+        return new_df
+    # Build a lookup table id → original token columns.
+    have = [c for c in _TOKEN_COLS if c in prev.columns]
+    if not have:
+        return new_df
+    lookup = prev.set_index(prev["id"].astype(int))[have]
+    out = new_df.copy()
+    ids = out["id"].astype(int)
+    for col in have:
+        out[col] = ids.map(lookup[col])
+    return out
+
+
 @dataclass
 class _DocumentState:
     """Open SWC document state bound to one editor tab/window."""
@@ -768,6 +824,17 @@ class SWCMainWindow(QMainWindow):
         )
         window_menu.addAction(show_auto_guide_action)
 
+        # History (provenance) — see PROVENANCE_SPEC.md and
+        # PROVENANCE_CONVERSION_GUIDE.md for the full surface.
+        history_menu = menu.addMenu("History")
+        open_history_action = QAction("Open History Browser…", self)
+        open_history_action.triggered.connect(self._on_open_history_browser)
+        history_menu.addAction(open_history_action)
+
+        init_history_action = QAction("Initialize History for This File…", self)
+        init_history_action.triggered.connect(self._on_init_history_for_current_file)
+        history_menu.addAction(init_history_action)
+
         # Help
         help_menu = menu.addMenu("Help")
         quick_action = QAction("Quick Manual", self)
@@ -1434,6 +1501,68 @@ class SWCMainWindow(QMainWindow):
 
         return change_rows
 
+    def _record_tracked_commit(
+        self,
+        doc: _DocumentState,
+        new_df: pd.DataFrame,
+        *,
+        kind,
+        params: dict,
+        message: str = "",
+    ) -> object | None:
+        """Record a provenance commit for a single GUI mutation.
+
+        Stage-1 design (see docs/PROVENANCE_REWIRE_CHECKLIST.md, GUI
+        section): each Apply-button click is its own commit, mirroring
+        the in-memory undo stack one-for-one. Future stage-2 work may
+        switch this to tracked_session-per-document with sub-ops per
+        click; the per-handler call sites won't need to change.
+
+        Returns the OpResult on success, None if the document has no
+        on-disk path yet (untitled / preview docs are not tracked).
+        Failures are logged and swallowed — provenance must never
+        block a GUI edit from being applied to the in-memory display.
+
+        Token-fidelity note: GUI dataframes don't carry the original
+        per-cell ``*_str`` columns that the SWC writer uses to
+        round-trip exact number formatting. Without that, the writer
+        would reformat every number using Python's default float repr
+        (e.g. ``2.5390625000000e+00`` → ``2.5390625``), which makes
+        the structured diff flag every node as "changed" even when
+        nothing actually moved. We re-attach the original tokens from
+        the previous on-disk state before writing, so only fields
+        whose typed values genuinely changed get reformatted.
+        """
+        if doc.is_preview or not getattr(doc, "file_path", ""):
+            return None
+        try:
+            from swcstudio.core.provenance import OpKind, tracked_op  # noqa: PLC0415
+            from swcstudio.core.swc_io import (  # noqa: PLC0415
+                parse_swc_text_preserve_tokens,
+                write_swc_to_bytes_preserve_tokens,
+            )
+
+            kind_value = kind.value if isinstance(kind, OpKind) else str(kind)
+            with tracked_op(
+                doc.file_path,
+                kind=kind,
+                params=dict(params or {}),
+                message=message or f"GUI {kind_value}",
+            ) as op:
+                # Re-attach original *_str token columns from the
+                # previous state for byte-faithful round-trip.
+                enriched = _enrich_df_with_original_tokens(
+                    new_df, op.input_bytes
+                )
+                op.set_output(write_swc_to_bytes_preserve_tokens(enriched))
+            return op.result
+        except Exception as e:  # noqa: BLE001
+            # Never block a GUI edit because the history layer failed.
+            # Surface the failure in the log so it's visible without
+            # crashing the user's session.
+            self._append_log(f"Provenance commit failed: {e}", "WARN")
+            return None
+
     def _record_session_operation(
         self,
         doc: _DocumentState,
@@ -1838,6 +1967,7 @@ class SWCMainWindow(QMainWindow):
         )
 
     def _on_simplification_process_requested(self, config_overrides: dict):
+        # Converted to provenance layer (rewire checklist GUI item G16).
         source_doc = self._active_source_document()
         if source_doc is None or source_doc.df is None or source_doc.df.empty:
             self._append_log("Simplification: no active SWC document.", "WARN")
@@ -1856,6 +1986,39 @@ class SWCMainWindow(QMainWindow):
 
         payload = self._simplification_log_payload(source_doc, result, output_path=None)
         source_doc.last_simplification_result = dict(payload)
+        from swcstudio.core.provenance import OpKind  # noqa: PLC0415
+        # Effective config = panel-default thresholds merged with whatever
+        # the user changed in the panel (epsilon, radius_tolerance,
+        # keep_tips, keep_bifurcations, …). Captures every numeric knob
+        # that actually controlled this simplification run.
+        from swcstudio.core.config import merge_config as _merge_simp  # noqa: PLC0415
+        from swcstudio.tools.morphology_editing.features.simplification import (  # noqa: PLC0415
+            get_config as _simp_default_config,
+        )
+        _simp_overrides = dict(config_overrides or {})
+        _simp_effective = _merge_simp(_simp_default_config(), _simp_overrides)
+        # If the algorithm reports the params it actually used, prefer
+        # that (it can include derived/internal values too).
+        _simp_actual_params = dict(payload.get("params_used", {}) or {})
+        # Only record config_overrides when it's a genuinely smaller
+        # delta against effective_config — otherwise it's redundant.
+        _params: dict = {"effective_config": _simp_effective}
+        if _simp_overrides and _simp_overrides != _simp_effective:
+            _params["config_overrides"] = _simp_overrides
+        if _simp_actual_params and _simp_actual_params != _simp_effective:
+            _params["params_used"] = _simp_actual_params
+        _params["original_node_count"] = int(payload.get("original_node_count", 0))
+        _params["new_node_count"]      = int(payload.get("new_node_count", 0))
+        _params["reduction_percent"]   = float(payload.get("reduction_percent", 0.0))
+        self._record_tracked_commit(
+            source_doc, simplified_df, kind=OpKind.SIMPLIFICATION,
+            params=_params,
+            message=(
+                f"GUI simplify: {payload.get('original_node_count', 0)} → "
+                f"{payload.get('new_node_count', 0)} nodes "
+                f"({payload.get('reduction_percent', 0.0):.2f}% reduction)"
+            ),
+        )
         self._apply_document_dataframe(
             source_doc,
             simplified_df,
@@ -2139,6 +2302,27 @@ class SWCMainWindow(QMainWindow):
                 f"{out_counts.get(1, 0)}/{out_counts.get(2, 0)}/{out_counts.get(3, 0)}/{out_counts.get(4, 0)}"
             ),
         ]
+        # Provenance: this is an AI op. tracked_op auto-detects
+        # OpKind.AUTO_LABEL as AI, captures the full env fingerprint
+        # (every installed package + system info), records an
+        # AI-run blob with model params + metrics. After this lands,
+        # `swcstudio history reproduce <sha>` produces a reproduce.yaml.
+        from swcstudio.core.provenance import OpKind  # noqa: PLC0415
+        self._record_tracked_commit(
+            source_doc,
+            preview_df,
+            kind=OpKind.AUTO_LABEL,
+            params={
+                "options":         opts_dict,
+                "nodes_total":     int(result_payload.get("nodes_total", 0)),
+                "type_changes":    int(result_payload.get("type_changes", 0)),
+                "out_type_counts": {str(k): int(v) for k, v in out_counts.items()},
+            },
+            message=(
+                f"GUI auto-label: {int(result_payload.get('type_changes', 0))} "
+                f"type changes / {int(result_payload.get('nodes_total', 0))} nodes"
+            ),
+        )
         self._apply_document_dataframe(
             source_doc,
             preview_df.copy(),
@@ -2200,6 +2384,7 @@ class SWCMainWindow(QMainWindow):
         return write_text_report(log_path, format_auto_typing_report_text(payload))
 
     def _on_manual_radii_apply_requested(self, node_id: int, new_radius: float):
+        # Converted to provenance layer (rewire checklist GUI item G2).
         doc = self._active_source_document()
         if doc is None or doc.df is None or doc.df.empty:
             self._append_log("Manual Radii: no active SWC document.", "WARN")
@@ -2217,7 +2402,22 @@ class SWCMainWindow(QMainWindow):
 
         new_df = doc.df.copy()
         new_df.loc[mask, "radius"] = target_radius
-        node_type = int(new_df.loc[mask, "type"].iloc[0])
+
+        # Provenance: record this Apply as one SET_RADIUS commit on the
+        # document's .history/. Falls through silently if the document
+        # has no file path (preview / untitled doc).
+        from swcstudio.core.provenance import OpKind  # noqa: PLC0415
+        self._record_tracked_commit(
+            doc,
+            new_df,
+            kind=OpKind.SET_RADIUS,
+            params={"node_id": int(node_id), "radius": target_radius},
+            message=(
+                f"GUI manual radii: node {int(node_id)} "
+                f"{old_radius:.6g} → {target_radius:.6g}"
+            ),
+        )
+
         self._apply_document_dataframe(
             doc,
             new_df,
@@ -2234,6 +2434,7 @@ class SWCMainWindow(QMainWindow):
         self._rerun_active_validation()
 
     def _on_validation_radii_apply_requested(self, result: object):
+        # Converted to provenance layer (rewire checklist GUI item G3).
         doc = self._active_source_document()
         if doc is None or doc.df is None or doc.df.empty:
             self._append_log("Auto Radii Editing: no active SWC document.", "WARN")
@@ -2262,6 +2463,33 @@ class SWCMainWindow(QMainWindow):
                     "new_parameters": f"radius={float(row.get('new_radius', 0.0)):.10g}",
                 }
             )
+
+        # Provenance: the auto-radii pass that produced `result` ran on
+        # the current in-memory doc.df, so this commit records exactly
+        # that mutation as one RADII_CLEAN op.
+        #
+        # NOTE: payload["config_used"] from the panel is ALREADY the
+        # full merged effective config (defaults + whatever the panel
+        # UI was set to). It is NOT a small user-overrides dict, so
+        # recording it under both names would be redundant. We only
+        # record effective_config here.
+        from swcstudio.core.provenance import OpKind  # noqa: PLC0415
+        _radii_effective = dict(payload.get("config_used") or {})
+        self._record_tracked_commit(
+            doc,
+            new_df_final,
+            kind=OpKind.RADII_CLEAN,
+            params={
+                "effective_config": _radii_effective,
+                "passes": passes_used,
+                "radius_changes": total_changes,
+            },
+            message=(
+                f"GUI auto radii: passes={passes_used}, "
+                f"radius_changes={total_changes}"
+            ),
+        )
+
         self._apply_document_dataframe(
             doc,
             new_df_final,
@@ -2320,6 +2548,7 @@ class SWCMainWindow(QMainWindow):
         self._rerun_active_validation()
 
     def _on_geometry_move_selection_requested(self, node_ids: object, anchor_id: int, x: float, y: float, z: float):
+        # Converted to provenance layer (rewire checklist GUI item G4).
         doc = self._active_source_document()
         if doc is None or doc.df is None or doc.df.empty:
             self._append_log("Geometry Editing: no active SWC document.", "WARN")
@@ -2334,6 +2563,14 @@ class SWCMainWindow(QMainWindow):
         except Exception as exc:  # noqa: BLE001
             self._append_log(f"Geometry Editing: {exc}", "WARN")
             return
+        from swcstudio.core.provenance import OpKind  # noqa: PLC0415
+        self._record_tracked_commit(
+            doc, new_df, kind=OpKind.GEOMETRY_EDIT,
+            params={"op": "move-selection", "anchor_id": int(anchor_id),
+                    "selected_node_ids": selected_node_ids,
+                    "x": float(x), "y": float(y), "z": float(z)},
+            message=f"GUI geometry move-selection anchor={anchor_id} ({len(selected_node_ids)} nodes)",
+        )
         self._apply_geometry_dataframe(
             doc,
             new_df,
@@ -2350,6 +2587,7 @@ class SWCMainWindow(QMainWindow):
         self._append_log(f"Geometry Editing: moved {len(selected_node_ids)} selected node(s).", "INFO")
 
     def _on_geometry_reconnect_requested(self, source_id: int, target_id: int):
+        # Converted to provenance layer (rewire checklist GUI item G5).
         doc = self._active_source_document()
         if doc is None or doc.df is None or doc.df.empty:
             self._append_log("Geometry Editing: no active SWC document.", "WARN")
@@ -2361,6 +2599,12 @@ class SWCMainWindow(QMainWindow):
         except Exception as exc:  # noqa: BLE001
             self._append_log(f"Geometry Editing: {exc}", "WARN")
             return
+        from swcstudio.core.provenance import OpKind  # noqa: PLC0415
+        self._record_tracked_commit(
+            doc, new_df, kind=OpKind.GEOMETRY_EDIT,
+            params={"op": "connect", "start_id": int(source_id), "end_id": int(target_id)},
+            message=f"GUI geometry reconnect end={target_id} → parent={source_id}",
+        )
         self._geometry_panel.clear_all_selections()
         self._geometry_panel.set_current_node(None)
         self._apply_geometry_dataframe(
@@ -2412,6 +2656,12 @@ class SWCMainWindow(QMainWindow):
         except Exception as exc:  # noqa: BLE001
             self._append_log(f"Geometry Editing: {exc}", "WARN")
             return
+        from swcstudio.core.provenance import OpKind  # noqa: PLC0415
+        self._record_tracked_commit(
+            doc, new_df, kind=OpKind.GEOMETRY_EDIT,
+            params={"op": "disconnect", "start_id": int(source_id), "end_id": int(target_id)},
+            message=f"GUI geometry disconnect path {source_id} … {target_id}",
+        )
         self._geometry_panel.clear_all_selections()
         self._geometry_panel.set_current_node(None)
         self._apply_geometry_dataframe(
@@ -2447,6 +2697,13 @@ class SWCMainWindow(QMainWindow):
         except Exception as exc:  # noqa: BLE001
             self._append_log(f"Geometry Editing: {exc}", "WARN")
             return
+        from swcstudio.core.provenance import OpKind  # noqa: PLC0415
+        self._record_tracked_commit(
+            doc, new_df, kind=OpKind.GEOMETRY_EDIT,
+            params={"op": "delete-node", "node_id": int(node_id),
+                    "reconnect_children": bool(reconnect_children)},
+            message=f"GUI geometry delete-node id={node_id} reconnect={bool(reconnect_children)}",
+        )
         self._geometry_panel.clear_all_selections()
         self._geometry_panel.set_current_node(None)
         event_title = "Delete Node" if not reconnect_children else "Delete Node + Reconnect Children"
@@ -2479,6 +2736,12 @@ class SWCMainWindow(QMainWindow):
         except Exception as exc:  # noqa: BLE001
             self._append_log(f"Geometry Editing: {exc}", "WARN")
             return
+        from swcstudio.core.provenance import OpKind  # noqa: PLC0415
+        self._record_tracked_commit(
+            doc, new_df, kind=OpKind.GEOMETRY_EDIT,
+            params={"op": "delete-subtree", "root_id": int(root_id)},
+            message=f"GUI geometry delete-subtree root={root_id}",
+        )
         self._geometry_panel.clear_all_selections()
         self._geometry_panel.set_current_node(None)
         self._apply_geometry_dataframe(
@@ -2509,6 +2772,14 @@ class SWCMainWindow(QMainWindow):
         except Exception as exc:  # noqa: BLE001
             self._append_log(f"Geometry Editing: {exc}", "WARN")
             return
+        from swcstudio.core.provenance import OpKind  # noqa: PLC0415
+        self._record_tracked_commit(
+            doc, new_df, kind=OpKind.GEOMETRY_EDIT,
+            params={"op": "insert", "start_id": int(start_id), "end_id": int(end_id),
+                    "x": float(x), "y": float(y), "z": float(z),
+                    "inserted_node_id": int(inserted_node_id)},
+            message=f"GUI geometry insert between {start_id} and {end_id}",
+        )
         self._geometry_panel.clear_all_selections()
         self._geometry_panel.set_current_node(None)
         self._apply_geometry_dataframe(
@@ -2728,6 +2999,75 @@ class SWCMainWindow(QMainWindow):
         self._append_log(f"Render mode set to {self._render_combo.currentText()}.", "INFO")
 
     # --------------------------------------------------------- File loading
+    def reload_swc_from_disk(self, path: str) -> None:
+        """Reload an open document's in-memory dataframe from its
+        on-disk current.swc (or fall back to ``path`` if no
+        current.swc exists yet).
+
+        Called by the history panel after a Revert action so the GUI
+        immediately reflects the reverted state without requiring the
+        user to close and reopen the file.
+
+        Idempotent and safe — if no open document matches ``path``
+        the call is a no-op.
+        """
+        try:
+            from swcstudio.core.provenance import current_swc_path_for  # noqa: PLC0415
+        except Exception:
+            current_swc_path_for = None  # type: ignore[assignment]
+
+        target = Path(path).resolve()
+        match_doc = None
+        for ed, doc in self._documents.items():
+            if doc.is_preview:
+                continue
+            try:
+                if Path(doc.file_path).resolve() == target:
+                    match_doc = doc
+                    break
+            except Exception:
+                continue
+        if match_doc is None:
+            return
+
+        # Prefer current.swc (latest state) if it exists; otherwise
+        # fall back to the source file.
+        src_path = Path(path)
+        if current_swc_path_for is not None:
+            cur = current_swc_path_for(src_path)
+            if cur.exists():
+                src_path = cur
+
+        try:
+            new_text = src_path.read_text(encoding="utf-8", errors="ignore")
+            new_df = parse_swc_text_preserve_tokens(new_text)
+            if new_df.empty:
+                return
+            for col in ("id", "type", "parent"):
+                new_df[col] = new_df[col].astype(int)
+            new_df = new_df.loc[:, SWC_COLS].copy()
+        except Exception as e:
+            self._append_log(f"Reload failed: {e}", "WARN")
+            return
+
+        # Reset in-memory document state to the reloaded df. Push a
+        # history snapshot so the user can still Undo if they didn't
+        # mean to revert; clear the recovery copy so we don't leak a
+        # stale unsaved-changes marker.
+        match_doc.df = new_df
+        match_doc.validation_report = None
+        match_doc.issues = []
+        match_doc.history_snapshots = [new_df.copy()]
+        match_doc.history_index = 0
+        match_doc.editor.load_swc(match_doc.df, match_doc.filename)
+        self._clear_recovery_copy(match_doc)
+        if match_doc is self._active_document():
+            self._sync_from_active_document(auto_run_validation=True)
+        self._append_log(
+            f"Reloaded {match_doc.filename} from {src_path.name}.",
+            "INFO",
+        )
+
     def _on_open(self):
         path, _ = QFileDialog.getOpenFileName(
             self, "Open SWC file", "", "SWC Files (*.swc);;All Files (*)"
@@ -2935,6 +3275,11 @@ class SWCMainWindow(QMainWindow):
 
     # --------------------------------------------------- Sync from editor
     def _on_editor_df_changed(self, editor: EditorTab, df: pd.DataFrame):
+        # Converted to provenance layer (rewire checklist bonus item G20).
+        # This fires for any direct in-table edit — labeling a node by
+        # changing its type cell, editing a radius cell, dragging a node
+        # in the 3D view, etc. The structured diff inside the commit
+        # accurately captures whatever fields changed.
         doc = self._documents.get(editor)
         if doc is None:
             return
@@ -2944,6 +3289,15 @@ class SWCMainWindow(QMainWindow):
         doc.validation_report = None
         doc.issues = []
         if not doc.is_preview:
+            # Provenance: every direct editor change is one commit. We
+            # mark the source so a future filter can pick out "edits
+            # made directly in the table" vs panel-driven mutations.
+            from swcstudio.core.provenance import OpKind  # noqa: PLC0415
+            self._record_tracked_commit(
+                doc, doc.df, kind=OpKind.PLUGIN_OP,
+                params={"source": "editor_table", "title": "Manual Label Edit"},
+                message="GUI editor: direct in-table edit",
+            )
             self._record_session_operation(
                 doc,
                 title="Manual Label Edit",
@@ -3362,6 +3716,7 @@ class SWCMainWindow(QMainWindow):
         self._on_issue_selected(issues[0])
 
     def _on_validation_index_clean_requested(self, new_df: object, id_map: object):
+        # Converted to provenance layer (rewire checklist GUI item G10).
         doc = self._active_source_document()
         if doc is None or doc.df is None or doc.df.empty:
             self._append_log("Validation: no active SWC document for Index Clean.", "WARN")
@@ -3380,6 +3735,14 @@ class SWCMainWindow(QMainWindow):
             original_node_count=original_node_count,
             new_node_count=new_node_count,
             remapped_id_count=remapped_id_count,
+        )
+        from swcstudio.core.provenance import OpKind  # noqa: PLC0415
+        self._record_tracked_commit(
+            doc, new_df, kind=OpKind.INDEX_CLEAN,
+            params={"original_node_count": original_node_count,
+                    "new_node_count": new_node_count,
+                    "remapped_id_count": remapped_id_count},
+            message=f"GUI validation index-clean ({remapped_id_count} ids remapped)",
         )
         self._apply_document_dataframe(
             doc,
@@ -4110,6 +4473,10 @@ class SWCMainWindow(QMainWindow):
         source_key = str(issue.get("source_key", "")).strip()
         payload = dict(issue.get("source_payload", {}) or {})
 
+        # Provenance: both branches below mutate doc.df. Each commits as
+        # one AUTO_FIX op carrying the issue_id + applied-node count.
+        from swcstudio.core.provenance import OpKind  # noqa: PLC0415
+
         if source_key == "radii_outlier_batch":
             changes = list(payload.get("changes", []) or [])
             if not changes:
@@ -4127,6 +4494,12 @@ class SWCMainWindow(QMainWindow):
                 applied.append(f"Node {node_id}: {old_radius:.5g} -> {new_radius:.5g}")
             if not applied:
                 return
+            self._record_tracked_commit(
+                doc, df, kind=OpKind.AUTO_FIX,
+                params={"issue_id": str(issue_id), "fix_kind": "radii_outlier_batch",
+                        "applied_count": len(applied)},
+                message=f"GUI apply suggested radii: issue={issue_id} ({len(applied)} nodes)",
+            )
             self._apply_document_dataframe(
                 doc,
                 df,
@@ -4155,6 +4528,12 @@ class SWCMainWindow(QMainWindow):
                 applied.append(f"Node {node_id}: {old_type} -> {new_type}")
             if not applied:
                 return
+            self._record_tracked_commit(
+                doc, df, kind=OpKind.AUTO_FIX,
+                params={"issue_id": str(issue_id), "fix_kind": "type_suspicion_batch",
+                        "applied_count": len(applied)},
+                message=f"GUI apply suggested labels: issue={issue_id} ({len(applied)} nodes)",
+            )
             self._apply_document_dataframe(
                 doc,
                 df,
@@ -4275,6 +4654,15 @@ class SWCMainWindow(QMainWindow):
                 )
             if not changed:
                 event_details.append("No connected multi-node soma groups required consolidation.")
+            # Provenance: rewire checklist GUI item G19 (soma consolidate).
+            from swcstudio.core.provenance import OpKind  # noqa: PLC0415
+            self._record_tracked_commit(
+                doc, new_df, kind=OpKind.PLUGIN_OP,
+                params={"plugin": "consolidate_soma", "issue_id": str(issue_id),
+                        "group_count": int(result.get("group_count", 0)),
+                        "removed_nodes": removed_nodes, "changed": changed},
+                message=f"GUI consolidate-soma (issue {issue_id})",
+            )
             self._apply_document_dataframe(
                 doc,
                 new_df,
@@ -4543,6 +4931,71 @@ class SWCMainWindow(QMainWindow):
         )
         self._show_help_text_dialog("About SWC-Studio", text)
         self._append_log("Opened About dialog.", "INFO")
+
+    # ----- History menu handlers (PROVENANCE_SPEC §14) -----
+    def _on_open_history_browser(self):
+        """Open the history browser dialog for the active SWC file."""
+        path = self._file_path
+        if not path:
+            from PySide6.QtWidgets import QMessageBox
+            QMessageBox.information(
+                self,
+                "History Browser",
+                "Open an SWC file first, then choose History → Open History Browser.",
+            )
+            return
+        try:
+            from swcstudio.gui.history_panel import open_history_dialog
+            open_history_dialog(self, path)
+            self._append_log(f"Opened history browser for {path}", "INFO")
+        except Exception as e:
+            self._append_log(f"Could not open history browser: {e}", "ERROR")
+
+    def _on_init_history_for_current_file(self):
+        """Initialize .history/ for the active file; import legacy if present."""
+        from PySide6.QtWidgets import QMessageBox
+        path = self._file_path
+        if not path:
+            QMessageBox.information(
+                self,
+                "Initialize History",
+                "Open an SWC file first, then choose History → Initialize History.",
+            )
+            return
+        try:
+            from swcstudio.core.provenance import (
+                history_dir_for,
+                init_history,
+                migrate_legacy_output_dir,
+                needs_migration,
+            )
+            hist = history_dir_for(path)
+            if hist.exists():
+                QMessageBox.information(
+                    self,
+                    "Initialize History",
+                    f"History is already initialized at {hist}.",
+                )
+                return
+            if needs_migration(path):
+                outcome = migrate_legacy_output_dir(path)
+                msg = "Initialized .history/."
+                if outcome.imported_commit:
+                    msg += f"\nImported state from {outcome.imported_from.name}."
+                if outcome.legacy_files_kept:
+                    msg += f"\nKept {outcome.legacy_files_kept} legacy file(s) in place."
+                QMessageBox.information(self, "Initialize History", msg)
+                self._append_log(msg.replace("\n", " "), "INFO")
+            else:
+                init_history(path)
+                QMessageBox.information(
+                    self, "Initialize History",
+                    f"Initialized .history/ at {hist}.",
+                )
+                self._append_log(f"Initialized history for {path}", "INFO")
+        except Exception as e:
+            self._append_log(f"Could not initialize history: {e}", "ERROR")
+            QMessageBox.warning(self, "Initialize History", str(e))
 
     def _check_for_updates(self):
         """Check GitHub Releases for a newer version and offer to install it.
