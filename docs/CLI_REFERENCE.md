@@ -144,19 +144,31 @@ swcstudio split ./data
 ### `swcstudio auto-typing <folder>`
 
 - Purpose: auto-labeling for every SWC in one folder.
-- Prints a short engine summary before processing
+- Engine: v12 QC-label-flag pipeline.
+- Prints a short engine summary before processing.
 - Soma, axon, and basal labeling are always enabled
-- The engine automatically switches between 3-class and 4-class
-  labeling by detecting whether an apical subtree is present
-- Optional `--model-dir` points at a directory of trained model files
-  (Stage 1 + Stage 2 + Stage 2b GNN, all three required); falls back
-  to user-data / bundled models if omitted
+- The engine detects cell type automatically unless `--cell-type` is
+  provided. Use `--cell-type pyramidal` or `--cell-type interneuron`
+  when the user already knows the cell type.
+- Flag scoring is enabled by default. `--flag-strictness` controls how
+  strict the bad-label flagger is; higher values are stricter and may
+  flag more cells.
+  Use `--flag-feature-mode baseline` to add optional
+  baseline-disagreement features, `--flag-feature-mode auto` to use those
+  features only when all required baseline predictor artifacts are
+  reachable, or `--no-flag` to skip flag scoring.
+- Optional `--model-dir` points at a v12-compatible model bundle. The
+  core required files are Stage 1, Stage 2, Stage 2b GNN, Branch3 rescue,
+  and QC gate; flag model files enable learned flag scoring.
 
 Examples:
 
 ```bash
 swcstudio auto-typing ./data
 swcstudio auto-typing ./data --model-dir ~/swc-models
+swcstudio auto-typing ./data --cell-type pyramidal --flag-strictness 0.8
+swcstudio auto-typing ./data --flag-feature-mode baseline
+swcstudio auto-typing ./data --no-flag
 ```
 
 Run `swcstudio models status` first if you want to confirm the engine
@@ -221,18 +233,29 @@ swcstudio auto-fix ./data/single-soma.swc
 
 - Purpose: apply the same single-file auto-label workflow used by the
   GUI Auto Label Editing panel
-- Engine: same auto-typing pipeline used by `swcstudio auto-typing`
+- Engine: same v12 QC-label-flag pipeline used by `swcstudio auto-typing`
 - Changes only node types; geometry, parent IDs, and radii are preserved
 - Soma, axon, and basal labeling are always enabled
-- The engine automatically switches between 3-class and 4-class
-  labeling by detecting whether an apical subtree is present
-- Optional `--model-dir` points at a directory of trained model files
+- The engine detects cell type automatically unless `--cell-type` is
+  provided. Use `--cell-type pyramidal` or `--cell-type interneuron`
+  when the user already knows the cell type.
+- Flag scoring is enabled by default. `--flag-strictness` controls how
+  strict the bad-label flagger is; higher values are stricter and may
+  flag more cells.
+  Use `--flag-feature-mode baseline` to add optional
+  baseline-disagreement features, `--flag-feature-mode auto` to use those
+  features only when all required baseline predictor artifacts are
+  reachable, or `--no-flag` to skip flag scoring.
+- Optional `--model-dir` points at a v12-compatible model bundle.
 
 Examples:
 
 ```bash
 swcstudio auto-label ./data/single-soma.swc
 swcstudio auto-label ./data/single-soma.swc --model-dir ~/my-models
+swcstudio auto-label ./data/single-soma.swc --cell-type interneuron --flag-strictness 0.3
+swcstudio auto-label ./data/single-soma.swc --flag-feature-mode auto
+swcstudio auto-label ./data/single-soma.swc --no-flag
 ```
 
 To verify the engine can find its model files:
@@ -350,11 +373,17 @@ swcstudio insert ./data/single-soma.swc --start-id 10 --end-id 22 --x 100 --y 12
 
 ### `swcstudio train auto-typing`
 
-Train all three model files of the auto-typing pipeline — Stage 1
-(cell-type classifier), Stage 2 (per-branch classifier), and Stage 2b
-(GraphSAGE GNN apical-vs-basal head) — on your own labeled SWC corpus.
-All three are required at inference time. Pass `--no-gnn` only when
-you want to refresh Stages 1+2 against an existing GNN checkpoint.
+Train the three core custom-training files of the auto-typing pipeline:
+Stage 1 (cell-type classifier), Stage 2 (per-branch classifier), and
+Stage 2b (GraphSAGE GNN apical-vs-basal head) on your own labeled SWC
+corpus.
+Pass `--no-gnn` only when you want to refresh Stages 1+2 against an
+existing GNN checkpoint.
+
+Note: the bundled production engine is now the v12 QC-label-flag
+pipeline. Full v12 deployment also uses a Branch3 rescue checkpoint, QC
+gate, and optional learned flag models. This training command currently
+trains only the core Stage 1 + Stage 2 + Stage 2b stack.
 
 Required dataset layout:
 
@@ -394,7 +423,7 @@ swcstudio auto-label cell.swc --model-dir ./my-models
 export SWCSTUDIO_MODEL_DIR=./my-models
 ```
 
-Training writes three files into `--output-dir`:
+Training writes three core files into `--output-dir`:
 
 - `cell_type_classifier.pkl`  Stage 1
 - `branch_classifier.pkl`     Stage 2
@@ -421,7 +450,35 @@ swcstudio models status --model-dir ~/my-models
 ```
 
 Output is a search-path diagnostic plus a JSON summary of which model
-files were found and whether torch is available for the Stage 2b GNN.
+files were found, whether torch is available for the Stage 2b GNN, and
+whether optional baseline-disagreement predictor artifacts are reachable.
+
+### Current Auto-Label Model Bundle
+
+The current production auto-label path is the v12 QC-label-flag pipeline:
+
+- Stage 1 cell type: `cell_type_classifier.pkl`
+- Stage 2 subtree labeler: `branch_classifier.pkl`
+- Stage 2b apical/basal GNN: `gnn_apical_basal.pt`
+- Branch3 rescue: `gnn_branch3_rescue.pt`
+- QC gate: `qc_gate.pkl`
+- Compact learned flags: `flag_model_pyramidal.joblib`,
+  `flag_model_interneuron.joblib`, `flag_model_all.joblib`
+- Baseline-disagreement learned flags:
+  `flag_model_pyramidal_baseline.joblib`,
+  `flag_model_all_baseline.joblib`
+
+`--flag-feature-mode compact` uses the compact flagger and does not need
+external baseline predictor files. `--flag-feature-mode baseline` builds
+multi-baseline disagreement features from NeuroM-RF, L-Measure-RF,
+Sholl-RF, and Sholl-MLP predictor artifacts, then scores the
+baseline-disagreement flag model. `--flag-feature-mode auto` uses the
+baseline-disagreement flagger when all four baseline predictors are
+reachable and otherwise falls back to compact.
+
+The deployed baseline-disagreement flagger uses `baseline_oof_*`
+features. It does not require the older research-only `xmodel_*`
+multi-v12 ensemble features.
 
 ## Plugins
 

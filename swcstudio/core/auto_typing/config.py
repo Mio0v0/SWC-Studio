@@ -1,11 +1,10 @@
 """Persisted user-facing configuration for the auto-typing feature.
 
-The auto-typing engine itself is the v9 ML pipeline (Stage 1 + 2 + 2b GNN
-+ Stage 3); it does not have hand-tuned weights to expose. The only
-runtime knobs end users actually edit are model directory overrides and
-GNN toggles. They live in the same JSON config the Batch Processing tool
-already persists, so the GUI / CLI continue to read and write a single
-file.
+The auto-typing engine itself is the v12 QC-label-flag pipeline. The
+runtime knobs end users edit are model directory overrides, optional
+cell-type override, and flag scoring strictness. They live in the same
+JSON config the Batch Processing tool already persists, so the GUI / CLI
+continue to read and write a single file.
 """
 from __future__ import annotations
 
@@ -20,6 +19,10 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "enabled": True,
     "model_dir": "",
     "use_subtree_stage2": True,
+    "cell_type": "unknown",
+    "flag_enabled": True,
+    "flag_strictness": 0.5,
+    "flag_feature_mode": "compact",
 }
 
 _CACHED: dict[str, Any] | None = None

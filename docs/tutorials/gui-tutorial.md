@@ -65,7 +65,11 @@ Common repair paths:
   model files work out of the box, so just click **Run**. To use
   custom-trained models, use the **Browse…** button next to the
   *Model dir* field. The green/red status indicator next to the field
-  tells you whether the engine can run with the current selection.
+  tells you whether the engine can run with the current selection. Use
+  the cell-type selector when you already know whether the cell is
+  pyramidal or interneuron; leave it unknown to run Stage 1. The flag
+  strictness slider controls how conservatively the bad-label flagger
+  marks a cell.
 - `Manual Radii Editing`
 - `Auto Radii Editing`
 - `Geometry Editing`

@@ -114,8 +114,8 @@ class _TypeSuspicionWorker(QObject):
     ``Likely wrong labels`` issues. Used by the GUI to compute type
     suspicion off the main thread so the issue panel can show its
     fast-path entries (validation, radii, simplification suggestion)
-    immediately instead of blocking ~1-2 seconds while the full v9 ML
-    pipeline runs.
+    immediately instead of blocking ~1-2 seconds while the full v12
+    QC-label-flag pipeline runs.
     """
 
     finished = Signal(int, object)  # run_id, list[dict]

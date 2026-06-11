@@ -427,6 +427,8 @@ def format_auto_typing_report_text(payload: dict[str, Any]) -> str:
     lines.append(f"Total nodes processed: {payload.get('total_nodes', 0)}")
     lines.append(f"Type changes: {payload.get('total_type_changes', 0)}")
     lines.append(f"Radius changes: {payload.get('total_radius_changes', 0)}")
+    if "files_flagged" in payload:
+        lines.append(f"Flagged files: {payload.get('files_flagged', 0)}")
     if payload.get("zip_path"):
         lines.append(f"Zip output: {payload.get('zip_path')}")
 

@@ -480,7 +480,7 @@ def compute_type_suspicion_issues(df: pd.DataFrame | None) -> list[dict[str, Any
     """Run the auto-typing engine on ``df`` and return the ``Likely wrong
     labels`` issues. Exposed separately so callers (typically the GUI)
     can run it on a worker thread instead of blocking the issue panel
-    while the full v9 ML pipeline (Stage 1 + 2 + 2b GNN + 3) runs on
+    while the full v12 QC-label-flag pipeline runs on
     the morphology — which can take seconds on large cells.
     """
     if df is None or df.empty:

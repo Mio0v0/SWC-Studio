@@ -33,25 +33,51 @@ Dataclass for auto-typing input options:
 - `soma: bool` (default `True`)  — write predicted soma label
 - `axon: bool` (default `True`)  — accept predicted axon labels
 - `basal: bool` (default `True`) — accept predicted basal labels
-- `apic: bool` (default `False`) — accept predicted apical labels
+- `apic: bool` (default `True`) - accept predicted apical labels
 - `rad: bool` (default `False`)  — apply "copy parent radius if zero"
   fix to zero-radius nodes
 - `zip_output: bool` (default `False`) — write a zip of the output
   folder (folder runs only)
+- `cell_type: str | None` (default `None`) - `None` / `"unknown"` runs
+  Stage 1; `"pyramidal"` or `"interneuron"` bypasses Stage 1 with the
+  user-provided type
+- `flag_enabled: bool` (default `True`) - run learned bad-label flag scoring
+- `flag_strictness: float` (default `0.5`) - controls how conservative
+  flagging is; higher values are stricter and may flag more cells
+- `flag_feature_mode: str` (default `"compact"`) - `"compact"` uses the
+  fast deployed flagger; `"baseline"` adds optional baseline-disagreement
+  features; `"auto"` uses baseline features only when all optional artifacts
+  are reachable
+
+Current flag feature modes:
+
+- `compact` - uses the bundled compact learned flagger and only features
+  available from the v12 inference pass.
+- `baseline` - computes multi-baseline disagreement features from the
+  optional NeuroM-RF, L-Measure-RF, Sholl-RF, and Sholl-MLP predictor
+  artifacts, then scores the bundled baseline-disagreement flagger.
+- `auto` - uses `baseline` when all four baseline predictors are reachable;
+  otherwise falls back to `compact`.
+
+The deployed baseline-disagreement flagger expects `baseline_oof_*`
+features and does not require the older research-only `xmodel_*`
+multi-v12 ensemble feature set.
 
 #### `BatchResult`
 
 Returned by folder runs (`run_batch` / `batch_auto_typing`). Fields
 include `folder`, `out_dir`, `zip_path`, `files_total`, `files_processed`,
 `files_failed`, `total_nodes`, `total_type_changes`,
-`total_radius_changes`, `failures`, `per_file`, `log_path`.
+`total_radius_changes`, `failures`, `per_file`, `log_path`,
+`files_flagged`.
 
 #### `FileResult`
 
 Returned by single-file runs (`run_file`). Fields include `input_file`,
 `output_file`, `nodes_total`, `type_changes`, `radius_changes`,
-`out_type_counts`, `failures`, `change_details`, `log_path`, `headers`,
-`rows`, `types`, `radii`.
+`out_type_counts`, `cell_type`, `cell_type_source`, `stage1_confidence`,
+`qc_result`, `flag_result`, `failures`, `change_details`, `log_path`,
+`headers`, `rows`, `types`, `radii`.
 
 ### Batch Processing
 
@@ -72,6 +98,12 @@ selector — the engine is a single ML pipeline. The
 - `model_dir` (str) — override the model search path
 - `use_subtree_stage2` (bool, default `True`) — whether Stage 2
   operates on full primary subtrees
+- `cell_type` (str, default `"unknown"`) - use `"unknown"` to run
+  Stage 1, or provide `"pyramidal"` / `"interneuron"` to bypass it
+- `flag_enabled` (bool, default `True`) - enable learned flag scoring
+- `flag_strictness` (float, default `0.5`) - control flag conservatism
+- `flag_feature_mode` (str, default `"compact"`) - `compact`, `baseline`,
+  or `auto`
 
 #### `batch_radii_cleaning(folder, *, config_overrides=None) -> dict`
 
@@ -112,7 +144,15 @@ Runs sanitize + validation from file, optionally writes output.
 Runs the shared auto-typing engine on a single file. The
 `config_overrides` dict accepts the same keys as `batch_auto_typing`:
 `model_dir` (override the model search path), `use_subtree_stage2`
-(default `True`).
+(default `True`), `cell_type`, `flag_enabled`, `flag_strictness`, and
+`flag_feature_mode`.
+
+When flag scoring runs, `FileResult.flag_result` includes the selected
+model path, `requested_feature_mode`, `actual_feature_mode`,
+`rank_score`, `prob_bad`, the selected threshold, `flagged`, and
+`n_baseline_features`. In a baseline-disagreement run,
+`actual_feature_mode == "baseline"` and `n_baseline_features` should be
+greater than zero.
 
 #### `swcstudio.core.auto_typing.run_file(file_path, opts, *, model_dir=None, output_path=None, write_output=True, write_log=True, use_subtree_stage2=True) -> FileResult`
 
@@ -133,7 +173,14 @@ indicator and by the CLI to fail fast before doing any work.
 #### `swcstudio.core.auto_typing.backend_status(*, model_dir=None) -> dict`
 
 Structured status report — which model files were found, where, and
-whether torch is available for the Stage 2b GNN.
+whether torch is available for the Stage 2b GNN, and whether optional
+baseline-disagreement predictor artifacts are reachable.
+
+The status report includes `flag_pyramidal_baseline_ok`,
+`flag_all_baseline_ok`, and `baseline_predictors_ok`. The first two mean
+the learned baseline-disagreement flag model bundles are present; the
+last means the optional baseline predictor pickles needed to build the
+runtime disagreement features are also reachable.
 
 #### `swcstudio.core.auto_typing_train.train_user_models(data_dir, output_dir, *, train_gnn=True, ...) -> TrainingResult`
 

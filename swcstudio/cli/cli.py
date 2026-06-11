@@ -207,7 +207,7 @@ def _print_validation_results(report: dict) -> None:
 
 def _print_auto_typing_guide() -> None:
     print(
-        "Auto-typing engine: v9 ML pipeline\n"
+        "Auto-typing engine: v12 QC-label-flag pipeline\n"
         "----------------------------------\n"
         "Stage 1  cell-type detector (sklearn) — pyramidal vs interneuron\n"
         "Stage 2  per-subtree classifier (sklearn) — axon / basal / apical\n"
@@ -423,13 +423,45 @@ def build_parser() -> argparse.ArgumentParser:
     batch_split.add_argument("folder", type=Path)
     _feature_json_arg(batch_split)
 
-    batch_auto = batch_sub.add_parser("auto-typing", help="Auto-typing on folder (v9 ML pipeline).")
+    batch_auto = batch_sub.add_parser(
+        "auto-typing",
+        help="Auto-typing on folder (v12 QC-label-flag pipeline).",
+    )
     batch_auto.add_argument("folder", type=Path)
     batch_auto.add_argument(
         "--model-dir",
         type=Path,
         default=None,
-        help="Override the directory holding the auto-typing model files (cell_type_classifier.pkl, branch_classifier.pkl, gnn_apical_basal.pt).",
+        help=(
+            "Override the directory holding the auto-typing model files "
+            "(Stage 1, Stage 2, GNN, Branch3, QC gate, and flag models)."
+        ),
+    )
+    batch_auto.add_argument(
+        "--cell-type",
+        choices=("unknown", "pyramidal", "interneuron"),
+        default="unknown",
+        help="Use Stage 1 when unknown; otherwise bypass Stage 1 with the supplied cell type.",
+    )
+    batch_auto.add_argument(
+        "--flag-strictness",
+        type=float,
+        default=0.5,
+        help="Flag strictness from 0.0 (loose/fewer flags) to 1.0 (strict/more flags).",
+    )
+    batch_auto.add_argument(
+        "--flag-feature-mode",
+        choices=("compact", "baseline", "auto"),
+        default="compact",
+        help=(
+            "Flag feature source. compact uses the bundled fast flagger; "
+            "baseline adds optional baseline-disagreement predictors."
+        ),
+    )
+    batch_auto.add_argument(
+        "--no-flag",
+        action="store_true",
+        help="Disable learned per-cell bad-label flag scoring.",
     )
     _feature_json_arg(batch_auto)
 
@@ -460,13 +492,45 @@ def build_parser() -> argparse.ArgumentParser:
     val_run.add_argument("file", type=Path)
     _feature_json_arg(val_run)
 
-    val_auto_label = val_sub.add_parser("auto-label", help="Auto-label editing on one SWC file (v9 ML pipeline).")
+    val_auto_label = val_sub.add_parser(
+        "auto-label",
+        help="Auto-label editing on one SWC file (v12 QC-label-flag pipeline).",
+    )
     val_auto_label.add_argument("file", type=Path)
     val_auto_label.add_argument(
         "--model-dir",
         type=Path,
         default=None,
-        help="Override the directory holding the auto-typing model files.",
+        help=(
+            "Override the directory holding the auto-typing model files "
+            "(Stage 1, Stage 2, GNN, Branch3, QC gate, and flag models)."
+        ),
+    )
+    val_auto_label.add_argument(
+        "--cell-type",
+        choices=("unknown", "pyramidal", "interneuron"),
+        default="unknown",
+        help="Use Stage 1 when unknown; otherwise bypass Stage 1 with the supplied cell type.",
+    )
+    val_auto_label.add_argument(
+        "--flag-strictness",
+        type=float,
+        default=0.5,
+        help="Flag strictness from 0.0 (loose/fewer flags) to 1.0 (strict/more flags).",
+    )
+    val_auto_label.add_argument(
+        "--flag-feature-mode",
+        choices=("compact", "baseline", "auto"),
+        default="compact",
+        help=(
+            "Flag feature source. compact uses the bundled fast flagger; "
+            "baseline adds optional baseline-disagreement predictors."
+        ),
+    )
+    val_auto_label.add_argument(
+        "--no-flag",
+        action="store_true",
+        help="Disable learned per-cell bad-label flag scoring.",
     )
     _feature_json_arg(val_auto_label)
 
@@ -767,10 +831,15 @@ def main(argv: list[str] | None = None) -> int:
                 basal=True,
                 rad=False,
                 zip_output=False,
+                cell_type=args.cell_type,
+                flag_enabled=not bool(getattr(args, "no_flag", False)),
+                flag_strictness=max(0.0, min(1.0, float(args.flag_strictness))),
+                flag_feature_mode=str(getattr(args, "flag_feature_mode", "compact") or "compact"),
             )
             cfg_overrides = _parse_config_overrides(args.config_json) or {}
             if getattr(args, "model_dir", None):
                 cfg_overrides["model_dir"] = str(args.model_dir)
+            cfg_overrides["flag_feature_mode"] = opts.flag_feature_mode
             from swcstudio.core.auto_typing import is_available  # noqa: PLC0415
             ok, reason = is_available(model_dir=cfg_overrides.get("model_dir"))
             if not ok:
@@ -945,10 +1014,15 @@ def main(argv: list[str] | None = None) -> int:
                 basal=True,
                 rad=False,
                 zip_output=False,
+                cell_type=args.cell_type,
+                flag_enabled=not bool(getattr(args, "no_flag", False)),
+                flag_strictness=max(0.0, min(1.0, float(args.flag_strictness))),
+                flag_feature_mode=str(getattr(args, "flag_feature_mode", "compact") or "compact"),
             )
             cfg_overrides = _parse_config_overrides(args.config_json) or {}
             if getattr(args, "model_dir", None):
                 cfg_overrides["model_dir"] = str(args.model_dir)
+            cfg_overrides["flag_feature_mode"] = opts.flag_feature_mode
             from swcstudio.core.auto_typing import is_available  # noqa: PLC0415
             ok, reason = is_available(model_dir=cfg_overrides.get("model_dir"))
             if not ok:
@@ -964,6 +1038,7 @@ def main(argv: list[str] | None = None) -> int:
                 write_log=False,
             )
             out_counts = dict(out.get("out_type_counts", {}) or {})
+            flag_result = dict(out.get("flag_result", {}) or {})
             out["operation_log_path"] = _write_cli_operation_report(
                 Path(args.file),
                 operation_name="validation_auto_label",
@@ -976,6 +1051,9 @@ def main(argv: list[str] | None = None) -> int:
                     f"Input: {args.file}",
                     f"Nodes: {int(out.get('nodes_total', 0))}",
                     f"Type changes: {int(out.get('type_changes', 0))}",
+                    f"Cell type: {out.get('cell_type') or 'unknown'} ({out.get('cell_type_source') or 'stage1'})",
+                    f"Flagged: {bool(flag_result.get('flagged', False))}",
+                    f"Flag score: {float(flag_result.get('rank_score', 0.0)):.4f}" if flag_result else "Flag score: n/a",
                     "Out types (1/2/3/4): "
                     f"{out_counts.get(1, 0)}/{out_counts.get(2, 0)}/{out_counts.get(3, 0)}/{out_counts.get(4, 0)}",
                 ],

@@ -1,9 +1,10 @@
 """Single-file auto-typing for the Validation tool.
 
 Thin wrapper around :mod:`swcstudio.core.auto_typing`. The engine itself
-is the v9 ML pipeline; there is no backend selection, the only knobs
-are the user model directory override and whether to use the subtree
-Stage 2 head.
+is the v12 QC-label-flag pipeline; there is no backend selection. The
+runtime knobs are the user model directory override, optional cell-type
+override, flag scoring strictness, and whether to use the subtree Stage
+2 head.
 """
 
 from __future__ import annotations
@@ -34,7 +35,6 @@ from swcstudio.tools.batch_processing.features.auto_typing import (
 
 
 def _options_from_config(cfg: dict[str, Any]) -> BatchOptions:
-    _ = cfg
     return BatchOptions(
         soma=True,
         axon=True,
@@ -42,6 +42,10 @@ def _options_from_config(cfg: dict[str, Any]) -> BatchOptions:
         basal=True,
         rad=False,
         zip_output=False,
+        cell_type=(cfg.get("cell_type") or "unknown"),
+        flag_enabled=bool(cfg.get("flag_enabled", True)),
+        flag_strictness=float(cfg.get("flag_strictness", 0.5)),
+        flag_feature_mode=str(cfg.get("flag_feature_mode") or "compact"),
     )
 
 
@@ -124,6 +128,11 @@ def auto_label_file(
         "type_changes": int(getattr(result_obj, "type_changes", 0)),
         "radius_changes": 0,
         "out_type_counts": dict(getattr(result_obj, "out_type_counts", {}) or {}),
+        "cell_type": getattr(result_obj, "cell_type", None),
+        "cell_type_source": getattr(result_obj, "cell_type_source", "stage1"),
+        "stage1_confidence": getattr(result_obj, "stage1_confidence", None),
+        "qc_result": dict(getattr(result_obj, "qc_result", {}) or {}),
+        "flag_result": dict(getattr(result_obj, "flag_result", {}) or {}),
         "change_details": list(getattr(result_obj, "change_details", []) or []),
         "result_obj": result_obj,
     }

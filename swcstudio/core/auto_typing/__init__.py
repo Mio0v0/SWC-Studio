@@ -1,4 +1,4 @@
-"""Auto-typing engine for swcstudio (v9 ML pipeline).
+"""Auto-typing engine for swcstudio (v12 QC-label-flag pipeline).
 
 This package is the single auto-labeling backend used everywhere in
 swcstudio. It runs a four-stage pipeline that classifies every node in
@@ -10,11 +10,12 @@ an SWC into soma / axon / basal dendrite / apical dendrite:
   ensemble), propagated to all branches in the same primary subtree.
 * Stage 2b: GraphSAGE GNN over the branch graph re-decides
   apical-vs-basal for pyramidal dendrite branches.
-* Stage 3: topology refinement.
+* Stage 3: topology refinement plus conservative Branch3 rescue.
+* QC/flag: runtime QC metadata and learned per-cell bad-label flag.
 
-All four stages are required. The package's required dependencies
+The core stages are required. The package's required dependencies
 include sklearn, torch, and torch_geometric, and ``pip install -e .``
-ships the trained model files for every stage.
+ships the trained model files for the pipeline and flag scorer.
 
 End users typically reach this code through the CLI (``swcstudio
 validation auto-label``, ``swcstudio batch auto-typing``) or through

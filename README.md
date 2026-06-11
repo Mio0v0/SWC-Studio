@@ -54,6 +54,13 @@ Use this path if you only need the desktop application and don't want to deal wi
 
 Models are bundled inside the app — no separate download.
 
+The bundled auto-labeling model is the current v12 QC-label-flag
+pipeline: Stage 1 cell typing, Stage 2 subtree labeling, Stage 2b
+apical/basal GNN, Branch3 rescue, QC gate, and learned bad-label flag
+scoring. Compact flag scoring is available out of the box. The optional
+baseline-disagreement flag mode is also supported when the NeuroM-RF,
+L-Measure-RF, Sholl-RF, and Sholl-MLP predictor artifacts are reachable.
+
 ### Option 2 — Researcher, `pip install` (recommended for scripted workflows)
 
 The Python package is published on PyPI:
@@ -62,9 +69,10 @@ The Python package is published on PyPI:
 pip install swcstudio
 swcstudio-gui          # launch the desktop GUI
 swcstudio --help       # CLI
+swcstudio models status
 ```
 
-Requires Python 3.10+ already installed on your system. The wheel itself is small (~300 KB); the heavy dependencies (PyTorch, PySide6, vispy, etc.) come along automatically. Models are downloaded on the first auto-label call (~21 MB, one-time, cached locally).
+Requires Python 3.10+ already installed on your system. The wheel itself is small (~300 KB); the heavy dependencies (PyTorch, PySide6, vispy, etc.) come along automatically. Models are downloaded on the first auto-label call (~80 MB, one-time, cached locally).
 
 For a clean isolated install:
 
@@ -128,7 +136,7 @@ How you update depends on how you installed:
 
 | Install method | How to update |
 |---|---|
-| **Option 1** (bundled app) | Help → **Check for Updates** in the GUI. The in-app updater downloads only the changed layer (~5 MB code or ~21 MB models), no full re-download required. |
+| **Option 1** (bundled app) | Help → **Check for Updates** in the GUI. The in-app updater downloads only the changed layer (~5 MB code or ~80 MB models), no full re-download required. |
 | **Option 2** (pip) | `pip install --upgrade swcstudio` — pip downloads only what changed. Models auto-refresh on next auto-label call if a new version is available. |
 | **Option 3** (source) | `git pull` followed by `pip install -e .` to pick up any new dependencies. |
 

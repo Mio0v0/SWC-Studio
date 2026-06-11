@@ -211,11 +211,40 @@ auto-typing engine, implemented in:
 | Stage 1 | sklearn ensemble over 49 whole-cell features (`cell_type_classifier.pkl`) | pyramidal vs interneuron |
 | Stage 2 | sklearn ensemble per primary subtree (`branch_classifier.pkl`) | axon / basal / apical per subtree |
 | Stage 2b | GraphSAGE GNN over the branch graph (`gnn_apical_basal.pt`) | apical-vs-basal re-decision on pyramidal dendrites |
+| Branch3 | conservative GraphSAGE rescue head (`gnn_branch3_rescue.pt`) | rescue difficult pyramidal apical/basal cases |
 | Stage 3 | topology refinement | soma-boundary constraints applied (one primary axon, one primary apical), short islands flipped |
+| QC/flag | QC gate plus learned flag models (`qc_gate.pkl`, `flag_model_*.joblib`), optionally with baseline-disagreement features | per-cell QC metadata and bad-label flag score |
 
 Stage 1 uses a soft handoff: when its confidence is below threshold it
 runs Stages 2 + 3 for both cell types and picks the higher-confidence
 outcome.
+
+### Current deployed model files
+
+The bundled production model bundle contains the full QC-label-flag
+architecture:
+
+- `cell_type_classifier.pkl` - Stage 1 cell-type classifier
+- `branch_classifier.pkl` - Stage 2 subtree labeler
+- `gnn_apical_basal.pt` - Stage 2b apical/basal GNN
+- `gnn_branch3_rescue.pt` - Branch3 rescue head
+- `qc_gate.pkl` - runtime QC gate
+- `flag_model_pyramidal.joblib`, `flag_model_interneuron.joblib`,
+  `flag_model_all.joblib` - compact learned flaggers
+- `flag_model_pyramidal_baseline.joblib`,
+  `flag_model_all_baseline.joblib` - baseline-disagreement learned
+  flaggers
+
+The baseline-disagreement flaggers are small and bundled, but they need
+the optional baseline predictor pickles to build their runtime features:
+`neurom_rf.pkl`, `lmeasure_rf.pkl`, `sholl_rf.pkl`, and `sholl_mlp.pkl`.
+Use `swcstudio models status` to confirm both the flag bundles and those
+optional predictors are reachable.
+
+The deployed baseline-disagreement flagger uses `baseline_oof_*`
+features. It is not the older research-only multi-v12 `xmodel_*`
+ensemble flagger; SWC-Studio intentionally rejects a flag bundle that
+requires unsupported `xmodel_*` features.
 
 ### Apical detection
 
@@ -236,6 +265,12 @@ hand-tuned weights. Current keys:
   the default search order: env var → user data dir → bundled)
 - `use_subtree_stage2` — whether Stage 2 operates on full primary
   subtrees (default `true`)
+- `cell_type` - `unknown` runs Stage 1; `pyramidal` or `interneuron`
+  bypasses Stage 1 with the user-provided type
+- `flag_enabled` - enable learned per-cell bad-label flag scoring
+- `flag_strictness` - tune flagging from loose to conservative
+- `flag_feature_mode` - `compact`, `baseline`, or `auto`; baseline mode
+  requires optional baseline predictor artifacts
 - `enabled` — feature gate (default `true`)
 - `notes` — free-form description; not consumed by the engine
 
@@ -244,6 +279,15 @@ into the user data directory (`%APPDATA%\swcstudio\models\` on Windows,
 `~/Library/Application Support/swcstudio/models/` on macOS, or
 `~/.local/share/swcstudio/models/` on Linux) and they take precedence
 over the bundled defaults.
+
+`flag_feature_mode` behavior:
+
+- `compact` uses only features already available from the v12 inference
+  pass.
+- `baseline` computes multi-baseline disagreement features from
+  NeuroM-RF, L-Measure-RF, Sholl-RF, and Sholl-MLP predictions.
+- `auto` uses `baseline` when all four baseline predictors are reachable;
+  otherwise it falls back to `compact`.
 
 ## How Checks Become GUI Issues
 

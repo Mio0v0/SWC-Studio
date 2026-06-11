@@ -13,6 +13,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QSplitter,
     QStackedWidget,
+    QSizePolicy,
     QTreeWidget,
     QTreeWidgetItem,
     QVBoxLayout,
@@ -145,6 +146,8 @@ class EditorTab(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        self.setMinimumWidth(0)
+        self.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Expanding)
         self._df: pd.DataFrame | None = None
         self._mode = self.MODE_CANVAS
         self._has_data = False
@@ -153,13 +156,18 @@ class EditorTab(QWidget):
         root_layout = QVBoxLayout(self)
         root_layout.setContentsMargins(0, 0, 0, 0)
         self._stack = QStackedWidget()
+        self._stack.setMinimumWidth(0)
+        self._stack.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Expanding)
         root_layout.addWidget(self._stack)
 
         self._page_empty = QWidget()
+        self._page_empty.setMinimumWidth(0)
         self._page_empty.setStyleSheet("background: #000;")
         self._stack.addWidget(self._page_empty)
 
         self._page_batch = QWidget()
+        self._page_batch.setMinimumWidth(0)
+        self._page_batch.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Expanding)
         batch_layout = QVBoxLayout(self._page_batch)
         batch_layout.setContentsMargins(8, 8, 8, 8)
         batch_layout.setSpacing(6)
@@ -171,6 +179,8 @@ class EditorTab(QWidget):
         self._batch_summary.setStyleSheet("font-size: 12px; color: #555;")
         batch_layout.addWidget(self._batch_summary)
         self._batch_tree = QTreeWidget()
+        self._batch_tree.setMinimumWidth(0)
+        self._batch_tree.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Expanding)
         self._batch_tree.setHeaderLabels(["Status", "Label"])
         self._batch_tree.setRootIsDecorated(True)
         self._batch_tree.setItemsExpandable(True)

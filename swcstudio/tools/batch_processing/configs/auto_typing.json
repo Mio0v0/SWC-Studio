@@ -1,7 +1,10 @@
 {
   "enabled": true,
   "feature": "auto_typing",
+  "flag_enabled": true,
+  "flag_strictness": 0.5,
+  "cell_type": "unknown",
   "model_dir": "",
   "use_subtree_stage2": true,
-  "notes": "Auto-typing uses the v9 ML pipeline. The only runtime knobs are the optional model_dir override (point at custom-trained models) and use_subtree_stage2 (whether Stage 2 operates on full primary subtrees; default true)."
+  "notes": "Auto-typing uses the v12 QC-label-flag pipeline. cell_type may be unknown, pyramidal, or interneuron. flag_strictness is 0.0 loose to 1.0 strict."
 }

@@ -43,7 +43,9 @@ swcstudio move-subtree ./data/single-soma.swc --root-id 40 --x 100 --y 120 --z 5
 Current single-file edit behavior:
 
 - auto-label always applies soma, axon, and basal labeling
-- apical labeling is enabled automatically only when the morphology contains a strong apical subtree
+- apical labeling is detected automatically when appropriate
+- `--cell-type pyramidal` / `--cell-type interneuron` bypasses Stage 1 when the user already knows the cell type
+- flag scoring is enabled by default; `--flag-strictness` tunes loose vs conservative flagging and `--no-flag` disables it
 
 
 - the updated SWC is written automatically

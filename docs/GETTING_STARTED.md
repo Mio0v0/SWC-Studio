@@ -46,7 +46,7 @@ pip install swcstudio
 
 The wheel itself is tiny (~300 KB code only); the heavy dependencies
 (PyTorch, PySide6, vispy, sklearn, etc.) are pulled in by pip. The
-auto-typing models are **downloaded on first use** (~21 MB, one-time)
+auto-typing models are **downloaded on first use** (~80 MB, one-time)
 and cached at:
 
 - macOS: `~/Library/Application Support/swcstudio/models/`
@@ -129,7 +129,7 @@ How you update depends on how you installed:
 
 | Install method | How to update |
 |---|---|
-| Option 1 (bundled app) | Help → **Check for Updates** in the GUI. The in-app updater downloads only the changed layer (~5 MB code or ~21 MB models), no full re-download. |
+| Option 1 (bundled app) | Help → **Check for Updates** in the GUI. The in-app updater downloads only the changed layer (~5 MB code or ~80 MB models), no full re-download. |
 | Option 2 (pip) | `pip install --upgrade swcstudio`. Pip downloads only what changed; models refresh on next auto-label call if a new version is available. |
 | Option 3 (source) | `git pull` followed by `pip install -e .` to pick up any new dependencies. |
 
@@ -155,9 +155,10 @@ python -m swcstudio.gui.main
 
 `swcstudio models status` is worth running once after install: it
 prints the auto-typing engine's model search path and confirms the
-three bundled model files are reachable. You should see all three of
-`cell_type_classifier.pkl`, `branch_classifier.pkl`, and
-`gnn_apical_basal.pt` listed as `[FOUND]`.
+bundled v12 model files are reachable. You should see the core files
+`cell_type_classifier.pkl`, `branch_classifier.pkl`,
+`gnn_apical_basal.pt`, `gnn_branch3_rescue.pt`, and `qc_gate.pkl`
+listed as `[FOUND]`, plus flag model paths when flag scoring is bundled.
 
 ## First CLI checks
 
@@ -181,9 +182,10 @@ Single-file edit commands write both the updated SWC and the matching
 log into the source file's default output directory. No separate
 `--write` flag is required.
 
-`auto-label` always applies soma / axon / basal labeling and
-automatically enables apical labeling only when an apical subtree is
-detected.
+`auto-label` always applies soma / axon / basal labeling, detects apical
+labels when appropriate, and can flag cells whose predicted labels look
+unreliable. Use `--cell-type pyramidal` or `--cell-type interneuron`
+when you already know the cell type; leave it unknown to run Stage 1.
 
 ## First GUI checks
 

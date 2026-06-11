@@ -1,6 +1,6 @@
 """Public entry points for the auto-typing engine.
 
-Four stages drive every prediction:
+The v12 QC-label-flag path drives every prediction:
 
 * Stage 1: cell-type detector (sklearn ensemble, 49 whole-cell
   features) decides pyramidal vs interneuron with a soft handoff.
@@ -8,11 +8,11 @@ Four stages drive every prediction:
   ensemble), propagated to all branches in the same primary subtree.
 * Stage 2b: GraphSAGE GNN over the branch graph re-decides
   apical-vs-basal for pyramidal dendrite branches.
-* Stage 3: topology refinement.
+* Stage 3: topology refinement plus conservative Branch3 rescue.
+* QC/flag: runtime QC metadata and learned per-cell bad-label flag.
 
-All four stages are required. ``is_available`` returns False if any
-of the three model files (Stage 1 pickle, Stage 2 pickle, GNN
-checkpoint) or torch / torch_geometric are missing.
+The core model files are required. ``is_available`` returns False if any
+of the Stage 1, Stage 2, GNN, Branch3, or QC-gate files are missing.
 
 Public surface:
 
@@ -54,8 +54,9 @@ def is_available(*, model_dir: str | None = None) -> tuple[bool, str]:
     """Return ``(ok, reason)`` describing whether the auto-typing engine
     can run right now.
 
-    The engine requires all three model files (Stage 1 sklearn pickle,
-    Stage 2 sklearn pickle, Stage 2b GNN checkpoint) plus torch and
+    The engine requires the v12 model files (Stage 1 sklearn pickle,
+    Stage 2 sklearn pickle, Stage 2b GNN checkpoint, Branch3 rescue
+    checkpoint, and QC gate) plus torch and
     torch_geometric — they are required dependencies of the package, so
     a normal install satisfies them. When something is missing this
     returns ``(False, reason)`` with a search-path diagnostic so the
@@ -64,6 +65,8 @@ def is_available(*, model_dir: str | None = None) -> tuple[bool, str]:
     s1 = resolve_model_path("stage1", override=model_dir)
     s2 = resolve_model_path("stage2", override=model_dir)
     gnn = resolve_model_path("gnn", override=model_dir)
+    branch3 = resolve_model_path("branch3", override=model_dir)
+    qc_gate = resolve_model_path("qc_gate", override=model_dir)
     missing = []
     if s1 is None:
         missing.append("Stage 1 (cell_type_classifier.pkl)")
@@ -71,6 +74,10 @@ def is_available(*, model_dir: str | None = None) -> tuple[bool, str]:
         missing.append("Stage 2 (branch_classifier.pkl)")
     if gnn is None:
         missing.append("Stage 2b GNN (gnn_apical_basal.pt)")
+    if branch3 is None:
+        missing.append("Branch3 rescue head (gnn_branch3_rescue.pt)")
+    if qc_gate is None:
+        missing.append("QC gate (qc_gate.pkl)")
     if missing:
         return False, (
             "Auto-typing is missing required model files: "
@@ -96,6 +103,23 @@ def backend_status(*, model_dir: str | None = None) -> dict[str, Any]:
     s1 = resolve_model_path("stage1", override=model_dir)
     s2 = resolve_model_path("stage2", override=model_dir)
     gnn = resolve_model_path("gnn", override=model_dir)
+    branch3 = resolve_model_path("branch3", override=model_dir)
+    qc_gate = resolve_model_path("qc_gate", override=model_dir)
+    flag_pyr = resolve_model_path("flag_pyramidal", override=model_dir)
+    flag_int = resolve_model_path("flag_interneuron", override=model_dir)
+    flag_all = resolve_model_path("flag_all", override=model_dir)
+    flag_pyr_baseline = resolve_model_path("flag_pyramidal_baseline", override=model_dir, auto_download=False)
+    flag_all_baseline = resolve_model_path("flag_all_baseline", override=model_dir, auto_download=False)
+    try:
+        from .baseline_disagreement import baseline_model_status  # noqa: PLC0415
+        baseline_status = baseline_model_status(override=model_dir)
+    except Exception as exc:  # noqa: BLE001
+        baseline_status = {
+            "available": False,
+            "error": f"{exc.__class__.__name__}: {exc}",
+            "paths": {},
+            "search_dirs": [],
+        }
 
     torch_ok = True
     torch_msg = "torch + torch_geometric available"
@@ -110,9 +134,25 @@ def backend_status(*, model_dir: str | None = None) -> dict[str, Any]:
         "stage1_path": str(s1) if s1 else None,
         "stage2_path": str(s2) if s2 else None,
         "gnn_path": str(gnn) if gnn else None,
+        "branch3_path": str(branch3) if branch3 else None,
+        "qc_gate_path": str(qc_gate) if qc_gate else None,
+        "flag_pyramidal_path": str(flag_pyr) if flag_pyr else None,
+        "flag_interneuron_path": str(flag_int) if flag_int else None,
+        "flag_all_path": str(flag_all) if flag_all else None,
+        "flag_pyramidal_baseline_path": str(flag_pyr_baseline) if flag_pyr_baseline else None,
+        "flag_all_baseline_path": str(flag_all_baseline) if flag_all_baseline else None,
         "stage1_ok": s1 is not None,
         "stage2_ok": s2 is not None,
         "gnn_ok": gnn is not None and torch_ok,
+        "branch3_ok": branch3 is not None and torch_ok,
+        "qc_gate_ok": qc_gate is not None,
+        "flag_pyramidal_ok": flag_pyr is not None,
+        "flag_interneuron_ok": flag_int is not None,
+        "flag_all_ok": flag_all is not None,
+        "flag_pyramidal_baseline_ok": flag_pyr_baseline is not None,
+        "flag_all_baseline_ok": flag_all_baseline is not None,
+        "baseline_predictors_ok": bool(baseline_status.get("available")),
+        "baseline_predictors": baseline_status,
         "torch_ok": torch_ok,
         "torch_message": torch_msg,
         "search_diagnostic": diagnostic_search_report(override=model_dir),
@@ -125,6 +165,8 @@ def backend_status(*, model_dir: str | None = None) -> dict[str, Any]:
 
 
 _GNN_CACHE: dict[str, Any] = {"path": None, "state": None}
+_BRANCH3_CACHE: dict[str, Any] = {"path": None, "state": None}
+_QC_GATE_CACHE: dict[str, Any] = {"path": None, "state": None}
 
 
 def _load_gnn_state(model_dir: str | None) -> Any:
@@ -145,6 +187,50 @@ def _load_gnn_state(model_dir: str | None) -> Any:
     _GNN_CACHE["path"] = cache_key
     _GNN_CACHE["state"] = state
     return state
+
+
+def _load_branch3_state(model_dir: str | None) -> Any:
+    branch3_path = resolve_model_path("branch3", override=model_dir)
+    if branch3_path is None:
+        raise FileNotFoundError(
+            "Branch3 rescue checkpoint (gnn_branch3_rescue.pt) not found.\n"
+            + diagnostic_search_report(override=model_dir)
+        )
+    cache_key = str(branch3_path.resolve())
+    if _BRANCH3_CACHE.get("path") == cache_key and _BRANCH3_CACHE.get("state") is not None:
+        return _BRANCH3_CACHE["state"]
+    from .gnn_branch3_inference import load_branch3  # noqa: PLC0415
+    state = load_branch3(branch3_path)
+    _BRANCH3_CACHE["path"] = cache_key
+    _BRANCH3_CACHE["state"] = state
+    return state
+
+
+def _load_qc_gate(model_dir: str | None) -> Any | None:
+    qc_path = resolve_model_path("qc_gate", override=model_dir)
+    if qc_path is None:
+        return None
+    cache_key = str(qc_path.resolve())
+    if _QC_GATE_CACHE.get("path") == cache_key and _QC_GATE_CACHE.get("state") is not None:
+        return _QC_GATE_CACHE["state"]
+    from .qc_input import QCGate  # noqa: PLC0415
+    gate = QCGate.load(qc_path)
+    _QC_GATE_CACHE["path"] = cache_key
+    _QC_GATE_CACHE["state"] = gate
+    return gate
+
+
+def _public_qc_result(raw: Any) -> dict[str, Any] | None:
+    """Return the user-facing QC payload without bulky internals."""
+    if raw is None:
+        return None
+    if hasattr(raw, "to_dict"):
+        raw = raw.to_dict()
+    if not isinstance(raw, dict):
+        return {"passed": False, "reasons": [f"qc_error:unexpected_result:{type(raw).__name__}"]}
+    out = dict(raw)
+    out.pop("feature_vector", None)
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -329,6 +415,156 @@ def _rows_to_swc_nodes(rows: list[dict[str, Any]]) -> list:
     ]
 
 
+def _normalize_cell_type(raw: str | None) -> str | None:
+    value = str(raw or "").strip().lower()
+    if value in {"", "unknown", "auto", "stage1", "none"}:
+        return None
+    if value in {"pyramidal", "interneuron"}:
+        return value
+    raise ValueError("cell_type must be one of: unknown, pyramidal, interneuron")
+
+
+def _normalize_flag_feature_mode(raw: str | None) -> str:
+    value = str(raw or "compact").strip().lower().replace("-", "_")
+    if value in {"", "default"}:
+        return "compact"
+    if value in {"compact", "baseline", "auto"}:
+        return value
+    raise ValueError("flag_feature_mode must be one of: compact, baseline, auto")
+
+
+def _compact_flag_model_for_cell_type(model_dir: str | None, cell_type: str | None) -> Path | None:
+    if cell_type == "pyramidal":
+        return (
+            resolve_model_path("flag_pyramidal", override=model_dir, auto_download=False)
+            or resolve_model_path("flag_all", override=model_dir, auto_download=False)
+        )
+    if cell_type == "interneuron":
+        return (
+            resolve_model_path("flag_interneuron", override=model_dir, auto_download=False)
+            or resolve_model_path("flag_all", override=model_dir, auto_download=False)
+        )
+    return resolve_model_path("flag_all", override=model_dir, auto_download=False)
+
+
+def _baseline_flag_model_for_cell_type(model_dir: str | None, cell_type: str | None) -> Path | None:
+    if cell_type == "pyramidal":
+        return (
+            resolve_model_path("flag_pyramidal_baseline", override=model_dir, auto_download=False)
+            or resolve_model_path("flag_all_baseline", override=model_dir, auto_download=False)
+        )
+    return resolve_model_path("flag_all_baseline", override=model_dir, auto_download=False)
+
+
+def _flag_model_for_cell_type(
+    model_dir: str | None,
+    cell_type: str | None,
+    feature_mode: str | None,
+) -> tuple[Path | None, str]:
+    mode = _normalize_flag_feature_mode(feature_mode)
+    compact = _compact_flag_model_for_cell_type(model_dir, cell_type)
+    baseline = _baseline_flag_model_for_cell_type(model_dir, cell_type)
+    if mode == "baseline":
+        return baseline, "baseline"
+    if mode == "auto" and baseline is not None:
+        try:
+            from .baseline_disagreement import baseline_model_status  # noqa: PLC0415
+            if bool(baseline_model_status(override=model_dir).get("available")):
+                return baseline, "baseline"
+        except Exception:
+            pass
+    return compact, "compact"
+
+
+def _score_flag_for_pipeline_result(
+    *,
+    in_path: Path,
+    rows: list[dict[str, Any]],
+    opts: BatchOptions,
+    model_dir: str | None,
+    stage1_path: Path,
+    stage2_path: Path,
+    gnn_state: Any | None,
+    pipeline_result: Any,
+    cell_type: str | None,
+    stage1_conf: float | None,
+    use_subtree_stage2: bool,
+) -> dict[str, Any] | None:
+    if not bool(getattr(opts, "flag_enabled", True)) or pipeline_result is None:
+        return None
+
+    requested_mode = _normalize_flag_feature_mode(getattr(opts, "flag_feature_mode", "compact"))
+    flag_path, actual_mode = _flag_model_for_cell_type(model_dir, cell_type, requested_mode)
+    if flag_path is None:
+        if requested_mode == "baseline":
+            return {
+                "enabled": True,
+                "flagged": False,
+                "requested_feature_mode": requested_mode,
+                "actual_feature_mode": "baseline",
+                "error": "Baseline flag model is not available. Expected flag_model_pyramidal_baseline.joblib or flag_model_all_baseline.joblib.",
+            }
+        return None
+
+    try:
+        from .flagging import build_feature_row, score_flag  # noqa: PLC0415
+        from .pipeline import run_pipeline_on_nodes  # noqa: PLC0415
+
+        nodes_for_flag = _rows_to_swc_nodes(rows)
+        base_result = None
+        if cell_type == "pyramidal":
+            base_result = run_pipeline_on_nodes(
+                nodes_for_flag,
+                file_path="",
+                stage1_model=stage1_path,
+                stage2_model=stage2_path,
+                gnn_state=gnn_state,
+                branch3_state=None,
+                use_subtree_stage2=use_subtree_stage2,
+                override_cell_type=_normalize_cell_type(getattr(opts, "cell_type", None)),
+            )
+        feature_row = build_feature_row(
+            file_name=in_path.name,
+            nodes=nodes_for_flag,
+            labels=list(pipeline_result.node_labels),
+            confidences=[float(c) for c in pipeline_result.node_confidences],
+            stage1_cell_type=str(cell_type or ""),
+            stage1_confidence=float(stage1_conf if stage1_conf is not None else 0.0),
+            base_labels=list(base_result.node_labels) if base_result is not None else None,
+            base_confidences=(
+                [float(c) for c in base_result.node_confidences]
+                if base_result is not None else None
+            ),
+        )
+        if actual_mode == "baseline":
+            from .baseline_disagreement import build_baseline_disagreement_features  # noqa: PLC0415
+            feature_row.update(
+                build_baseline_disagreement_features(
+                    nodes=nodes_for_flag,
+                    labels=list(pipeline_result.node_labels),
+                    stage1_cell_type=str(cell_type or ""),
+                    model_dir=model_dir,
+                )
+            )
+        out = score_flag(
+            flag_model_path=flag_path,
+            feature_row=feature_row,
+            cell_type_for_filter=str(cell_type or ""),
+            strictness=float(getattr(opts, "flag_strictness", 0.5)),
+        )
+        out["requested_feature_mode"] = requested_mode
+        out["actual_feature_mode"] = actual_mode
+        return out
+    except Exception as exc:  # noqa: BLE001
+        return {
+            "enabled": True,
+            "flagged": False,
+            "requested_feature_mode": requested_mode,
+            "actual_feature_mode": actual_mode,
+            "error": f"{exc.__class__.__name__}: {exc}",
+        }
+
+
 def _apply_pipeline_to_rows(
     rows: list[dict[str, Any]],
     *,
@@ -336,10 +572,11 @@ def _apply_pipeline_to_rows(
     stage1_path: Path,
     stage2_path: Path,
     gnn_state: Any | None,
+    branch3_state: Any | None,
     use_subtree_stage2: bool,
-) -> tuple[list[int], list[float], int, int]:
+) -> tuple[list[int], list[float], int, int, Any | None]:
     """Run the pipeline on parsed SWC rows. Returns
-    ``(types, radii, type_changes, radius_changes)``.
+    ``(types, radii, type_changes, radius_changes, pipeline_result)``.
 
     The ``opts`` flags map onto the pipeline like this:
 
@@ -363,15 +600,19 @@ def _apply_pipeline_to_rows(
             [float(r["radius"]) for r in rows],
             0,
             0,
+            None,
         )
 
+    cell_type_override = _normalize_cell_type(getattr(opts, "cell_type", None))
     result = run_pipeline_on_nodes(
         nodes,
         file_path="",
         stage1_model=stage1_path,
         stage2_model=stage2_path,
         gnn_state=gnn_state,
+        branch3_state=branch3_state,
         use_subtree_stage2=use_subtree_stage2,
+        override_cell_type=cell_type_override,
     )
     pipeline_types = list(result.node_labels)
 
@@ -432,7 +673,7 @@ def _apply_pipeline_to_rows(
     radius_changes = sum(
         1 for old, new in zip(radii_orig, radii) if float(old) != float(new)
     )
-    return final_types, radii, type_changes, radius_changes
+    return final_types, radii, type_changes, radius_changes, result
 
 
 # ---------------------------------------------------------------------------
@@ -458,21 +699,47 @@ def run_file(
     stage1_path = resolve_model_path("stage1", override=model_dir)
     stage2_path = resolve_model_path("stage2", override=model_dir)
     gnn_state = _load_gnn_state(model_dir)
+    branch3_state = _load_branch3_state(model_dir)
+    qc_gate = _load_qc_gate(model_dir)
 
     in_path = Path(file_path)
     headers, rows = _parse_swc(in_path)
     ineligible = _check_auto_label_eligibility(rows)
     if ineligible is not None:
         raise ValueError(f"{in_path.name}: {ineligible}")
+    qc_result = None
+    if qc_gate is not None:
+        try:
+            qc_result = _public_qc_result(qc_gate.evaluate(in_path))
+        except Exception as exc:  # noqa: BLE001
+            qc_result = {"passed": False, "reasons": [f"qc_error:{exc}"], "path": str(in_path)}
 
     orig_types = [int(r["type"]) for r in rows]
     orig_radii = [float(r["radius"]) for r in rows]
-    types, radii, type_changes, radius_changes = _apply_pipeline_to_rows(
+    types, radii, type_changes, radius_changes, pipeline_result = _apply_pipeline_to_rows(
         rows,
         opts=opts,
         stage1_path=stage1_path,
         stage2_path=stage2_path,
         gnn_state=gnn_state,
+        branch3_state=branch3_state,
+        use_subtree_stage2=use_subtree_stage2,
+    )
+    cell_type = getattr(getattr(pipeline_result, "stage1", None), "cell_type", None)
+    stage1_conf = getattr(getattr(pipeline_result, "stage1", None), "confidence", None)
+    cell_type_source = "user" if _normalize_cell_type(getattr(opts, "cell_type", None)) else "stage1"
+
+    flag_result = _score_flag_for_pipeline_result(
+        in_path=in_path,
+        rows=rows,
+        opts=opts,
+        model_dir=model_dir,
+        stage1_path=stage1_path,
+        stage2_path=stage2_path,
+        gnn_state=gnn_state,
+        pipeline_result=pipeline_result,
+        cell_type=cell_type,
+        stage1_conf=stage1_conf,
         use_subtree_stage2=use_subtree_stage2,
     )
 
@@ -518,11 +785,14 @@ def run_file(
             "total_nodes": len(rows),
             "total_type_changes": type_changes,
             "total_radius_changes": radius_changes,
+            "files_flagged": int(bool(flag_result and flag_result.get("flagged"))),
             "failures": [],
             "per_file": [
                 f"{in_path.name}: nodes={len(rows)}, type_changes={type_changes}, "
-                f"radius_changes={radius_changes}, out_types(soma/axon/basal/apic)="
-                f"{out_counts[1]}/{out_counts[2]}/{out_counts[3]}/{out_counts[4]}"
+                f"radius_changes={radius_changes}, cell_type={cell_type or 'unknown'} "
+                f"({cell_type_source}), flag={bool(flag_result and flag_result.get('flagged'))}, "
+                f"out_types(soma/axon/basal/apic)={out_counts[1]}/{out_counts[2]}/"
+                f"{out_counts[3]}/{out_counts[4]}"
             ],
             "change_details": change_details,
         }
@@ -535,6 +805,11 @@ def run_file(
         type_changes=type_changes,
         radius_changes=radius_changes,
         out_type_counts=out_counts,
+        cell_type=cell_type,
+        cell_type_source=cell_type_source,
+        stage1_confidence=float(stage1_conf) if stage1_conf is not None else None,
+        qc_result=qc_result,
+        flag_result=flag_result,
         failures=[],
         change_details=change_details,
         log_path=log_path,
@@ -567,6 +842,8 @@ def run_batch(
     stage1_path = resolve_model_path("stage1", override=model_dir)
     stage2_path = resolve_model_path("stage2", override=model_dir)
     gnn_state = _load_gnn_state(model_dir)
+    branch3_state = _load_branch3_state(model_dir)
+    qc_gate = _load_qc_gate(model_dir)
 
     in_dir = Path(folder)
     swc_files = sorted([
@@ -588,6 +865,7 @@ def run_batch(
     total_type_changes = 0
     total_radius_changes = 0
     total_files = len(swc_files)
+    files_flagged = 0
 
     for idx, swc_path in enumerate(swc_files):
         if progress_callback is not None:
@@ -598,15 +876,22 @@ def run_batch(
             if ineligible is not None:
                 failures.append(f"{swc_path.name}: skipped — {ineligible}")
                 continue
+            qc_result = None
+            if qc_gate is not None:
+                try:
+                    qc_result = _public_qc_result(qc_gate.evaluate(swc_path))
+                except Exception as exc:  # noqa: BLE001
+                    qc_result = {"passed": False, "reasons": [f"qc_error:{exc}"], "path": str(swc_path)}
 
             orig_types = [int(r["type"]) for r in rows]
             orig_radii = [float(r["radius"]) for r in rows]
-            types, radii, type_changes, radius_changes = _apply_pipeline_to_rows(
+            types, radii, type_changes, radius_changes, pipeline_result = _apply_pipeline_to_rows(
                 rows,
                 opts=opts,
                 stage1_path=stage1_path,
                 stage2_path=stage2_path,
                 gnn_state=gnn_state,
+                branch3_state=branch3_state,
                 use_subtree_stage2=use_subtree_stage2,
             )
             out_path = operation_output_path_for_file(
@@ -621,6 +906,24 @@ def run_batch(
             total_nodes += len(rows)
             total_type_changes += type_changes
             total_radius_changes += radius_changes
+            cell_type = getattr(getattr(pipeline_result, "stage1", None), "cell_type", None)
+            stage1_conf = getattr(getattr(pipeline_result, "stage1", None), "confidence", None)
+            cell_type_source = "user" if _normalize_cell_type(getattr(opts, "cell_type", None)) else "stage1"
+            flag_result = _score_flag_for_pipeline_result(
+                in_path=swc_path,
+                rows=rows,
+                opts=opts,
+                model_dir=model_dir,
+                stage1_path=stage1_path,
+                stage2_path=stage2_path,
+                gnn_state=gnn_state,
+                pipeline_result=pipeline_result,
+                cell_type=cell_type,
+                stage1_conf=stage1_conf,
+                use_subtree_stage2=use_subtree_stage2,
+            )
+            if bool(flag_result and flag_result.get("flagged")):
+                files_flagged += 1
             out_counts = {
                 1: sum(1 for t in types if int(t) == 1),
                 2: sum(1 for t in types if int(t) == 2),
@@ -629,8 +932,11 @@ def run_batch(
             }
             per_file.append(
                 f"{swc_path.name}: nodes={len(rows)}, type_changes={type_changes}, "
-                f"radius_changes={radius_changes}, out_types(soma/axon/basal/apic)="
-                f"{out_counts[1]}/{out_counts[2]}/{out_counts[3]}/{out_counts[4]}"
+                f"radius_changes={radius_changes}, cell_type={cell_type or 'unknown'} "
+                f"({cell_type_source}), qc_pass={None if qc_result is None else qc_result.get('passed')}, "
+                f"flag={bool(flag_result and flag_result.get('flagged'))}, "
+                f"out_types(soma/axon/basal/apic)={out_counts[1]}/{out_counts[2]}/"
+                f"{out_counts[3]}/{out_counts[4]}"
             )
 
             change_details.extend(
@@ -659,6 +965,7 @@ def run_batch(
         "total_nodes": total_nodes,
         "total_type_changes": total_type_changes,
         "total_radius_changes": total_radius_changes,
+        "files_flagged": files_flagged,
         "failures": failures,
         "per_file": per_file,
         "change_details": change_details,
@@ -680,6 +987,7 @@ def run_batch(
         total_nodes=total_nodes,
         total_type_changes=total_type_changes,
         total_radius_changes=total_radius_changes,
+        files_flagged=files_flagged,
         failures=failures,
         per_file=per_file,
         log_path=log_path,

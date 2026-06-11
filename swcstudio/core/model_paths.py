@@ -1,11 +1,21 @@
 """Resolve where the auto-typing models live on disk.
 
-The auto-typing engine (:mod:`swcstudio.core.auto_typing`) needs three
-trained model files:
+The auto-typing engine (:mod:`swcstudio.core.auto_typing`) is the v12
+QC-label-flag path. Its required core model files are:
 
 * ``cell_type_classifier.pkl`` — Stage 1 (whole-cell pyramidal vs interneuron)
 * ``branch_classifier.pkl`` — Stage 2 (per-branch / per-subtree multiclass)
-* ``gnn_apical_basal.pt`` — optional Stage 2b GraphSAGE GNN
+* ``gnn_apical_basal.pt`` — Stage 2b GraphSAGE GNN
+* ``gnn_branch3_rescue.pt`` — conservative Branch3 rescue head
+* ``qc_gate.pkl`` — runtime QC gate
+
+Optional learned flag models add per-cell bad-label flag scoring:
+
+* ``flag_model_pyramidal.joblib``
+* ``flag_model_interneuron.joblib``
+* ``flag_model_all.joblib``
+* ``flag_model_pyramidal_baseline.joblib`` (optional heavy flagger)
+* ``flag_model_all_baseline.joblib`` (optional heavy flagger)
 
 Search order (first existing wins):
 
@@ -19,8 +29,8 @@ Search order (first existing wins):
    * Linux: ``~/.local/share/swcstudio/models``
 
 3. The bundled directory inside the installed package
-   (``swcstudio/data/models``). All three model files are shipped
-   here so a fresh ``pip install`` produces a fully working engine.
+   (``swcstudio/data/models``). Source installs keep the current model
+   files here; pip installs can fetch the model layer on first use.
 
 Public API:
 
@@ -31,7 +41,7 @@ Public API:
 
 Calling code never hard-codes paths. It calls
 ``resolve_model_path("gnn_apical_basal.pt")`` and gets either a real
-path or ``None`` (in which case the GNN step is skipped).
+path or ``None``.
 """
 from __future__ import annotations
 
@@ -46,6 +56,13 @@ MODEL_FILES = {
     "stage1": "cell_type_classifier.pkl",
     "stage2": "branch_classifier.pkl",
     "gnn":    "gnn_apical_basal.pt",
+    "branch3": "gnn_branch3_rescue.pt",
+    "qc_gate": "qc_gate.pkl",
+    "flag_pyramidal": "flag_model_pyramidal.joblib",
+    "flag_interneuron": "flag_model_interneuron.joblib",
+    "flag_all": "flag_model_all.joblib",
+    "flag_pyramidal_baseline": "flag_model_pyramidal_baseline.joblib",
+    "flag_all_baseline": "flag_model_all_baseline.joblib",
 }
 
 ENV_VAR = "SWCSTUDIO_MODEL_DIR"

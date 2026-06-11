@@ -184,6 +184,8 @@ class CellTypeClassifier:
                 "Run hybrid/train_stage1.py first to train a model, "
                 "or the heuristic fallback will be used."
             )
+        from ._pickle_compat import install_hybrid_pickle_aliases  # noqa: PLC0415
+        install_hybrid_pickle_aliases()
         with open(model_path, "rb") as f:
             data = pickle.load(f)
         obj = cls()

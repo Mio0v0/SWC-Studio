@@ -1,9 +1,10 @@
 """Auto-typing feature for the Batch Processing tool.
 
 Thin wrapper around :mod:`swcstudio.core.auto_typing`. The engine itself
-is the v9 ML pipeline and has no alternative backends; this module
-exists to register the feature with the plugin system and to expose the
-config plumbing the GUI / CLI need.
+is the v12 QC-label-flag pipeline and has no alternative backends; this
+module exists to register the feature with the plugin system and to
+expose the model directory, cell-type override, and flag strictness
+plumbing the GUI / CLI need.
 """
 
 from __future__ import annotations
@@ -43,7 +44,6 @@ def get_config() -> dict[str, Any]:
 
 
 def _options_from_config(cfg: dict[str, Any]) -> BatchOptions:
-    _ = cfg
     return BatchOptions(
         soma=True,
         axon=True,
@@ -51,6 +51,10 @@ def _options_from_config(cfg: dict[str, Any]) -> BatchOptions:
         basal=True,
         rad=False,
         zip_output=False,
+        cell_type=(cfg.get("cell_type") or "unknown"),
+        flag_enabled=bool(cfg.get("flag_enabled", True)),
+        flag_strictness=float(cfg.get("flag_strictness", 0.5)),
+        flag_feature_mode=str(cfg.get("flag_feature_mode") or "compact"),
     )
 
 

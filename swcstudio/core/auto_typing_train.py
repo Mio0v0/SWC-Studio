@@ -1,9 +1,14 @@
 """Train custom hybrid auto-typing models on a user dataset.
 
-End users who want a v9-quality model tuned to their own SWC corpus run
-this once, point the auto-typing backend at the resulting model
-directory, and from then on all CLI / GUI auto-typing calls use their
-custom-trained models.
+End users who want a custom Stage 1 + Stage 2 + Stage 2b model tuned to
+their own SWC corpus can run this once and point the auto-typing backend
+at the resulting model directory.
+
+The bundled production engine is the v12 QC-label-flag pipeline. In
+addition to the three custom-training artifacts below, full v12
+deployment also uses a Branch3 rescue checkpoint, QC gate, and optional
+learned flag models. This helper currently trains the core three-stage
+stack only.
 
 Expected input dataset layout::
 
@@ -28,7 +33,7 @@ Training stages (run in this order):
        ``--no-gnn`` if you only want to retrain Stages 1+2 against an
        existing GNN checkpoint.
 
-Output is a directory containing the three standard model files
+Output is a directory containing the three core model files
 (``cell_type_classifier.pkl``, ``branch_classifier.pkl``,
 ``gnn_apical_basal.pt``). Point ``swcstudio`` at this directory by
 setting the ``SWCSTUDIO_MODEL_DIR`` environment variable, by passing
@@ -95,7 +100,7 @@ def train_user_models(
         ``True``. Set to ``False`` when you only want to refresh
         Stages 1+2 and re-use the existing bundled GNN checkpoint.
     seed, gnn_hidden, gnn_layers, gnn_dropout, gnn_epochs, gnn_patience
-        Hyperparameters. Defaults match the v9 release configuration.
+        Hyperparameters. Defaults match the custom-training release configuration.
 
     Returns
     -------
@@ -129,7 +134,7 @@ def train_user_models(
     stage2_out = output_dir / MODEL_FILES["stage2"]
     # train_stage2 builds its own train/test split using seed+test_size;
     # we use the same defaults as the eval pipeline so users can
-    # reproduce v9-style numbers if their dataset is large enough.
+    # reproduce custom-training numbers if their dataset is large enough.
     stage2_metrics = train_stage2(
         data_dir, output_path=stage2_out, seed=seed,
     )

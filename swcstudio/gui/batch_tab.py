@@ -6,14 +6,18 @@ from pathlib import Path
 
 from PySide6.QtCore import Qt, QThread, Signal, Slot
 from PySide6.QtWidgets import (
+    QCheckBox,
+    QComboBox,
     QDialog,
     QFileDialog,
+    QDoubleSpinBox,
     QHBoxLayout,
     QLabel,
     QLineEdit,
     QPlainTextEdit,
     QProgressBar,
     QPushButton,
+    QSlider,
     QVBoxLayout,
     QWidget,
 )
@@ -196,6 +200,20 @@ class BatchTabWidget(QWidget):
         desc.setStyleSheet("font-size: 12px; color: #555;")
         root.addWidget(desc)
 
+        # ---- input folder picker
+        input_row = QHBoxLayout()
+        input_row.setSpacing(6)
+        input_lbl = QLabel("Input folder:")
+        input_lbl.setStyleSheet("font-size: 12px; color: #333;")
+        input_row.addWidget(input_lbl)
+        self._batch_edit_input_dir = QLineEdit()
+        self._batch_edit_input_dir.setPlaceholderText("Select a folder containing SWC files")
+        input_row.addWidget(self._batch_edit_input_dir, stretch=1)
+        self._batch_btn_browse_input = QPushButton("Browse...")
+        self._batch_btn_browse_input.clicked.connect(self._on_browse_batch_input_dir)
+        input_row.addWidget(self._batch_btn_browse_input)
+        root.addLayout(input_row)
+
         # ---- model dir picker (optional override)
         self._batch_model_row = QHBoxLayout()
         self._batch_model_row.setSpacing(6)
@@ -216,6 +234,63 @@ class BatchTabWidget(QWidget):
         self._batch_model_row.addWidget(self._batch_backend_status_lbl)
         root.addLayout(self._batch_model_row)
         self._refresh_batch_backend_status()
+
+        option_row = QHBoxLayout()
+        option_row.setSpacing(8)
+        cell_lbl = QLabel("Cell type:")
+        cell_lbl.setStyleSheet("font-size: 12px; color: #333;")
+        option_row.addWidget(cell_lbl)
+        self._batch_cell_type_combo = QComboBox()
+        self._batch_cell_type_combo.addItem("Unknown", "unknown")
+        self._batch_cell_type_combo.addItem("Pyramidal", "pyramidal")
+        self._batch_cell_type_combo.addItem("Interneuron", "interneuron")
+        option_row.addWidget(self._batch_cell_type_combo)
+        self._batch_flag_enabled = QCheckBox("Flag")
+        self._batch_flag_enabled.setChecked(True)
+        option_row.addWidget(self._batch_flag_enabled)
+        flag_mode_lbl = QLabel("Features:")
+        flag_mode_lbl.setStyleSheet("font-size: 12px; color: #333;")
+        option_row.addWidget(flag_mode_lbl)
+        self._batch_flag_feature_combo = QComboBox()
+        self._batch_flag_feature_combo.addItem("Simple", "compact")
+        self._batch_flag_feature_combo.addItem("Complex", "baseline")
+        self._batch_flag_feature_combo.addItem("Auto", "auto")
+        self._batch_flag_feature_combo.setToolTip(
+            "Simple uses the compact flagger. Complex uses baseline-disagreement features when available."
+        )
+        option_row.addWidget(self._batch_flag_feature_combo)
+        strict_lbl = QLabel("Strictness:")
+        strict_lbl.setStyleSheet("font-size: 12px; color: #333;")
+        option_row.addWidget(strict_lbl)
+        loose_lbl = QLabel("Loose")
+        loose_lbl.setStyleSheet("font-size: 11px; color: #666;")
+        option_row.addWidget(loose_lbl)
+        self._batch_flag_slider = QSlider(Qt.Horizontal)
+        self._batch_flag_slider.setRange(0, 100)
+        self._batch_flag_slider.setValue(50)
+        self._batch_flag_slider.setFixedWidth(120)
+        option_row.addWidget(self._batch_flag_slider)
+        strict_side_lbl = QLabel("Strict")
+        strict_side_lbl.setStyleSheet("font-size: 11px; color: #666;")
+        option_row.addWidget(strict_side_lbl)
+        self._batch_flag_strictness_spin = QDoubleSpinBox()
+        self._batch_flag_strictness_spin.setRange(0.0, 1.0)
+        self._batch_flag_strictness_spin.setSingleStep(0.01)
+        self._batch_flag_strictness_spin.setDecimals(2)
+        self._batch_flag_strictness_spin.setValue(0.50)
+        self._batch_flag_strictness_spin.setFixedWidth(72)
+        self._batch_flag_strictness_spin.setToolTip(
+            "Flag strictness from 0.00 loose to 1.00 strict."
+        )
+        option_row.addWidget(self._batch_flag_strictness_spin)
+        self._batch_flag_slider.valueChanged.connect(
+            lambda value: self._batch_flag_strictness_spin.setValue(float(value) / 100.0)
+        )
+        self._batch_flag_strictness_spin.valueChanged.connect(
+            lambda value: self._batch_flag_slider.setValue(int(round(float(value) * 100.0)))
+        )
+        option_row.addStretch()
+        root.addLayout(option_row)
 
         action_row = QHBoxLayout()
         self._btn_run_batch_check = QPushButton("Run")
@@ -247,6 +322,13 @@ class BatchTabWidget(QWidget):
         # Keep controls pinned to the top of the tab even when there is extra height.
         root.addStretch(1)
         return page
+
+    def _on_browse_batch_input_dir(self) -> None:
+        path = QFileDialog.getExistingDirectory(
+            self, "Select folder with SWC files for auto-labeling"
+        )
+        if path:
+            self._batch_edit_input_dir.setText(path)
 
     def _on_browse_batch_model_dir(self) -> None:
         path = QFileDialog.getExistingDirectory(
@@ -434,12 +516,22 @@ class BatchTabWidget(QWidget):
             )
             return
 
-        folder_path = QFileDialog.getExistingDirectory(
-            self, "Select folder with SWC files for auto-labeling"
-        )
+        folder_path = (self._batch_edit_input_dir.text() or "").strip()
+        if not folder_path:
+            folder_path = QFileDialog.getExistingDirectory(
+                self, "Select folder with SWC files for auto-labeling"
+            )
+            if folder_path:
+                self._batch_edit_input_dir.setText(folder_path)
         if not folder_path:
             self._set_status(
                 "Auto-labeling batch processing cancelled.",
+                self._batch_status_box,
+            )
+            return
+        if not os.path.isdir(folder_path):
+            self._set_status(
+                f"Selected input folder does not exist:\n{folder_path}",
                 self._batch_status_box,
             )
             return
@@ -462,6 +554,10 @@ class BatchTabWidget(QWidget):
             basal=True,
             rad=False,
             zip_output=False,
+            cell_type=self._batch_cell_type_combo.currentData() or "unknown",
+            flag_enabled=self._batch_flag_enabled.isChecked(),
+            flag_strictness=float(self._batch_flag_slider.value()) / 100.0,
+            flag_feature_mode=self._batch_flag_feature_combo.currentData() or "compact",
         )
 
         md = (self._batch_edit_model_dir.text() or "").strip() or None
@@ -475,6 +571,10 @@ class BatchTabWidget(QWidget):
         config_overrides: dict = {}
         if md:
             config_overrides["model_dir"] = md
+        config_overrides["cell_type"] = self._batch_cell_type_combo.currentData() or "unknown"
+        config_overrides["flag_enabled"] = self._batch_flag_enabled.isChecked()
+        config_overrides["flag_strictness"] = float(self._batch_flag_slider.value()) / 100.0
+        config_overrides["flag_feature_mode"] = self._batch_flag_feature_combo.currentData() or "compact"
 
         # Hand off to a worker thread so the UI stays responsive while
         # the engine processes potentially many files.
@@ -503,8 +603,15 @@ class BatchTabWidget(QWidget):
         controls and shows the progress bar while a worker is in flight."""
         self._btn_run_batch_check.setEnabled(not running)
         self._btn_edit_auto_cfg.setEnabled(not running)
+        self._batch_edit_input_dir.setEnabled(not running)
+        self._batch_btn_browse_input.setEnabled(not running)
         self._batch_edit_model_dir.setEnabled(not running)
         self._batch_btn_browse_model.setEnabled(not running)
+        self._batch_cell_type_combo.setEnabled(not running)
+        self._batch_flag_enabled.setEnabled(not running)
+        self._batch_flag_feature_combo.setEnabled(not running)
+        self._batch_flag_slider.setEnabled(not running)
+        self._batch_flag_strictness_spin.setEnabled(not running)
 
         self._batch_progress.setVisible(running)
         self._batch_progress_label.setVisible(running)
@@ -543,6 +650,7 @@ class BatchTabWidget(QWidget):
             f"Total nodes processed: {getattr(result, 'total_nodes', 0)}",
             f"Type changes: {getattr(result, 'total_type_changes', 0)}",
             f"Radius changes: {getattr(result, 'total_radius_changes', 0)}",
+            f"Flagged files: {getattr(result, 'files_flagged', 0)}",
         ]
         zip_path = getattr(result, "zip_path", None)
         if zip_path:

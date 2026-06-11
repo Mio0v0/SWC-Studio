@@ -27,6 +27,10 @@ class BatchOptions:
     basal: bool = True
     rad: bool = False
     zip_output: bool = False
+    cell_type: str | None = None
+    flag_enabled: bool = True
+    flag_strictness: float = 0.5
+    flag_feature_mode: str = "compact"
 
 
 @dataclass
@@ -43,6 +47,7 @@ class BatchResult:
     failures: list[str]
     per_file: list[str]
     log_path: str | None
+    files_flagged: int = 0
 
 
 @dataclass
@@ -53,6 +58,11 @@ class FileResult:
     type_changes: int
     radius_changes: int
     out_type_counts: dict[int, int]
+    cell_type: str | None
+    cell_type_source: str
+    stage1_confidence: float | None
+    qc_result: dict[str, Any] | None
+    flag_result: dict[str, Any] | None
     failures: list[str]
     change_details: list[str]
     log_path: str | None

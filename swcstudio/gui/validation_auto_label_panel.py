@@ -1,7 +1,7 @@
 """Validation control panel: single-file auto label editing applied in-place.
 
-The auto-labeling engine is the v9 ML pipeline; the user can optionally
-override the model directory to point at custom-trained models.
+The auto-labeling engine is the v12 QC-label-flag pipeline; the user can
+optionally override the model directory to point at custom-trained models.
 """
 
 from __future__ import annotations
@@ -10,14 +10,18 @@ import json
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
+    QCheckBox,
+    QComboBox,
     QDialog,
     QFileDialog,
+    QDoubleSpinBox,
     QHBoxLayout,
     QLabel,
     QLineEdit,
     QPlainTextEdit,
     QProgressBar,
     QPushButton,
+    QSlider,
     QVBoxLayout,
     QWidget,
 )
@@ -150,6 +154,63 @@ class ValidationAutoLabelPanel(QWidget):
         self._model_row.addWidget(self._backend_status_lbl)
         root.addLayout(self._model_row)
 
+        option_row = QHBoxLayout()
+        option_row.setSpacing(8)
+        cell_lbl = QLabel("Cell type:")
+        cell_lbl.setStyleSheet("font-size: 12px; color: #333;")
+        option_row.addWidget(cell_lbl)
+        self._cell_type_combo = QComboBox()
+        self._cell_type_combo.addItem("Unknown", "unknown")
+        self._cell_type_combo.addItem("Pyramidal", "pyramidal")
+        self._cell_type_combo.addItem("Interneuron", "interneuron")
+        option_row.addWidget(self._cell_type_combo)
+        self._flag_enabled = QCheckBox("Flag")
+        self._flag_enabled.setChecked(True)
+        option_row.addWidget(self._flag_enabled)
+        flag_mode_lbl = QLabel("Features:")
+        flag_mode_lbl.setStyleSheet("font-size: 12px; color: #333;")
+        option_row.addWidget(flag_mode_lbl)
+        self._flag_feature_combo = QComboBox()
+        self._flag_feature_combo.addItem("Simple", "compact")
+        self._flag_feature_combo.addItem("Complex", "baseline")
+        self._flag_feature_combo.addItem("Auto", "auto")
+        self._flag_feature_combo.setToolTip(
+            "Simple uses the compact flagger. Complex uses baseline-disagreement features when available."
+        )
+        option_row.addWidget(self._flag_feature_combo)
+        strict_lbl = QLabel("Strictness:")
+        strict_lbl.setStyleSheet("font-size: 12px; color: #333;")
+        option_row.addWidget(strict_lbl)
+        loose_lbl = QLabel("Loose")
+        loose_lbl.setStyleSheet("font-size: 11px; color: #666;")
+        option_row.addWidget(loose_lbl)
+        self._flag_slider = QSlider(Qt.Horizontal)
+        self._flag_slider.setRange(0, 100)
+        self._flag_slider.setValue(50)
+        self._flag_slider.setFixedWidth(120)
+        option_row.addWidget(self._flag_slider)
+        strict_side_lbl = QLabel("Strict")
+        strict_side_lbl.setStyleSheet("font-size: 11px; color: #666;")
+        option_row.addWidget(strict_side_lbl)
+        self._flag_strictness_spin = QDoubleSpinBox()
+        self._flag_strictness_spin.setRange(0.0, 1.0)
+        self._flag_strictness_spin.setSingleStep(0.01)
+        self._flag_strictness_spin.setDecimals(2)
+        self._flag_strictness_spin.setValue(0.50)
+        self._flag_strictness_spin.setFixedWidth(72)
+        self._flag_strictness_spin.setToolTip(
+            "Flag strictness from 0.00 loose to 1.00 strict."
+        )
+        option_row.addWidget(self._flag_strictness_spin)
+        self._flag_slider.valueChanged.connect(
+            lambda value: self._flag_strictness_spin.setValue(float(value) / 100.0)
+        )
+        self._flag_strictness_spin.valueChanged.connect(
+            lambda value: self._flag_slider.setValue(int(round(float(value) * 100.0)))
+        )
+        option_row.addStretch()
+        root.addLayout(option_row)
+
         top_btns = QHBoxLayout()
         self._btn_run = QPushButton("Run")
         self._btn_run.clicked.connect(
@@ -185,6 +246,15 @@ class ValidationAutoLabelPanel(QWidget):
         )
         root.addWidget(self._summary, stretch=1)
 
+    @staticmethod
+    def _display_feature_mode(raw: object) -> str:
+        value = str(raw or "compact").strip().lower()
+        if value.startswith("baseline"):
+            return "Complex"
+        if value == "auto":
+            return "Auto"
+        return "Simple"
+
     def current_options(self) -> BatchOptions:
         return BatchOptions(
             soma=True,
@@ -193,12 +263,22 @@ class ValidationAutoLabelPanel(QWidget):
             basal=True,
             rad=False,
             zip_output=False,
+            cell_type=self._cell_type_combo.currentData() or "unknown",
+            flag_enabled=self._flag_enabled.isChecked(),
+            flag_strictness=float(self._flag_slider.value()) / 100.0,
+            flag_feature_mode=self._flag_feature_combo.currentData() or "compact",
         )
 
     def current_settings(self) -> dict:
         """Return ``{"model_dir": str|None}``."""
         model_dir = (self._edit_model_dir.text() or "").strip() or None
-        return {"model_dir": model_dir}
+        return {
+            "model_dir": model_dir,
+            "cell_type": self._cell_type_combo.currentData() or "unknown",
+            "flag_enabled": self._flag_enabled.isChecked(),
+            "flag_strictness": float(self._flag_slider.value()) / 100.0,
+            "flag_feature_mode": self._flag_feature_combo.currentData() or "compact",
+        }
 
     def _on_browse_model_dir(self) -> None:
         path = QFileDialog.getExistingDirectory(
@@ -240,17 +320,31 @@ class ValidationAutoLabelPanel(QWidget):
             return
 
         out_counts = dict(summary.get("out_type_counts", {}))
+        flag_result = dict(summary.get("flag_result", {}) or {})
         lines = [
             "Auto Label Editing Result",
             "-------------------------",
             f"Nodes processed: {summary.get('nodes_total', 0)}",
             f"Type changes: {summary.get('type_changes', 0)}",
             f"Radius changes: {summary.get('radius_changes', 0)}",
+            f"Cell type: {summary.get('cell_type') or 'unknown'} ({summary.get('cell_type_source') or 'stage1'})",
+            f"Flagged: {bool(flag_result.get('flagged', False))}",
             (
                 "Output types (soma/axon/basal/apic): "
                 f"{out_counts.get(1, 0)}/{out_counts.get(2, 0)}/{out_counts.get(3, 0)}/{out_counts.get(4, 0)}"
             ),
         ]
+        if flag_result:
+            lines.append(
+                f"Flag score: {float(flag_result.get('rank_score', 0.0)):.4f} "
+                f"(prob_bad={float(flag_result.get('prob_bad', 0.0)):.4f})"
+            )
+            lines.append(
+                "Flag features: "
+                f"{self._display_feature_mode(flag_result.get('actual_feature_mode') or flag_result.get('selected_feature_mode'))}"
+            )
+            if flag_result.get("error"):
+                lines.append(f"Flag error: {flag_result.get('error')}")
         log_path = str(summary.get("log_path", "") or "").strip()
         if log_path:
             lines.extend(["", f"Log file: {log_path}"])
@@ -267,5 +361,10 @@ class ValidationAutoLabelPanel(QWidget):
         self._btn_edit_cfg.setEnabled(not running)
         self._edit_model_dir.setEnabled(not running)
         self._btn_browse_model.setEnabled(not running)
+        self._cell_type_combo.setEnabled(not running)
+        self._flag_enabled.setEnabled(not running)
+        self._flag_feature_combo.setEnabled(not running)
+        self._flag_slider.setEnabled(not running)
+        self._flag_strictness_spin.setEnabled(not running)
         if running and status_text:
             self._summary.setPlainText(str(status_text))

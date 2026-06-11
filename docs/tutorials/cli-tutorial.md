@@ -62,6 +62,8 @@ swcstudio index-clean ./data/single-soma.swc
 swcstudio auto-fix ./data/single-soma.swc
 swcstudio auto-label ./data/single-soma.swc
 swcstudio auto-label ./data/single-soma.swc --model-dir ~/my-models   # custom-trained models
+swcstudio auto-label ./data/single-soma.swc --cell-type pyramidal --flag-strictness 0.8
+swcstudio auto-label ./data/single-soma.swc --no-flag
 swcstudio set-type ./data/single-soma.swc --node-id 14169 --new-type 3
 swcstudio set-radius ./data/single-soma.swc --node-id 42 --radius 0.75
 swcstudio connect ./data/single-soma.swc --start-id 10 --end-id 22
@@ -73,8 +75,9 @@ Single-file edit commands automatically write:
 - the matching operation log
 
 to the default `*_swc_studio_output` directory for the source file.
-Auto-label uses automatic apical detection — there are no
-class-selection flags.
+Auto-label uses the v12 QC-label-flag engine. Leave cell type as
+unknown to run Stage 1, or pass `--cell-type pyramidal` /
+`--cell-type interneuron` when the user already knows the type.
 
 ## Step 5: Use batch commands for folders
 
@@ -87,6 +90,7 @@ swcstudio validate ./data
 swcstudio split ./data
 swcstudio auto-typing ./data
 swcstudio auto-typing ./data --model-dir ~/my-models   # custom-trained models
+swcstudio auto-typing ./data --cell-type unknown --flag-strictness 0.5
 swcstudio radii-clean ./data
 swcstudio simplify ./data
 swcstudio index-clean ./data
@@ -94,8 +98,8 @@ swcstudio index-clean ./data
 
 ## Step 5b: Train your own auto-typing models
 
-If you have a labeled SWC corpus, you can train all three models —
-Stage 1, Stage 2, and the Stage 2b GNN — tuned to your data:
+If you have a labeled SWC corpus, you can train the three core custom
+models tuned to your data: Stage 1, Stage 2, and the Stage 2b GNN.
 
 ```bash
 swcstudio train auto-typing --data-dir ./labeled --output-dir ./my-models
@@ -117,6 +121,10 @@ The standard `pip install -e .` already includes torch and
 torch_geometric, so GNN training works out of the box. Use `--no-gnn`
 only when you want to refresh Stages 1+2 against an existing
 `gnn_apical_basal.pt` checkpoint that's already in `--output-dir`.
+
+The bundled production auto-labeler also uses Branch3, QC, and flag
+artifacts. The custom-training command currently trains the core
+Stage 1 + Stage 2 + Stage 2b stack only.
 
 To make your custom models the new default everywhere (no `--model-dir`
 flag needed), copy them into your user data directory — see the

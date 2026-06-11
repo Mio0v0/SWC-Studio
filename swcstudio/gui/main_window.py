@@ -9,7 +9,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from PySide6.QtCore import QEvent, QThread, Qt, Signal, Slot
+from PySide6.QtCore import QEvent, QRect, QSize, QThread, Qt, Signal, Slot
 from PySide6.QtGui import QAction, QDragEnterEvent, QDropEvent, QFontMetrics
 from PySide6.QtWidgets import (
     QApplication,
@@ -21,6 +21,7 @@ from PySide6.QtWidgets import (
     QFileDialog,
     QHBoxLayout,
     QLabel,
+    QLayout,
     QMainWindow,
     QMenuBar,
     QPlainTextEdit,
@@ -163,6 +164,82 @@ class _CanvasTabs(QTabWidget):
                 self._drag_tab_index = -1
                 self._drag_start_global = None
         return super().eventFilter(watched, event)
+
+
+class _FlowLayout(QLayout):
+    """Compact wrapping layout for toolbar-style buttons."""
+
+    def __init__(self, parent=None, *, margin: int = 0, h_spacing: int = 6, v_spacing: int = 6):
+        super().__init__(parent)
+        self._items = []
+        self._h_spacing = int(h_spacing)
+        self._v_spacing = int(v_spacing)
+        self.setContentsMargins(margin, margin, margin, margin)
+
+    def addItem(self, item):
+        self._items.append(item)
+
+    def count(self):
+        return len(self._items)
+
+    def itemAt(self, index):
+        if 0 <= index < len(self._items):
+            return self._items[index]
+        return None
+
+    def takeAt(self, index):
+        if 0 <= index < len(self._items):
+            return self._items.pop(index)
+        return None
+
+    def expandingDirections(self):
+        return Qt.Orientations(Qt.Orientation(0))
+
+    def hasHeightForWidth(self):
+        return True
+
+    def heightForWidth(self, width):
+        return self._do_layout(QRect(0, 0, width, 0), True)
+
+    def setGeometry(self, rect):
+        super().setGeometry(rect)
+        self._do_layout(rect, False)
+
+    def sizeHint(self):
+        return self.minimumSize()
+
+    def minimumSize(self):
+        size = QSize()
+        for item in self._items:
+            size = size.expandedTo(item.minimumSize())
+        margins = self.contentsMargins()
+        size += QSize(margins.left() + margins.right(), margins.top() + margins.bottom())
+        return size
+
+    def _do_layout(self, rect: QRect, test_only: bool) -> int:
+        margins = self.contentsMargins()
+        effective = rect.adjusted(margins.left(), margins.top(), -margins.right(), -margins.bottom())
+        x = effective.x()
+        y = effective.y()
+        line_height = 0
+
+        for item in self._items:
+            widget = item.widget()
+            if widget is not None and widget.isHidden():
+                continue
+            item_size = item.sizeHint()
+            next_x = x + item_size.width() + self._h_spacing
+            if x > effective.x() and next_x - self._h_spacing > effective.right() + 1:
+                x = effective.x()
+                y += line_height + self._v_spacing
+                next_x = x + item_size.width() + self._h_spacing
+                line_height = 0
+            if not test_only:
+                item.setGeometry(QRect(x, y, item_size.width(), item_size.height()))
+            x = next_x
+            line_height = max(line_height, item_size.height())
+
+        return y + line_height - rect.y() + margins.bottom()
 
 
 class _DetachedEditorWindow(QMainWindow):
@@ -528,9 +605,8 @@ class SWCMainWindow(QMainWindow):
         group_layout.setContentsMargins(8, 10, 8, 8)
         group_layout.setSpacing(6)
 
-        tools_row = QHBoxLayout()
+        tools_row = _FlowLayout(h_spacing=8, v_spacing=6)
         tools_row.setContentsMargins(0, 0, 0, 0)
-        tools_row.setSpacing(8)
 
         tool_defs = [
             ("Batch Processing", "batch"),
@@ -553,21 +629,18 @@ class SWCMainWindow(QMainWindow):
             btn.setFlat(True)
             btn.setMinimumWidth(max(normal_fm.horizontalAdvance(label), bold_fm.horizontalAdvance(label)) + 46)
             btn.setMinimumHeight(tool_btn_min_height)
-            btn.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+            btn.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
             btn.setCursor(Qt.PointingHandCursor)
             btn.clicked.connect(lambda _=False, k=key: self._activate_feature(k))
             btn.setProperty("tool_key", key)
             tools_row.addWidget(btn)
             self._tool_menu_buttons[key] = btn
-        tools_row.addStretch()
         group_layout.addLayout(tools_row)
 
         self._feature_strip = QWidget()
-        self._feature_strip.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        self._feature_row = QHBoxLayout(self._feature_strip)
+        self._feature_strip.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
+        self._feature_row = _FlowLayout(self._feature_strip, h_spacing=6, v_spacing=6)
         self._feature_row.setContentsMargins(0, 0, 0, 0)
-        self._feature_row.setSpacing(6)
-        self._feature_row.addStretch()
         group_layout.addWidget(self._feature_strip)
 
         status_row = QHBoxLayout()
@@ -864,7 +937,6 @@ class SWCMainWindow(QMainWindow):
 
         labels = self._tool_feature_labels()
         if not labels:
-            self._feature_row.addStretch()
             return
 
         normal_fm = QFontMetrics(self.font())
@@ -872,19 +944,18 @@ class SWCMainWindow(QMainWindow):
         bold_font.setBold(True)
         bold_fm = QFontMetrics(bold_font)
         feature_btn_min_height = max(self.fontMetrics().height() + 18, 38)
-        max_feature_w = max(max(normal_fm.horizontalAdvance(lb), bold_fm.horizontalAdvance(lb)) for lb in labels) + 52
         for label in labels:
             btn = QPushButton(label)
             btn.setObjectName("featureBtn")
             btn.setCheckable(True)
-            btn.setMinimumWidth(max_feature_w)
+            label_width = max(normal_fm.horizontalAdvance(label), bold_fm.horizontalAdvance(label))
+            btn.setMinimumWidth(max(86, label_width + 34))
             btn.setMinimumHeight(feature_btn_min_height)
-            btn.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+            btn.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
             btn.clicked.connect(lambda _=False, lb=label: self._on_top_feature_button_clicked(lb))
             self._feature_row.addWidget(btn)
             self._top_feature_buttons.append(btn)
 
-        self._feature_row.addStretch()
         self._sync_top_feature_button_selection()
 
     def _sync_top_feature_button_selection(self):
@@ -1896,6 +1967,9 @@ class SWCMainWindow(QMainWindow):
         config_overrides: dict = {}
         if backend_cfg.get("model_dir"):
             config_overrides["model_dir"] = str(backend_cfg["model_dir"])
+        for key in ("cell_type", "flag_enabled", "flag_strictness", "flag_feature_mode"):
+            if key in backend_cfg:
+                config_overrides[key] = backend_cfg[key]
 
         from swcstudio.core.auto_typing import is_available as _engine_available  # noqa: PLC0415
         ok, reason = _engine_available(model_dir=config_overrides.get("model_dir"))
@@ -2024,6 +2098,10 @@ class SWCMainWindow(QMainWindow):
             "apic": bool(getattr(opts, "apic", False)),
             "basal": bool(getattr(opts, "basal", False)),
             "rad": bool(getattr(opts, "rad", False)),
+            "cell_type": str(getattr(opts, "cell_type", "unknown") or "unknown"),
+            "flag_enabled": bool(getattr(opts, "flag_enabled", True)),
+            "flag_strictness": float(getattr(opts, "flag_strictness", 0.5)),
+            "flag_feature_mode": str(getattr(opts, "flag_feature_mode", "compact") or "compact"),
         }
         result_payload = {
             "input_file": str(source_doc.file_path or source_doc.filename),
@@ -2031,6 +2109,11 @@ class SWCMainWindow(QMainWindow):
             "type_changes": int(getattr(result_obj, "type_changes", 0)),
             "radius_changes": 0,
             "out_type_counts": dict(getattr(result_obj, "out_type_counts", {}) or {}),
+            "cell_type": getattr(result_obj, "cell_type", None),
+            "cell_type_source": getattr(result_obj, "cell_type_source", "stage1"),
+            "stage1_confidence": getattr(result_obj, "stage1_confidence", None),
+            "qc_result": dict(getattr(result_obj, "qc_result", {}) or {}),
+            "flag_result": dict(getattr(result_obj, "flag_result", {}) or {}),
             "change_details": [
                 line
                 for line in list(getattr(result_obj, "change_details", []) or [])
@@ -2049,6 +2132,8 @@ class SWCMainWindow(QMainWindow):
             f"Input: {source_doc.file_path or source_doc.filename}",
             f"Nodes: {int(result_payload.get('nodes_total', 0))}",
             f"Type changes: {int(result_payload.get('type_changes', 0))}",
+            f"Cell type: {result_payload.get('cell_type') or 'unknown'} ({result_payload.get('cell_type_source') or 'stage1'})",
+            f"Flagged: {bool(dict(result_payload.get('flag_result', {}) or {}).get('flagged', False))}",
             (
                 "Out types (1/2/3/4): "
                 f"{out_counts.get(1, 0)}/{out_counts.get(2, 0)}/{out_counts.get(3, 0)}/{out_counts.get(4, 0)}"
@@ -2090,6 +2175,9 @@ class SWCMainWindow(QMainWindow):
             f"nodes={int(result.get('nodes_total', 0))}, "
             f"type_changes={int(result.get('type_changes', 0))}, "
             f"radius_changes={int(result.get('radius_changes', 0))}, "
+            f"cell_type={result.get('cell_type') or 'unknown'} "
+            f"({result.get('cell_type_source') or 'stage1'}), "
+            f"flag={bool(dict(result.get('flag_result', {}) or {}).get('flagged', False))}, "
             f"out_types(soma/axon/basal/apic)="
             f"{out_counts.get(1, 0)}/{out_counts.get(2, 0)}/{out_counts.get(3, 0)}/{out_counts.get(4, 0)}"
         ]
