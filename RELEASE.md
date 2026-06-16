@@ -64,7 +64,7 @@ For a tag `v0.2.0`, the workflow attaches these assets to the release:
 | Asset                                  | Audience                          | Size  |
 |----------------------------------------|-----------------------------------|-------|
 | `swcstudio-code-v0.2.0.zip`            | Modular .app users (code update)  | ~5 MB |
-| `swcstudio-models-v0.2.0.zip`          | Modular .app users + pip users    | ~60 MB |
+| `swcstudio-models-v0.2.0.zip`          | Modular .app users + pip users    | ~75-80 MB raw model files |
 | `SWC-Studio-v0.2.0-macOS.zip`          | New / runtime-bumping Mac users   | ~700 MB |
 | `SWC-Studio-v0.2.0-Windows.zip`        | New / runtime-bumping Win users   | ~700 MB |
 | `swcstudio-0.2.0-py3-none-any.whl`     | pip users (auto-pulled by pip)    | ~5 MB |

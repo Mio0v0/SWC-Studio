@@ -108,18 +108,6 @@ def backend_status(*, model_dir: str | None = None) -> dict[str, Any]:
     flag_pyr = resolve_model_path("flag_pyramidal", override=model_dir)
     flag_int = resolve_model_path("flag_interneuron", override=model_dir)
     flag_all = resolve_model_path("flag_all", override=model_dir)
-    flag_pyr_baseline = resolve_model_path("flag_pyramidal_baseline", override=model_dir, auto_download=False)
-    flag_all_baseline = resolve_model_path("flag_all_baseline", override=model_dir, auto_download=False)
-    try:
-        from .baseline_disagreement import baseline_model_status  # noqa: PLC0415
-        baseline_status = baseline_model_status(override=model_dir)
-    except Exception as exc:  # noqa: BLE001
-        baseline_status = {
-            "available": False,
-            "error": f"{exc.__class__.__name__}: {exc}",
-            "paths": {},
-            "search_dirs": [],
-        }
 
     torch_ok = True
     torch_msg = "torch + torch_geometric available"
@@ -139,8 +127,6 @@ def backend_status(*, model_dir: str | None = None) -> dict[str, Any]:
         "flag_pyramidal_path": str(flag_pyr) if flag_pyr else None,
         "flag_interneuron_path": str(flag_int) if flag_int else None,
         "flag_all_path": str(flag_all) if flag_all else None,
-        "flag_pyramidal_baseline_path": str(flag_pyr_baseline) if flag_pyr_baseline else None,
-        "flag_all_baseline_path": str(flag_all_baseline) if flag_all_baseline else None,
         "stage1_ok": s1 is not None,
         "stage2_ok": s2 is not None,
         "gnn_ok": gnn is not None and torch_ok,
@@ -149,10 +135,6 @@ def backend_status(*, model_dir: str | None = None) -> dict[str, Any]:
         "flag_pyramidal_ok": flag_pyr is not None,
         "flag_interneuron_ok": flag_int is not None,
         "flag_all_ok": flag_all is not None,
-        "flag_pyramidal_baseline_ok": flag_pyr_baseline is not None,
-        "flag_all_baseline_ok": flag_all_baseline is not None,
-        "baseline_predictors_ok": bool(baseline_status.get("available")),
-        "baseline_predictors": baseline_status,
         "torch_ok": torch_ok,
         "torch_message": torch_msg,
         "search_diagnostic": diagnostic_search_report(override=model_dir),
@@ -231,6 +213,18 @@ def _public_qc_result(raw: Any) -> dict[str, Any] | None:
     out = dict(raw)
     out.pop("feature_vector", None)
     return out
+
+
+def _qc_failure_reasons(qc_result: dict[str, Any] | None) -> list[str]:
+    """Return non-empty QC reasons when a file should not be auto-labeled."""
+    if not qc_result:
+        return []
+    passed = qc_result.get("passed")
+    if passed is None or bool(passed):
+        return []
+    raw_reasons = qc_result.get("reasons") or []
+    reasons = [str(reason) for reason in raw_reasons if str(reason).strip()]
+    return reasons or ["qc_failed"]
 
 
 # ---------------------------------------------------------------------------
@@ -426,11 +420,9 @@ def _normalize_cell_type(raw: str | None) -> str | None:
 
 def _normalize_flag_feature_mode(raw: str | None) -> str:
     value = str(raw or "compact").strip().lower().replace("-", "_")
-    if value in {"", "default"}:
+    if value in {"", "default", "compact", "simple", "auto", "baseline", "complex"}:
         return "compact"
-    if value in {"compact", "baseline", "auto"}:
-        return value
-    raise ValueError("flag_feature_mode must be one of: compact, baseline, auto")
+    raise ValueError("flag_feature_mode must be compact/simple")
 
 
 def _compact_flag_model_for_cell_type(model_dir: str | None, cell_type: str | None) -> Path | None:
@@ -447,33 +439,13 @@ def _compact_flag_model_for_cell_type(model_dir: str | None, cell_type: str | No
     return resolve_model_path("flag_all", override=model_dir, auto_download=False)
 
 
-def _baseline_flag_model_for_cell_type(model_dir: str | None, cell_type: str | None) -> Path | None:
-    if cell_type == "pyramidal":
-        return (
-            resolve_model_path("flag_pyramidal_baseline", override=model_dir, auto_download=False)
-            or resolve_model_path("flag_all_baseline", override=model_dir, auto_download=False)
-        )
-    return resolve_model_path("flag_all_baseline", override=model_dir, auto_download=False)
-
-
 def _flag_model_for_cell_type(
     model_dir: str | None,
     cell_type: str | None,
     feature_mode: str | None,
 ) -> tuple[Path | None, str]:
-    mode = _normalize_flag_feature_mode(feature_mode)
-    compact = _compact_flag_model_for_cell_type(model_dir, cell_type)
-    baseline = _baseline_flag_model_for_cell_type(model_dir, cell_type)
-    if mode == "baseline":
-        return baseline, "baseline"
-    if mode == "auto" and baseline is not None:
-        try:
-            from .baseline_disagreement import baseline_model_status  # noqa: PLC0415
-            if bool(baseline_model_status(override=model_dir).get("available")):
-                return baseline, "baseline"
-        except Exception:
-            pass
-    return compact, "compact"
+    _normalize_flag_feature_mode(feature_mode)
+    return _compact_flag_model_for_cell_type(model_dir, cell_type), "compact"
 
 
 def _score_flag_for_pipeline_result(
@@ -496,14 +468,6 @@ def _score_flag_for_pipeline_result(
     requested_mode = _normalize_flag_feature_mode(getattr(opts, "flag_feature_mode", "compact"))
     flag_path, actual_mode = _flag_model_for_cell_type(model_dir, cell_type, requested_mode)
     if flag_path is None:
-        if requested_mode == "baseline":
-            return {
-                "enabled": True,
-                "flagged": False,
-                "requested_feature_mode": requested_mode,
-                "actual_feature_mode": "baseline",
-                "error": "Baseline flag model is not available. Expected flag_model_pyramidal_baseline.joblib or flag_model_all_baseline.joblib.",
-            }
         return None
 
     try:
@@ -536,16 +500,6 @@ def _score_flag_for_pipeline_result(
                 if base_result is not None else None
             ),
         )
-        if actual_mode == "baseline":
-            from .baseline_disagreement import build_baseline_disagreement_features  # noqa: PLC0415
-            feature_row.update(
-                build_baseline_disagreement_features(
-                    nodes=nodes_for_flag,
-                    labels=list(pipeline_result.node_labels),
-                    stage1_cell_type=str(cell_type or ""),
-                    model_dir=model_dir,
-                )
-            )
         out = score_flag(
             flag_model_path=flag_path,
             feature_row=feature_row,
@@ -713,6 +667,9 @@ def run_file(
             qc_result = _public_qc_result(qc_gate.evaluate(in_path))
         except Exception as exc:  # noqa: BLE001
             qc_result = {"passed": False, "reasons": [f"qc_error:{exc}"], "path": str(in_path)}
+    qc_reasons = _qc_failure_reasons(qc_result)
+    if qc_reasons:
+        raise ValueError(f"{in_path.name}: QC rejected; " + "; ".join(qc_reasons))
 
     orig_types = [int(r["type"]) for r in rows]
     orig_radii = [float(r["radius"]) for r in rows]
@@ -782,6 +739,7 @@ def run_file(
             "files_total": 1,
             "files_processed": 1,
             "files_failed": 0,
+            "files_qc_failed": 0,
             "total_nodes": len(rows),
             "total_type_changes": type_changes,
             "total_radius_changes": radius_changes,
@@ -866,6 +824,7 @@ def run_batch(
     total_radius_changes = 0
     total_files = len(swc_files)
     files_flagged = 0
+    files_qc_failed = 0
 
     for idx, swc_path in enumerate(swc_files):
         if progress_callback is not None:
@@ -882,6 +841,14 @@ def run_batch(
                     qc_result = _public_qc_result(qc_gate.evaluate(swc_path))
                 except Exception as exc:  # noqa: BLE001
                     qc_result = {"passed": False, "reasons": [f"qc_error:{exc}"], "path": str(swc_path)}
+            qc_reasons = _qc_failure_reasons(qc_result)
+            if qc_reasons:
+                files_qc_failed += 1
+                per_file.append(
+                    f"{swc_path.name}: QC rejected; skipped auto-labeling; "
+                    f"reasons={'; '.join(qc_reasons)}"
+                )
+                continue
 
             orig_types = [int(r["type"]) for r in rows]
             orig_radii = [float(r["radius"]) for r in rows]
@@ -962,6 +929,7 @@ def run_batch(
         "files_total": len(swc_files),
         "files_processed": processed,
         "files_failed": len(failures),
+        "files_qc_failed": files_qc_failed,
         "total_nodes": total_nodes,
         "total_type_changes": total_type_changes,
         "total_radius_changes": total_radius_changes,
@@ -984,6 +952,7 @@ def run_batch(
         files_total=len(swc_files),
         files_processed=processed,
         files_failed=len(failures),
+        files_qc_failed=files_qc_failed,
         total_nodes=total_nodes,
         total_type_changes=total_type_changes,
         total_radius_changes=total_radius_changes,

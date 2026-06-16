@@ -31,15 +31,20 @@ SQLite index", inspired by:
 
 ## 1. On-disk layout
 
-History lives **per file**, in the existing output directory, plus a
-**project-level index** at the parent folder root.
+History lives **per file** as a visible archive next to the SWC, plus
+the existing output directory for materialized current/checkpoint SWCs
+and a **project-level index** at the parent folder root.
 
 ```
 neuron_001.swc
+neuron_001_history.swcstudio       # visible encrypted history repo archive
 neuron_001_swc_studio_output/
     neuron_001_current.swc          # latest materialized state
     <user-marked checkpoints>.swc   # optional, see §7
-    .history/
+
+Inside neuron_001_history.swcstudio after SWC-Studio decrypts/materializes it:
+    history/
+        repo_manifest.json          # repo_id, SWC name, archive name
         version                     # integer; starts at 1
         events.jsonl                # append-only event log (source of truth)
         objects/<sha[:2]>/<sha>.zst # zstd-compressed content-addressed blobs
@@ -48,7 +53,6 @@ neuron_001_swc_studio_output/
             branches/<name>         # commit sha at the tip of each branch
             tags/<name>             # optional immutable named pointers
         index.sqlite                # rebuildable cache of events.jsonl
-        lock                        # OS advisory lockfile (see §10)
 
 <project_root>/
     .swcstudio/
@@ -56,8 +60,20 @@ neuron_001_swc_studio_output/
         version
 ```
 
-- Per-file `.history/` is the **source of truth**. Move the SWC and its
-  output dir together and provenance survives.
+- Per-file `<stem>_history.swcstudio` is the **source of truth**.
+  SWC-Studio materializes it into a transient `.history/` work tree
+  only while reading or writing, then re-encrypts it and removes the
+  work tree.
+- SWC-Studio writes/reads the archive with AES zip encryption through
+  `pyzipper`. By default it uses an app-managed password so the sidecar
+  is not a normal user-editable zip folder. Advanced users can set
+  `SWCSTUDIO_HISTORY_PASSWORD` to override the password for a controlled
+  workflow.
+- Legacy `<stem>_history.swcstudio.zip` archives can still be opened and
+  are rewritten to the current `<stem>_history.swcstudio` name on the
+  next commit.
+- Move the SWC and its `<stem>_history.swcstudio` archive together
+  and provenance survives.
 - Project-level `.swcstudio/` is a **derived index** rebuilt from the
   per-file logs. Useful for project-wide queries ("every AI run by
   Alice on this dataset") but never authoritative.
@@ -145,7 +161,7 @@ line endings, sorted keys for byte-stable output.
 
 ### Common envelope
 
-```json
+```text
 {
   "schema_version": 1,
   "kind": "commit",
@@ -183,7 +199,7 @@ For AI ops the sub-op also carries an `ai_run_ref` blob hash:
 ```json
 {
   "kind": "auto_label",
-  "params": {"model_version": "v9", "rng_seed": 42},
+  "params": {"model_bundle": "v12", "cell_type": "unknown", "flag_strictness": 0.5},
   "summary": {"nodes_modified": 1283},
   "ai_run_ref": "sha256:..."
 }
@@ -221,10 +237,10 @@ MLflow-compatible field names. Stored in `objects/<sha>.zst`.
   "started_at": "2024-01-01T11:45:00Z",
   "finished_at": "2024-01-01T11:45:22Z",
   "status": "FINISHED",
-  "params":  {"model_version": "v9", "rng_seed": 42, "stage": "all"},
+  "params":  {"model_bundle": "v12", "cell_type": "unknown", "flag_strictness": 0.5},
   "metrics": {"nodes_labeled": 1283, "low_conf_count": 17},
   "artifacts": [
-    {"name": "model.pkl", "sha256": "..."},
+    {"name": "swcstudio-models-v0.2.0.zip", "sha256": "..."},
     {"name": "input.swc", "sha256": "..."},
     {"name": "output.swc", "sha256": "..."}
   ],
@@ -260,8 +276,8 @@ Every materialized SWC carries exactly **two** `@PROV` comment lines at
 the top:
 
 ```
-# @PROV root=a1b2c3d4 file=neuron_001.swc created=2024-01-01T09:00:00Z
-# @PROV tip=g7h8i9j0 parent=d4e5f6a7 ops=20 tool=swcstudio@0.2.0 actor=tuo updated=2024-01-01T11:45:22Z sidecar=.history/
+# @PROV root=a1b2c3d4 file=neuron_001.swc created=2024-01-01T09:00:00Z repo=neuron_001_history.swcstudio repo_id=...
+# @PROV tip=g7h8i9j0 parent=d4e5f6a7 ops=20 tool=swcstudio@0.2.0 actor=tuo updated=2024-01-01T11:45:22Z sidecar=neuron_001_history.swcstudio repo_id=...
 ```
 
 - **Line 1 (root)** — written once, never modified.
@@ -321,7 +337,7 @@ from swcstudio.core.provenance import tracked_op, OpKind
 with tracked_op(
     dataset_path="/path/to/neuron_001.swc",
     kind=OpKind.AUTO_LABEL,
-    params={"model_version": "v9", "rng_seed": 42},
+    params={"model_bundle": "v12", "cell_type": "unknown", "flag_strictness": 0.5},
     message="Auto-label apical/basal",
     is_ai=True,
 ) as op:
@@ -332,19 +348,23 @@ with tracked_op(
 
 Lifecycle:
 
-1. Acquire `.history/lock`. Fail loudly if already held.
-2. Read the active branch tip. Snapshot input.
-3. If `is_ai=True`, snapshot env fingerprint (or reference an existing one).
-4. Run the body.
-5. Validate output was set; compute `output_sha`.
-6. Compute structured diff vs input; write diff blob.
-7. If `is_ai=True`, finalize and write AI-run blob.
-8. Write commit event to `events.jsonl` (atomic append).
-9. Update `refs/branches/<active>` to new commit sha (atomic rename).
-10. If commit count on this branch is a multiple of 50, write a snapshot blob.
-11. Update SQLite index (within same SQLite transaction).
-12. Rewrite `<stem>_current.swc` with updated `@PROV` tip line.
-13. Release lock.
+1. Materialize `<stem>_history.swcstudio` into the transient `.history/`
+   work tree, or initialize a new work tree if no archive exists.
+2. Acquire `.history/lock`. Fail loudly if already held.
+3. Read the active branch tip. Snapshot input.
+4. If `is_ai=True`, snapshot env fingerprint (or reference an existing one).
+5. Run the body.
+6. Validate output was set; compute `output_sha`.
+7. Compute structured diff vs input; write diff blob.
+8. If `is_ai=True`, finalize and write AI-run blob.
+9. Write commit event to `events.jsonl` (atomic append).
+10. Update `refs/branches/<active>` to new commit sha (atomic rename).
+11. If commit count on this branch is a multiple of 50, write a snapshot blob.
+12. Update SQLite index (within same SQLite transaction).
+13. Rewrite `<stem>_current.swc` with updated `@PROV` tip line.
+14. Release lock.
+15. Re-encrypt the `.history/` work tree into `<stem>_history.swcstudio`
+    and remove the work tree.
 
 Errors at any step roll back: no partial events, no orphan blobs are
 referenced, lock is released in `finally`.
@@ -369,9 +389,10 @@ Worst case replay: 49 diffs.
 ## 10. Concurrency
 
 `.history/lock` is an OS-level advisory lock (`fcntl.flock` on POSIX,
-`msvcrt.locking` on Windows). Acquired by `tracked_op()`,
-`tracked_session()`, and any maintenance verb. Held only for the
-duration of one op or session.
+`msvcrt.locking` on Windows) inside the transient extracted work tree.
+It is acquired by `tracked_op()`, `tracked_session()`, and any
+maintenance verb, and is not stored in the durable archive. Held only
+for the duration of one op or session.
 
 If acquisition fails, the verb exits with a clear error naming the
 holding PID and start time. No silent retry.
@@ -465,10 +486,10 @@ schema_version: 1
 op:        auto_label
 input:     {sha256: ..., path: "neuron_001.swc"}
 output:    {sha256: ...}
-params:    {model_version: v9, rng_seed: 42}
-model:     {sha256: ..., url: "https://github.com/.../models/v9/cell_type_classifier.pkl"}
+params:    {model_bundle: v12, cell_type: unknown, flag_strictness: 0.5}
+model:     {sha256: ..., url: "https://github.com/Mio0v0/SWC-Studio/releases/download/v0.2.0/swcstudio-models-v0.2.0.zip"}
 env_hash:  sha256:...
-command:   "swcstudio auto-label --rng-seed 42 --model-version v9 input.swc"
+command:   "swcstudio auto-label input.swc --cell-type unknown --flag-strictness 0.5"
 ```
 
 A colleague with `swcstudio reproduce reproduce.yaml`:
@@ -633,8 +654,8 @@ new file's first commit records its source as a parent:
 }
 ```
 
-The new file gets its own `root_sha` and its own `.history/`. The
-`derived_from` field links the two histories. The project-level index
+The new file gets its own `root_sha` and its own encrypted history
+archive. The `derived_from` field links the two histories. The project-level index
 joins on `derived_from.root_sha` to walk inter-file lineage:
 "everything that came from `neuron_001.swc`".
 

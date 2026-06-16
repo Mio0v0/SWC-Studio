@@ -208,12 +208,13 @@ auto-typing engine, implemented in:
 
 | Stage | Implementation | Output |
 |---|---|---|
+| QC gate | type-agnostic structural checks and distribution checks (`qc_gate.pkl`) | rejects malformed, disconnected, or out-of-distribution files before auto-labeling; unlabeled type-0 inputs can pass |
 | Stage 1 | sklearn ensemble over 49 whole-cell features (`cell_type_classifier.pkl`) | pyramidal vs interneuron |
 | Stage 2 | sklearn ensemble per primary subtree (`branch_classifier.pkl`) | axon / basal / apical per subtree |
 | Stage 2b | GraphSAGE GNN over the branch graph (`gnn_apical_basal.pt`) | apical-vs-basal re-decision on pyramidal dendrites |
 | Branch3 | conservative GraphSAGE rescue head (`gnn_branch3_rescue.pt`) | rescue difficult pyramidal apical/basal cases |
 | Stage 3 | topology refinement | soma-boundary constraints applied (one primary axon, one primary apical), short islands flipped |
-| QC/flag | QC gate plus learned flag models (`qc_gate.pkl`, `flag_model_*.joblib`), optionally with baseline-disagreement features | per-cell QC metadata and bad-label flag score |
+| Flag scoring | compact learned flag models (`flag_model_*.joblib`) | post-prediction per-cell bad-label flag score |
 
 Stage 1 uses a soft handoff: when its confidence is below threshold it
 runs Stages 2 + 3 for both cell types and picks the higher-confidence
@@ -231,20 +232,12 @@ architecture:
 - `qc_gate.pkl` - runtime QC gate
 - `flag_model_pyramidal.joblib`, `flag_model_interneuron.joblib`,
   `flag_model_all.joblib` - compact learned flaggers
-- `flag_model_pyramidal_baseline.joblib`,
-  `flag_model_all_baseline.joblib` - baseline-disagreement learned
-  flaggers
 
-The baseline-disagreement flaggers are small and bundled, but they need
-the optional baseline predictor pickles to build their runtime features:
-`neurom_rf.pkl`, `lmeasure_rf.pkl`, `sholl_rf.pkl`, and `sholl_mlp.pkl`.
-Use `swcstudio models status` to confirm both the flag bundles and those
-optional predictors are reachable.
-
-The deployed baseline-disagreement flagger uses `baseline_oof_*`
-features. It is not the older research-only multi-v12 `xmodel_*`
-ensemble flagger; SWC-Studio intentionally rejects a flag bundle that
-requires unsupported `xmodel_*` features.
+The deployed flagger is the fast compact mode. Older config files that
+name `baseline`, `auto`, or `complex` are accepted for backward
+compatibility, but they are mapped to compact scoring. SWC-Studio
+intentionally rejects research-only flag bundles that require unsupported
+disagreement features.
 
 ### Apical detection
 
@@ -269,8 +262,8 @@ hand-tuned weights. Current keys:
   bypasses Stage 1 with the user-provided type
 - `flag_enabled` - enable learned per-cell bad-label flag scoring
 - `flag_strictness` - tune flagging from loose to conservative
-- `flag_feature_mode` - `compact`, `baseline`, or `auto`; baseline mode
-  requires optional baseline predictor artifacts
+- `flag_feature_mode` - compatibility field; compact scoring is always
+  used in SWC-Studio
 - `enabled` — feature gate (default `true`)
 - `notes` — free-form description; not consumed by the engine
 
@@ -284,10 +277,9 @@ over the bundled defaults.
 
 - `compact` uses only features already available from the v12 inference
   pass.
-- `baseline` computes multi-baseline disagreement features from
-  NeuroM-RF, L-Measure-RF, Sholl-RF, and Sholl-MLP predictions.
-- `auto` uses `baseline` when all four baseline predictors are reachable;
-  otherwise it falls back to `compact`.
+- `simple` is accepted as an alias for compact scoring.
+- Legacy `baseline`, `auto`, and `complex` values are treated as
+  `compact`.
 
 ## How Checks Become GUI Issues
 

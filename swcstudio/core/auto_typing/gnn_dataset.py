@@ -1,6 +1,6 @@
-"""GNN dataset builder for the apical-vs-basal head (Paper 1, §6 of CONTINUATION.md).
+"""GNN dataset builder for the apical-vs-basal head.
 
-Converts a `hybrid.branch_features.MorphologyBranches` (the same per-branch
+Converts a `swcstudio.core.auto_typing.branch_features.MorphologyBranches` (the same per-branch
 representation Stage 2 already operates on) into a `torch_geometric.data.Data`
 object suitable for training a small GraphSAGE / GCN classifier whose only
 job is to re-decide apical vs basal for pyramidal-dendrite branches.
@@ -36,7 +36,7 @@ Per-graph metadata stored on the Data object:
 Loaders:
 - `morphology_to_data(mb, ...)`: one MorphologyBranches -> one PyG Data
 - `build_dataset(data_dir, ...)`: walks data_dir/{pyramidal,interneuron}/,
-  extracts branches via `hybrid.branch_features.extract_branches`, returns a
+  extracts branches via `.branch_features.extract_branches`, returns a
   list[Data]. Optional cache-to-disk via `cache_path=`.
 
 Default-included files: only pyramidal cells (since the GNN's role is to
@@ -185,7 +185,7 @@ def morphology_to_data(
     Parameters
     ----------
     mb : MorphologyBranches
-        From `hybrid.branch_features.extract_branches`.
+        From `.branch_features.extract_branches`.
     feature_names : sequence of str
         Column subset of `BRANCH_FEATURE_NAMES` to use as node features.
         Default `DENDRITE_FEATURE_NAMES` drops cell-type one-hots and the

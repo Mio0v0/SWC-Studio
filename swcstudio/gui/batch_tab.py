@@ -18,6 +18,7 @@ from PySide6.QtWidgets import (
     QProgressBar,
     QPushButton,
     QSlider,
+    QSizePolicy,
     QVBoxLayout,
     QWidget,
 )
@@ -124,6 +125,12 @@ class BatchTabWidget(QWidget):
         self._batch_run_id: int = 0
         self._batch_worker: _AutoLabelBatchWorker | None = None
         self._batch_worker_thread: QThread | None = None
+        self._split_input_dir: str = ""
+        self._batch_input_dir: str = ""
+        self._batch_model_dir: str = ""
+        self._validation_input_dir: str = ""
+        self._simplify_input_dir: str = ""
+        self._index_clean_input_dir: str = ""
         self._split_page = self._build_split_page()
         self._auto_page = self._build_auto_page()
         self._validation_page = self._build_validation_page()
@@ -162,9 +169,10 @@ class BatchTabWidget(QWidget):
     # --------------------------------------------------------- UI builders
     def _build_split_page(self) -> QWidget:
         page = QWidget()
-        layout = QVBoxLayout(page)
-        layout.setContentsMargins(8, 8, 8, 8)
-        layout.setSpacing(8)
+        root = QVBoxLayout(page)
+        root.setContentsMargins(8, 8, 8, 8)
+        root.setSpacing(8)
+        root.setAlignment(Qt.AlignTop)
 
         desc = QLabel(
             "Select a folder and split each multi-cell SWC into separate trees.\n"
@@ -173,14 +181,23 @@ class BatchTabWidget(QWidget):
         )
         desc.setWordWrap(True)
         desc.setStyleSheet("font-size: 12px; color: #555;")
-        layout.addWidget(desc)
+        root.addWidget(desc)
 
-        self._btn_split_folder = QPushButton("Select Folder and Process Split…")
-        self._btn_split_folder.clicked.connect(self._on_split_folder)
-        layout.addWidget(self._btn_split_folder)
+        action_row = QHBoxLayout()
+        action_row.setSpacing(6)
+        self._btn_split_folder = self._compact_button(QPushButton("Select Folder"), 136)
+        self._btn_split_folder.clicked.connect(self._on_browse_split_input_dir)
+        action_row.addWidget(self._btn_split_folder)
+        self._btn_run_split_folder = self._compact_button(QPushButton("Run"), 60)
+        self._btn_run_split_folder.clicked.connect(self._on_run_split_folder)
+        action_row.addWidget(self._btn_run_split_folder)
+        action_row.addStretch()
+        root.addLayout(action_row)
+
+        root.addLayout(self._make_selected_folder_row("_split_input_dir_lbl"))
 
         self._split_status = self._new_status_box()
-        layout.addWidget(self._split_status, stretch=1)
+        root.addWidget(self._split_status, stretch=1)
         return page
 
     def _build_auto_page(self) -> QWidget:
@@ -191,28 +208,31 @@ class BatchTabWidget(QWidget):
         root.setAlignment(Qt.AlignTop)
 
         desc = QLabel(
-            "Auto-label every SWC file in a folder. Three-stage ML "
-            "pipeline: (1) detect cell type, (2) classify each dendrite "
-            "branch as axon / basal / apical, (3) refine with topology "
-            "rules."
+            "Auto-label every SWC file in a folder with the QC-label-flag "
+            "pipeline: input QC, cell-type detection or override, subtree "
+            "labeling, pyramidal apical/basal GNN rescue, topology cleanup, "
+            "and compact bad-label flag scoring."
         )
         desc.setWordWrap(True)
         desc.setStyleSheet("font-size: 12px; color: #555;")
         root.addWidget(desc)
 
-        # ---- input folder picker
-        input_row = QHBoxLayout()
-        input_row.setSpacing(6)
-        input_lbl = QLabel("Input folder:")
-        input_lbl.setStyleSheet("font-size: 12px; color: #333;")
-        input_row.addWidget(input_lbl)
-        self._batch_edit_input_dir = QLineEdit()
-        self._batch_edit_input_dir.setPlaceholderText("Select a folder containing SWC files")
-        input_row.addWidget(self._batch_edit_input_dir, stretch=1)
-        self._batch_btn_browse_input = QPushButton("Browse...")
+        # ---- input folder controls
+        action_row = QHBoxLayout()
+        action_row.setSpacing(6)
+        self._batch_btn_browse_input = self._compact_button(QPushButton("Select Folder"), 136)
         self._batch_btn_browse_input.clicked.connect(self._on_browse_batch_input_dir)
-        input_row.addWidget(self._batch_btn_browse_input)
-        root.addLayout(input_row)
+        action_row.addWidget(self._batch_btn_browse_input)
+        self._btn_run_batch_check = self._compact_button(QPushButton("Run"), 60)
+        self._btn_run_batch_check.clicked.connect(self._on_run_batch_check)
+        action_row.addWidget(self._btn_run_batch_check)
+        self._btn_edit_auto_cfg = self._compact_button(QPushButton("Show JSON"), 108)
+        self._btn_edit_auto_cfg.clicked.connect(self._on_edit_auto_typing_json)
+        action_row.addWidget(self._btn_edit_auto_cfg)
+        action_row.addStretch()
+        root.addLayout(action_row)
+
+        root.addLayout(self._make_selected_folder_row("_batch_input_dir_lbl"))
 
         # ---- model dir picker (optional override)
         self._batch_model_row = QHBoxLayout()
@@ -221,87 +241,72 @@ class BatchTabWidget(QWidget):
         model_lbl.setStyleSheet("font-size: 12px; color: #333;")
         self._batch_model_row.addWidget(model_lbl)
         self._batch_edit_model_dir = QLineEdit()
-        self._batch_edit_model_dir.setPlaceholderText(
-            "Leave blank to use bundled / user-data models"
-        )
-        self._batch_edit_model_dir.editingFinished.connect(self._refresh_batch_backend_status)
-        self._batch_model_row.addWidget(self._batch_edit_model_dir, stretch=1)
-        self._batch_btn_browse_model = QPushButton("Browse…")
+        self._batch_edit_model_dir.setPlaceholderText("Leave blank for default models")
+        self._batch_edit_model_dir.setToolTip("Leave blank to use bundled / user-data models.")
+        self._batch_edit_model_dir.setFixedWidth(260)
+        self._batch_edit_model_dir.editingFinished.connect(self._on_batch_model_dir_edited)
+        self._batch_model_row.addWidget(self._batch_edit_model_dir)
+        self._batch_btn_browse_model = self._compact_button(QPushButton("Browse..."), 96)
         self._batch_btn_browse_model.clicked.connect(self._on_browse_batch_model_dir)
         self._batch_model_row.addWidget(self._batch_btn_browse_model)
         self._batch_backend_status_lbl = QLabel("")
         self._batch_backend_status_lbl.setStyleSheet("font-size: 11px; color: #888;")
         self._batch_model_row.addWidget(self._batch_backend_status_lbl)
+        self._batch_model_row.addStretch()
         root.addLayout(self._batch_model_row)
         self._refresh_batch_backend_status()
 
-        option_row = QHBoxLayout()
-        option_row.setSpacing(8)
+        type_row = QHBoxLayout()
+        type_row.setSpacing(6)
         cell_lbl = QLabel("Cell type:")
         cell_lbl.setStyleSheet("font-size: 12px; color: #333;")
-        option_row.addWidget(cell_lbl)
+        type_row.addWidget(cell_lbl)
         self._batch_cell_type_combo = QComboBox()
         self._batch_cell_type_combo.addItem("Unknown", "unknown")
         self._batch_cell_type_combo.addItem("Pyramidal", "pyramidal")
         self._batch_cell_type_combo.addItem("Interneuron", "interneuron")
-        option_row.addWidget(self._batch_cell_type_combo)
+        self._batch_cell_type_combo.setMaximumWidth(128)
+        type_row.addWidget(self._batch_cell_type_combo)
         self._batch_flag_enabled = QCheckBox("Flag")
         self._batch_flag_enabled.setChecked(True)
-        option_row.addWidget(self._batch_flag_enabled)
-        flag_mode_lbl = QLabel("Features:")
-        flag_mode_lbl.setStyleSheet("font-size: 12px; color: #333;")
-        option_row.addWidget(flag_mode_lbl)
-        self._batch_flag_feature_combo = QComboBox()
-        self._batch_flag_feature_combo.addItem("Simple", "compact")
-        self._batch_flag_feature_combo.addItem("Complex", "baseline")
-        self._batch_flag_feature_combo.addItem("Auto", "auto")
-        self._batch_flag_feature_combo.setToolTip(
-            "Simple uses the compact flagger. Complex uses baseline-disagreement features when available."
-        )
-        option_row.addWidget(self._batch_flag_feature_combo)
+        type_row.addWidget(self._batch_flag_enabled)
+        type_row.addStretch()
+        root.addLayout(type_row)
+
+        strict_row = QHBoxLayout()
+        strict_row.setSpacing(4)
         strict_lbl = QLabel("Strictness:")
         strict_lbl.setStyleSheet("font-size: 12px; color: #333;")
-        option_row.addWidget(strict_lbl)
+        strict_row.addWidget(strict_lbl)
         loose_lbl = QLabel("Loose")
         loose_lbl.setStyleSheet("font-size: 11px; color: #666;")
-        option_row.addWidget(loose_lbl)
+        strict_row.addWidget(loose_lbl)
         self._batch_flag_slider = QSlider(Qt.Horizontal)
         self._batch_flag_slider.setRange(0, 100)
         self._batch_flag_slider.setValue(50)
-        self._batch_flag_slider.setFixedWidth(120)
-        option_row.addWidget(self._batch_flag_slider)
+        self._batch_flag_slider.setFixedWidth(88)
+        strict_row.addWidget(self._batch_flag_slider)
         strict_side_lbl = QLabel("Strict")
         strict_side_lbl.setStyleSheet("font-size: 11px; color: #666;")
-        option_row.addWidget(strict_side_lbl)
+        strict_row.addWidget(strict_side_lbl)
         self._batch_flag_strictness_spin = QDoubleSpinBox()
         self._batch_flag_strictness_spin.setRange(0.0, 1.0)
         self._batch_flag_strictness_spin.setSingleStep(0.01)
         self._batch_flag_strictness_spin.setDecimals(2)
         self._batch_flag_strictness_spin.setValue(0.50)
-        self._batch_flag_strictness_spin.setFixedWidth(72)
+        self._batch_flag_strictness_spin.setFixedWidth(60)
         self._batch_flag_strictness_spin.setToolTip(
             "Flag strictness from 0.00 loose to 1.00 strict."
         )
-        option_row.addWidget(self._batch_flag_strictness_spin)
+        strict_row.addWidget(self._batch_flag_strictness_spin)
         self._batch_flag_slider.valueChanged.connect(
             lambda value: self._batch_flag_strictness_spin.setValue(float(value) / 100.0)
         )
         self._batch_flag_strictness_spin.valueChanged.connect(
             lambda value: self._batch_flag_slider.setValue(int(round(float(value) * 100.0)))
         )
-        option_row.addStretch()
-        root.addLayout(option_row)
-
-        action_row = QHBoxLayout()
-        self._btn_run_batch_check = QPushButton("Run")
-        self._btn_run_batch_check.clicked.connect(self._on_run_batch_check)
-        action_row.addWidget(self._btn_run_batch_check)
-
-        self._btn_edit_auto_cfg = QPushButton("Show JSON")
-        self._btn_edit_auto_cfg.clicked.connect(self._on_edit_auto_typing_json)
-        action_row.addWidget(self._btn_edit_auto_cfg)
-        action_row.addStretch()
-        root.addLayout(action_row)
+        strict_row.addStretch()
+        root.addLayout(strict_row)
 
         # Per-file progress for batch runs. Hidden until a worker starts.
         self._batch_progress = QProgressBar()
@@ -328,25 +333,84 @@ class BatchTabWidget(QWidget):
             self, "Select folder with SWC files for auto-labeling"
         )
         if path:
-            self._batch_edit_input_dir.setText(path)
+            self._set_batch_input_dir(path)
 
     def _on_browse_batch_model_dir(self) -> None:
         path = QFileDialog.getExistingDirectory(
             self, "Select directory containing auto-typing model files"
         )
         if path:
-            self._batch_edit_model_dir.setText(path)
+            self._batch_model_dir = path
+            self._sync_batch_model_dir_label()
             self._refresh_batch_backend_status()
 
+    def _on_batch_model_dir_edited(self) -> None:
+        self._batch_model_dir = (self._batch_edit_model_dir.text() or "").strip()
+        self._sync_batch_model_dir_label()
+        self._refresh_batch_backend_status()
+
+    def _make_selected_folder_row(self, label_attr: str) -> QHBoxLayout:
+        row = QHBoxLayout()
+        row.setSpacing(6)
+        lbl = QLabel("Selected folder:")
+        lbl.setStyleSheet("font-size: 12px; color: #333;")
+        row.addWidget(lbl)
+
+        value_lbl = QLabel("No folder selected.")
+        value_lbl.setWordWrap(True)
+        value_lbl.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
+        value_lbl.setStyleSheet("font-size: 12px; color: #555;")
+        row.addWidget(value_lbl, stretch=1)
+        setattr(self, label_attr, value_lbl)
+        return row
+
+    def _compact_button(self, button: QPushButton, max_width: int | None = None) -> QPushButton:
+        button.setMinimumWidth(0)
+        button.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+        if max_width is not None:
+            button.setFixedWidth(max_width)
+        return button
+
+    def _short_path_text(self, path: str, empty: str) -> str:
+        if not path:
+            return empty
+        try:
+            p = Path(path)
+            parent = p.parent.name
+            return f".../{parent}/{p.name}" if parent else p.name
+        except Exception:  # noqa: BLE001
+            return path
+
+    def _set_input_dir(self, attr_name: str, label: QLabel, path: str) -> None:
+        value = str(path or "").strip()
+        setattr(self, attr_name, value)
+        label.setText(self._short_path_text(value, "No folder selected."))
+        label.setToolTip(value)
+
+    def _set_batch_input_dir(self, path: str) -> None:
+        self._batch_input_dir = str(path or "").strip()
+        self._batch_input_dir_lbl.setText(
+            self._short_path_text(self._batch_input_dir, "No folder selected.")
+        )
+        self._batch_input_dir_lbl.setToolTip(self._batch_input_dir)
+
+    def _sync_batch_model_dir_label(self) -> None:
+        self._batch_edit_model_dir.blockSignals(True)
+        self._batch_edit_model_dir.setText(self._batch_model_dir)
+        self._batch_edit_model_dir.setToolTip(
+            self._batch_model_dir or "Leave blank to use bundled / user-data models."
+        )
+        self._batch_edit_model_dir.blockSignals(False)
+
     def _refresh_batch_backend_status(self) -> None:
-        md = (self._batch_edit_model_dir.text() or "").strip() or None
+        md = (self._batch_model_dir or "").strip() or None
         ok, reason = is_available(model_dir=md)
         if ok:
             self._batch_backend_status_lbl.setText("ready")
             self._batch_backend_status_lbl.setStyleSheet("font-size: 11px; color: #2a7;")
             self._batch_backend_status_lbl.setToolTip("All required model files are loaded.")
         else:
-            self._batch_backend_status_lbl.setText("unavailable — see details")
+            self._batch_backend_status_lbl.setText("unavailable")
             self._batch_backend_status_lbl.setStyleSheet("font-size: 11px; color: #c33;")
             self._batch_backend_status_lbl.setToolTip(str(reason))
 
@@ -370,20 +434,24 @@ class BatchTabWidget(QWidget):
         root.addWidget(desc)
 
         row = QHBoxLayout()
-        self._btn_batch_validate = QPushButton("Run")
+        row.setSpacing(6)
+        self._btn_batch_validation_folder = self._compact_button(QPushButton("Select Folder"), 136)
+        self._btn_batch_validation_folder.clicked.connect(self._on_browse_batch_validation_dir)
+        row.addWidget(self._btn_batch_validation_folder)
+        self._btn_batch_validate = self._compact_button(QPushButton("Run"), 60)
         self._btn_batch_validate.clicked.connect(self._on_run_batch_validation)
         row.addWidget(self._btn_batch_validate)
-        self._btn_show_precheck = QPushButton("Rule Guide")
+        self._btn_show_precheck = self._compact_button(QPushButton("Rule Guide"), 108)
         self._btn_show_precheck.clicked.connect(self.precheck_requested.emit)
         row.addWidget(self._btn_show_precheck)
         row.addStretch()
         root.addLayout(row)
 
-        self._batch_validation_status = QLabel("No batch validation run yet.")
-        self._batch_validation_status.setWordWrap(True)
-        self._batch_validation_status.setStyleSheet("font-size: 12px; color: #555;")
-        root.addWidget(self._batch_validation_status)
-        root.addStretch(1)
+        root.addLayout(self._make_selected_folder_row("_batch_validation_input_dir_lbl"))
+
+        self._batch_validation_status = self._new_status_box()
+        self._batch_validation_status.setPlainText("No batch validation run yet.")
+        root.addWidget(self._batch_validation_status, stretch=1)
         return page
 
     def _build_simplify_page(self) -> QWidget:
@@ -401,9 +469,18 @@ class BatchTabWidget(QWidget):
         desc.setStyleSheet("font-size: 12px; color: #555;")
         root.addWidget(desc)
 
-        self._btn_batch_simplify = QPushButton("Run")
+        action_row = QHBoxLayout()
+        action_row.setSpacing(6)
+        self._btn_batch_simplify_folder = self._compact_button(QPushButton("Select Folder"), 136)
+        self._btn_batch_simplify_folder.clicked.connect(self._on_browse_batch_simplify_dir)
+        action_row.addWidget(self._btn_batch_simplify_folder)
+        self._btn_batch_simplify = self._compact_button(QPushButton("Run"), 60)
         self._btn_batch_simplify.clicked.connect(self._on_run_batch_simplify)
-        root.addWidget(self._btn_batch_simplify)
+        action_row.addWidget(self._btn_batch_simplify)
+        action_row.addStretch()
+        root.addLayout(action_row)
+
+        root.addLayout(self._make_selected_folder_row("_batch_simplify_input_dir_lbl"))
 
         self._batch_simplify_status = self._new_status_box()
         root.addWidget(self._batch_simplify_status, stretch=1)
@@ -424,9 +501,18 @@ class BatchTabWidget(QWidget):
         desc.setStyleSheet("font-size: 12px; color: #555;")
         root.addWidget(desc)
 
-        self._btn_batch_index_clean = QPushButton("Run")
+        action_row = QHBoxLayout()
+        action_row.setSpacing(6)
+        self._btn_batch_index_clean_folder = self._compact_button(QPushButton("Select Folder"), 136)
+        self._btn_batch_index_clean_folder.clicked.connect(self._on_browse_batch_index_clean_dir)
+        action_row.addWidget(self._btn_batch_index_clean_folder)
+        self._btn_batch_index_clean = self._compact_button(QPushButton("Run"), 60)
         self._btn_batch_index_clean.clicked.connect(self._on_run_batch_index_clean)
-        root.addWidget(self._btn_batch_index_clean)
+        action_row.addWidget(self._btn_batch_index_clean)
+        action_row.addStretch()
+        root.addLayout(action_row)
+
+        root.addLayout(self._make_selected_folder_row("_batch_index_clean_input_dir_lbl"))
 
         self._batch_index_clean_status = self._new_status_box()
         root.addWidget(self._batch_index_clean_status, stretch=1)
@@ -455,7 +541,7 @@ class BatchTabWidget(QWidget):
 
     # --------------------------------------------------------- Public operations
     def run_split_folder(self):
-        self._on_split_folder()
+        self._on_run_split_folder()
 
     def run_auto_typing_batch(self):
         self._on_run_batch_check()
@@ -479,10 +565,22 @@ class BatchTabWidget(QWidget):
         self._config_dialog.raise_()
         self._config_dialog.activateWindow()
 
-    def _on_split_folder(self):
+    def _on_browse_split_input_dir(self) -> None:
         in_folder = QFileDialog.getExistingDirectory(self, "Choose folder containing SWC files")
+        if in_folder:
+            self._set_input_dir("_split_input_dir", self._split_input_dir_lbl, in_folder)
+
+    def _on_split_folder(self):
+        # Compatibility wrapper for older callers.
+        self._on_run_split_folder()
+
+    def _on_run_split_folder(self):
+        in_folder = (self._split_input_dir or "").strip()
         if not in_folder:
-            self._set_status("Folder split cancelled.", self._split_status)
+            self._set_status("Select an input folder before running Split.", self._split_status)
+            return
+        if not os.path.isdir(in_folder):
+            self._set_status(f"Selected input folder does not exist:\n{in_folder}", self._split_status)
             return
         try:
             result = split_folder(in_folder)
@@ -516,16 +614,10 @@ class BatchTabWidget(QWidget):
             )
             return
 
-        folder_path = (self._batch_edit_input_dir.text() or "").strip()
-        if not folder_path:
-            folder_path = QFileDialog.getExistingDirectory(
-                self, "Select folder with SWC files for auto-labeling"
-            )
-            if folder_path:
-                self._batch_edit_input_dir.setText(folder_path)
+        folder_path = (self._batch_input_dir or "").strip()
         if not folder_path:
             self._set_status(
-                "Auto-labeling batch processing cancelled.",
+                "Select an input folder before running Auto Label.",
                 self._batch_status_box,
             )
             return
@@ -557,10 +649,10 @@ class BatchTabWidget(QWidget):
             cell_type=self._batch_cell_type_combo.currentData() or "unknown",
             flag_enabled=self._batch_flag_enabled.isChecked(),
             flag_strictness=float(self._batch_flag_slider.value()) / 100.0,
-            flag_feature_mode=self._batch_flag_feature_combo.currentData() or "compact",
+            flag_feature_mode="compact",
         )
 
-        md = (self._batch_edit_model_dir.text() or "").strip() or None
+        md = (self._batch_model_dir or "").strip() or None
         ok, reason = is_available(model_dir=md)
         if not ok:
             self._set_status(
@@ -574,7 +666,7 @@ class BatchTabWidget(QWidget):
         config_overrides["cell_type"] = self._batch_cell_type_combo.currentData() or "unknown"
         config_overrides["flag_enabled"] = self._batch_flag_enabled.isChecked()
         config_overrides["flag_strictness"] = float(self._batch_flag_slider.value()) / 100.0
-        config_overrides["flag_feature_mode"] = self._batch_flag_feature_combo.currentData() or "compact"
+        config_overrides["flag_feature_mode"] = "compact"
 
         # Hand off to a worker thread so the UI stays responsive while
         # the engine processes potentially many files.
@@ -603,13 +695,11 @@ class BatchTabWidget(QWidget):
         controls and shows the progress bar while a worker is in flight."""
         self._btn_run_batch_check.setEnabled(not running)
         self._btn_edit_auto_cfg.setEnabled(not running)
-        self._batch_edit_input_dir.setEnabled(not running)
         self._batch_btn_browse_input.setEnabled(not running)
         self._batch_edit_model_dir.setEnabled(not running)
         self._batch_btn_browse_model.setEnabled(not running)
         self._batch_cell_type_combo.setEnabled(not running)
         self._batch_flag_enabled.setEnabled(not running)
-        self._batch_flag_feature_combo.setEnabled(not running)
         self._batch_flag_slider.setEnabled(not running)
         self._batch_flag_strictness_spin.setEnabled(not running)
 
@@ -646,6 +736,7 @@ class BatchTabWidget(QWidget):
             f"Output folder: {getattr(result, 'out_dir', '')}",
             f"SWC files detected: {getattr(result, 'files_total', 0)}",
             f"Processed: {getattr(result, 'files_processed', 0)}",
+            f"QC rejected: {getattr(result, 'files_qc_failed', 0)}",
             f"Failed: {getattr(result, 'files_failed', 0)}",
             f"Total nodes processed: {getattr(result, 'total_nodes', 0)}",
             f"Type changes: {getattr(result, 'total_type_changes', 0)}",
@@ -690,20 +781,32 @@ class BatchTabWidget(QWidget):
         self._batch_worker = None
         self._batch_worker_thread = None
 
-    def _on_run_batch_validation(self):
+    def _on_browse_batch_validation_dir(self) -> None:
         folder_path = QFileDialog.getExistingDirectory(
             self, "Select folder with SWC files for batch validation"
         )
+        if folder_path:
+            self._set_input_dir(
+                "_validation_input_dir",
+                self._batch_validation_input_dir_lbl,
+                folder_path,
+            )
+
+    def _on_run_batch_validation(self):
+        folder_path = (self._validation_input_dir or "").strip()
         if not folder_path:
-            self._batch_validation_status.setText("Batch validation cancelled.")
-            self.log_message.emit("Batch validation cancelled.")
+            msg = "Select an input folder before running Validation."
+            self._set_status(msg, self._batch_validation_status)
+            return
+        if not os.path.isdir(folder_path):
+            msg = f"Selected input folder does not exist:\n{folder_path}"
+            self._set_status(msg, self._batch_validation_status)
             return
         try:
             out = run_batch_validation(folder_path)
         except Exception as e:  # noqa: BLE001
             msg = f"Batch validation failed: {e}"
-            self._batch_validation_status.setText(msg)
-            self.log_message.emit(msg)
+            self._set_status(msg, self._batch_validation_status)
             return
 
         totals = dict(out.get("summary_total", {}))
@@ -715,14 +818,25 @@ class BatchTabWidget(QWidget):
         )
         if out.get("log_path"):
             msg = f"{msg} | report={out.get('log_path')}"
-        self._batch_validation_status.setText(msg)
-        self.log_message.emit(msg)
+        self._set_status(msg, self._batch_validation_status)
         self.batch_validation_ready.emit(out)
 
-    def _on_run_batch_simplify(self):
+    def _on_browse_batch_simplify_dir(self) -> None:
         folder_path = QFileDialog.getExistingDirectory(self, "Select folder with SWC files for batch simplification")
+        if folder_path:
+            self._set_input_dir(
+                "_simplify_input_dir",
+                self._batch_simplify_input_dir_lbl,
+                folder_path,
+            )
+
+    def _on_run_batch_simplify(self):
+        folder_path = (self._simplify_input_dir or "").strip()
         if not folder_path:
-            self._set_status("Batch simplification cancelled.", self._batch_simplify_status)
+            self._set_status("Select an input folder before running Simplification.", self._batch_simplify_status)
+            return
+        if not os.path.isdir(folder_path):
+            self._set_status(f"Selected input folder does not exist:\n{folder_path}", self._batch_simplify_status)
             return
         try:
             out = run_batch_simplification(folder_path)
@@ -756,10 +870,22 @@ class BatchTabWidget(QWidget):
         self._set_status("\n".join(lines), self._batch_simplify_status)
         self._show_report_popup("Batch Simplification Report", report_path)
 
-    def _on_run_batch_index_clean(self):
+    def _on_browse_batch_index_clean_dir(self) -> None:
         folder_path = QFileDialog.getExistingDirectory(self, "Select folder with SWC files for batch index clean")
+        if folder_path:
+            self._set_input_dir(
+                "_index_clean_input_dir",
+                self._batch_index_clean_input_dir_lbl,
+                folder_path,
+            )
+
+    def _on_run_batch_index_clean(self):
+        folder_path = (self._index_clean_input_dir or "").strip()
         if not folder_path:
-            self._set_status("Batch index clean cancelled.", self._batch_index_clean_status)
+            self._set_status("Select an input folder before running Index Clean.", self._batch_index_clean_status)
+            return
+        if not os.path.isdir(folder_path):
+            self._set_status(f"Selected input folder does not exist:\n{folder_path}", self._batch_index_clean_status)
             return
         try:
             out = run_batch_index_clean(folder_path)

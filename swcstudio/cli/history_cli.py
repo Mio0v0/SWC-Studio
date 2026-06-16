@@ -15,6 +15,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from contextlib import contextmanager
 from pathlib import Path
 
 from swcstudio.core.provenance import (
@@ -24,10 +25,14 @@ from swcstudio.core.provenance import (
     ObjectStore,
     RefError,
     TagExistsError,
+    archive_history_dir,
+    archive_path_for,
     create_tag,
     current_swc_path_for,
     delete_branch,
+    ensure_history_materialized,
     history_dir_for,
+    history_archive_exists,
     init_history,
     init_refs,
     iter_events,
@@ -42,6 +47,7 @@ from swcstudio.core.provenance import (
     read_tag,
     render_commit_text,
     render_history_log_text,
+    open_history_for_read,
     write_branch,
     write_head,
 )
@@ -157,7 +163,7 @@ def add_history_subparser(sub: argparse._SubParsersAction) -> None:
                     help="Include hostnames/usernames/paths (default: stripped)")
 
     # init (utility — implicit on first tracked_op, but useful for migration)
-    init_p = hsub.add_parser("init", help="Initialize .history/ and migrate any legacy output")
+    init_p = hsub.add_parser("init", help="Initialize the history archive and migrate any legacy output")
     init_p.add_argument("file", type=Path)
 
 
@@ -189,36 +195,33 @@ def dispatch_history(args: argparse.Namespace) -> int:
 
 
 def _cmd_log(args) -> int:
-    hist = history_dir_for(args.file)
-    _ensure_history_or_die(args.file, hist)
-    out = render_history_log_text(
-        hist,
-        branch=args.branch,
-        actor=args.actor,
-        since=args.since,
-        until=args.until,
-        limit=args.limit,
-    )
+    with _history_store(args.file) as hist:
+        out = render_history_log_text(
+            hist,
+            branch=args.branch,
+            actor=args.actor,
+            since=args.since,
+            until=args.until,
+            limit=args.limit,
+        )
     print(out, end="")
     return 0
 
 
 def _cmd_show(args) -> int:
-    hist = history_dir_for(args.file)
-    _ensure_history_or_die(args.file, hist)
-    if args.fmt == "json":
-        ev = _resolve_event_or_die(hist, args.sha)
-        print(json.dumps(ev.to_json_obj(), indent=2, sort_keys=True))
-    else:
-        print(render_commit_text(hist, args.sha), end="")
+    with _history_store(args.file) as hist:
+        if args.fmt == "json":
+            ev = _resolve_event_or_die(hist, args.sha)
+            print(json.dumps(ev.to_json_obj(), indent=2, sort_keys=True))
+        else:
+            print(render_commit_text(hist, args.sha), end="")
     return 0
 
 
 def _cmd_checkout(args) -> int:
-    hist = history_dir_for(args.file)
-    _ensure_history_or_die(args.file, hist)
-    ev = _resolve_event_or_die(hist, args.sha)
-    bytes_at_sha = _materialize_state_at(hist, ev.id)
+    with _history_store(args.file, write=True) as hist:
+        ev = _resolve_event_or_die(hist, args.sha)
+        bytes_at_sha = _materialize_state_at(hist, ev.id)
     short = ev.id.removeprefix("sha256:")[:12]
     if args.output:
         out_path = Path(args.output)
@@ -232,63 +235,59 @@ def _cmd_checkout(args) -> int:
 
 
 def _cmd_branch(args) -> int:
-    hist = history_dir_for(args.file)
-    _ensure_history_or_die(args.file, hist)
-    if args.name is None:
-        for name in list_branches(hist):
-            tip = read_branch(hist, name)
-            star = "*" if name == read_head(hist) else " "
-            short = (tip or "").removeprefix("sha256:")[:12] or "(empty)"
-            print(f"{star} {name:<20} {short}")
-        return 0
-    # Create
-    if args.from_sha is None:
-        head = read_head(hist)
-        sha = read_branch(hist, head)
-        if sha is None:
-            print(f"error: cannot branch from empty branch {head!r}", file=sys.stderr)
-            return 1
-    else:
-        sha = _resolve_event_or_die(hist, args.from_sha).id
-    write_branch(hist, args.name, sha)
+    with _history_store(args.file, write=args.name is not None) as hist:
+        if args.name is None:
+            for name in list_branches(hist):
+                tip = read_branch(hist, name)
+                star = "*" if name == read_head(hist) else " "
+                short = (tip or "").removeprefix("sha256:")[:12] or "(empty)"
+                print(f"{star} {name:<20} {short}")
+            return 0
+        # Create
+        if args.from_sha is None:
+            head = read_head(hist)
+            sha = read_branch(hist, head)
+            if sha is None:
+                print(f"error: cannot branch from empty branch {head!r}", file=sys.stderr)
+                return 1
+        else:
+            sha = _resolve_event_or_die(hist, args.from_sha).id
+        write_branch(hist, args.name, sha)
     print(f"created branch {args.name!r} at {sha.removeprefix('sha256:')[:12]}")
     return 0
 
 
 def _cmd_switch(args) -> int:
-    hist = history_dir_for(args.file)
-    _ensure_history_or_die(args.file, hist)
-    write_head(hist, args.name)
+    with _history_store(args.file, write=True) as hist:
+        write_head(hist, args.name)
     print(f"switched to branch {args.name!r}")
     return 0
 
 
 def _cmd_tag(args) -> int:
-    hist = history_dir_for(args.file)
-    _ensure_history_or_die(args.file, hist)
-    if args.name is None:
-        for name in list_tags(hist):
-            sha = read_tag(hist, name)
-            print(f"{name:<24} {(sha or '').removeprefix('sha256:')[:12]}")
-        return 0
-    if args.sha is None:
-        head = read_head(hist)
-        sha = read_branch(hist, head)
-        if sha is None:
-            print(f"error: cannot tag empty branch {head!r}", file=sys.stderr)
-            return 1
-    else:
-        sha = _resolve_event_or_die(hist, args.sha).id
-    create_tag(hist, args.name, sha)
+    with _history_store(args.file, write=args.name is not None) as hist:
+        if args.name is None:
+            for name in list_tags(hist):
+                sha = read_tag(hist, name)
+                print(f"{name:<24} {(sha or '').removeprefix('sha256:')[:12]}")
+            return 0
+        if args.sha is None:
+            head = read_head(hist)
+            sha = read_branch(hist, head)
+            if sha is None:
+                print(f"error: cannot tag empty branch {head!r}", file=sys.stderr)
+                return 1
+        else:
+            sha = _resolve_event_or_die(hist, args.sha).id
+        create_tag(hist, args.name, sha)
     print(f"created tag {args.name!r} -> {sha.removeprefix('sha256:')[:12]}")
     return 0
 
 
 def _cmd_checkpoint(args) -> int:
-    hist = history_dir_for(args.file)
-    _ensure_history_or_die(args.file, hist)
-    ev = _resolve_event_or_die(hist, args.sha)
-    body = _materialize_state_at(hist, ev.id)
+    with _history_store(args.file, write=True) as hist:
+        ev = _resolve_event_or_die(hist, args.sha)
+        body = _materialize_state_at(hist, ev.id)
     src = Path(args.file)
     out_dir = current_swc_path_for(src).parent
     label = "".join(c if c.isalnum() or c in "-_" else "_" for c in args.label)
@@ -299,16 +298,15 @@ def _cmd_checkpoint(args) -> int:
 
 
 def _cmd_reproduce(args) -> int:
-    hist = history_dir_for(args.file)
-    _ensure_history_or_die(args.file, hist)
-    ev = _resolve_event_or_die(hist, args.sha)
-    ai_refs = [op.get("ai_run_ref") for op in ev.ops if op.get("ai_run_ref")]
-    if not ai_refs:
-        print(f"error: commit {args.sha} has no AI runs", file=sys.stderr)
-        return 1
+    with _history_store(args.file) as hist:
+        ev = _resolve_event_or_die(hist, args.sha)
+        ai_refs = [op.get("ai_run_ref") for op in ev.ops if op.get("ai_run_ref")]
+        if not ai_refs:
+            print(f"error: commit {args.sha} has no AI runs", file=sys.stderr)
+            return 1
 
-    store = ObjectStore(hist / "objects")
-    blob = json.loads(store.get(ai_refs[0].removeprefix("sha256:")))
+        store = ObjectStore(hist / "objects")
+        blob = json.loads(store.get(ai_refs[0].removeprefix("sha256:")))
 
     yaml_text = _format_reproduce_yaml(ev, blob, args.file)
     out_path = args.output or Path(f"reproduce_{ev.id.removeprefix('sha256:')[:12]}.yaml")
@@ -318,64 +316,61 @@ def _cmd_reproduce(args) -> int:
 
 
 def _cmd_reindex(args) -> int:
-    hist = history_dir_for(args.file)
-    _ensure_history_or_die(args.file, hist)
-    n = rebuild_index(hist)
+    with _history_store(args.file, write=True) as hist:
+        n = rebuild_index(hist)
     print(f"reindexed {n} commits")
     return 0
 
 
 def _cmd_verify(args) -> int:
-    hist = history_dir_for(args.file)
-    _ensure_history_or_die(args.file, hist)
-    store = ObjectStore(hist / "objects")
-    n_ok = n_bad = 0
-    for sha in store.iter_shas():
-        try:
-            store.verify(sha)
-            n_ok += 1
-        except (BlobCorruptError, BlobNotFoundError) as e:
-            n_bad += 1
-            print(f"FAIL {sha}: {e}")
+    with _history_store(args.file) as hist:
+        store = ObjectStore(hist / "objects")
+        n_ok = n_bad = 0
+        for sha in store.iter_shas():
+            try:
+                store.verify(sha)
+                n_ok += 1
+            except (BlobCorruptError, BlobNotFoundError) as e:
+                n_bad += 1
+                print(f"FAIL {sha}: {e}")
     print(f"verified {n_ok} blobs, {n_bad} failures")
     return 1 if n_bad else 0
 
 
 def _cmd_gc(args) -> int:
-    hist = history_dir_for(args.file)
-    _ensure_history_or_die(args.file, hist)
-    store = ObjectStore(hist / "objects")
-    reachable = _reachable_blobs(hist)
-    all_shas = set(store.iter_shas())
-    unreachable = sorted(all_shas - reachable)
-    if not unreachable:
-        print("nothing to remove")
-        return 0
-    if args.dry_run:
+    with _history_store(args.file, write=not args.dry_run) as hist:
+        store = ObjectStore(hist / "objects")
+        reachable = _reachable_blobs(hist)
+        all_shas = set(store.iter_shas())
+        unreachable = sorted(all_shas - reachable)
+        if not unreachable:
+            print("nothing to remove")
+            return 0
+        if args.dry_run:
+            for sha in unreachable:
+                print(f"would remove {sha}")
+            print(f"({len(unreachable)} blobs would be removed)")
+            return 0
         for sha in unreachable:
-            print(f"would remove {sha}")
-        print(f"({len(unreachable)} blobs would be removed)")
-        return 0
-    for sha in unreachable:
-        store.remove(sha)
+            store.remove(sha)
     print(f"removed {len(unreachable)} blobs")
     return 0
 
 
 def _cmd_export_crate(args) -> int:
-    hist = history_dir_for(args.file)
-    _ensure_history_or_die(args.file, hist)
-    # Crate writer lives in slice 13 (provenance.crate). For the v1 CLI
-    # we surface the verb so it's discoverable; the implementation lives
-    # in the dedicated module.
-    from swcstudio.core.provenance.crate import export_crate
-    out = export_crate(args.file, args.output, with_pii=args.with_pii)
+    with _history_store(args.file, write=True):
+        # Crate writer lives in slice 13 (provenance.crate). For the v1 CLI
+        # we surface the verb so it's discoverable; the implementation lives
+        # in the dedicated module.
+        from swcstudio.core.provenance.crate import export_crate
+        out = export_crate(args.file, args.output, with_pii=args.with_pii)
     print(f"wrote crate -> {out}")
     return 0
 
 
 def _cmd_init(args) -> int:
     hist = history_dir_for(args.file)
+    archive = archive_path_for(args.file)
     if needs_migration(args.file):
         outcome = migrate_legacy_output_dir(args.file)
         msg = "initialized .history/"
@@ -383,12 +378,18 @@ def _cmd_init(args) -> int:
             msg += f"; imported state from {outcome.imported_from.name}"
         if outcome.legacy_files_kept:
             msg += f"; kept {outcome.legacy_files_kept} legacy file(s)"
+        if hist.exists():
+            archive_history_dir(hist, args.file, remove_dir=True)
+            msg = msg.replace(".history/", archive.name)
         print(msg)
-    elif hist.exists():
-        print("history already initialized")
+    elif hist.exists() or history_archive_exists(args.file):
+        if hist.exists():
+            archive_history_dir(hist, args.file, remove_dir=True)
+        print(f"history already initialized at {archive}")
     else:
         init_history(args.file)
-        print("initialized .history/")
+        archive_history_dir(hist, args.file, remove_dir=True)
+        print(f"initialized history archive at {archive}")
     return 0
 
 
@@ -417,8 +418,26 @@ _DISPATCH = {
 def _ensure_history_or_die(file_path: Path, hist: Path) -> None:
     if not hist.exists():
         raise FileNotFoundError(
-            f"no .history/ at {hist}; run 'swcstudio history init {file_path}' first"
+            f"no history archive at {archive_path_for(file_path)}; "
+            f"run 'swcstudio history init {file_path}' first"
         )
+
+
+@contextmanager
+def _history_store(file_path: Path, *, write: bool = False):
+    hist = history_dir_for(file_path)
+    if write:
+        ensure_history_materialized(file_path, hist)
+        try:
+            _ensure_history_or_die(file_path, hist)
+            yield hist
+        finally:
+            if hist.exists():
+                archive_history_dir(hist, file_path, remove_dir=True)
+        return
+    with open_history_for_read(file_path, hist) as live_hist:
+        _ensure_history_or_die(file_path, live_hist)
+        yield live_hist
 
 
 def _resolve_event_or_die(hist: Path, sha_or_prefix: str):
@@ -595,10 +614,11 @@ def _undo_diff(state: bytes, diff: dict) -> bytes:
 
 
 def _swc_for_history(hist: Path) -> Path:
-    """Reverse-map a .history/ dir back to the SWC it tracks.
+    """Reverse-map a materialized .history/ dir back to the SWC it tracks.
 
-    .history/ lives at <stem>_swc_studio_output/.history/, so the
-    SWC is at <parent>/<stem>.swc.
+    The transient .history/ work tree lives at
+    <stem>_swc_studio_output/.history/, so the SWC is at
+    <parent>/<stem>.swc.
     """
     out_dir = hist.parent
     if out_dir.name.endswith("_swc_studio_output"):

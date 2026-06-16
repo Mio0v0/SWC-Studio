@@ -7,8 +7,8 @@ It is a quick practical companion to the full [CLI Reference](CLI_REFERENCE.md).
 ## Inspect one file
 
 ```bash
-swcstudio check ./data/single-soma.swc
-swcstudio validate ./data/single-soma.swc
+swcstudio check cell.swc
+swcstudio validate cell.swc
 swcstudio rule-guide
 ```
 
@@ -17,27 +17,27 @@ swcstudio rule-guide
 Validation-oriented edits:
 
 ```bash
-swcstudio auto-fix ./data/single-soma.swc
-swcstudio auto-label ./data/single-soma.swc
-swcstudio radii-clean ./data/single-soma.swc
-swcstudio index-clean ./data/single-soma.swc
+swcstudio auto-fix cell.swc
+swcstudio auto-label cell.swc
+swcstudio radii-clean cell.swc
+swcstudio index-clean cell.swc
 ```
 
 Morphology edits:
 
 ```bash
-swcstudio set-type ./data/single-soma.swc --node-id 14169 --new-type 3
-swcstudio dendrogram-edit ./data/single-soma.swc --node-id 42 --new-type 3
-swcstudio set-radius ./data/single-soma.swc --node-id 42 --radius 0.75
+swcstudio set-type cell.swc --node-id 14169 --new-type 3
+swcstudio dendrogram-edit cell.swc --node-id 42 --new-type 3
+swcstudio set-radius cell.swc --node-id 42 --radius 0.75
 ```
 
 Geometry edits:
 
 ```bash
-swcstudio simplify ./data/single-soma.swc
-swcstudio connect ./data/single-soma.swc --start-id 10 --end-id 22
-swcstudio disconnect ./data/single-soma.swc --start-id 10 --end-id 22
-swcstudio move-subtree ./data/single-soma.swc --root-id 40 --x 100 --y 120 --z 5
+swcstudio simplify cell.swc
+swcstudio connect cell.swc --start-id 10 --end-id 22
+swcstudio disconnect cell.swc --start-id 10 --end-id 22
+swcstudio move-subtree cell.swc --root-id 40 --x 100 --y 120 --z 5
 ```
 
 Current single-file edit behavior:
@@ -55,18 +55,18 @@ Current single-file edit behavior:
 ## Process a folder
 
 ```bash
-swcstudio validate ./data
-swcstudio split ./data
-swcstudio auto-typing ./data
-swcstudio radii-clean ./data
-swcstudio simplify ./data
-swcstudio index-clean ./data
+swcstudio validate ./swc-folder
+swcstudio split ./swc-folder
+swcstudio auto-typing ./swc-folder
+swcstudio radii-clean ./swc-folder
+swcstudio simplify ./swc-folder
+swcstudio index-clean ./swc-folder
 ```
 
 ## Use temporary config overrides
 
 ```bash
-swcstudio validate ./data/single-soma.swc --config-json '{"checks":{"has_soma":{"enabled":true,"severity":"warning","params":{}}}}'
+swcstudio validate cell.swc --config-json '{"checks":{"has_soma":{"enabled":true,"severity":"warning","params":{}}}}'
 ```
 
 ## Related pages

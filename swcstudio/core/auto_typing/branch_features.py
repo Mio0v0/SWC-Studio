@@ -127,7 +127,7 @@ BRANCH_FEATURE_NAMES: list[str] = [
     "path_to_first_bifurcation_norm",    # primary-root to first bifurcation distance / max cell path. Apical: large, basal: small
 ]
 
-# Ablation hooks: paper/run_ablations.py sets SWCAL_NO_PCA=1 and
+# Ablation hooks: external training scripts can set SWCAL_NO_PCA=1 and
 # SWCAL_NO_TRUNK=1 to retrain Stage 2 without those feature blocks.
 # Filter BRANCH_FEATURE_NAMES at module load so training and inference
 # use the same reduced dimensionality.

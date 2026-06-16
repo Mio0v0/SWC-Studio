@@ -45,7 +45,7 @@ def _options_from_config(cfg: dict[str, Any]) -> BatchOptions:
         cell_type=(cfg.get("cell_type") or "unknown"),
         flag_enabled=bool(cfg.get("flag_enabled", True)),
         flag_strictness=float(cfg.get("flag_strictness", 0.5)),
-        flag_feature_mode=str(cfg.get("flag_feature_mode") or "compact"),
+        flag_feature_mode="compact",
     )
 
 

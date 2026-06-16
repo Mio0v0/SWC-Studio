@@ -64,7 +64,7 @@ Most feature commands accept `--config-json` for one-run config overrides.
 Example:
 
 ```bash
-swcstudio radii-clean ./data/single-soma.swc --config-json '{"rules":{"max_passes":8}}'
+swcstudio radii-clean cell.swc --config-json '{"rules":{"max_passes":8}}'
 ```
 
 This must be a JSON object and is merged into the feature config for that run.
@@ -108,7 +108,7 @@ No extra `--write` flag is needed.
 Example:
 
 ```bash
-swcstudio check ./data/single-soma.swc
+swcstudio check cell.swc
 ```
 
 ## Direct Commands
@@ -126,8 +126,8 @@ For commands like `validate`, `radii-clean`, `simplify`, and `index-clean`:
 Examples:
 
 ```bash
-swcstudio validate ./data
-swcstudio validate ./data/single-soma.swc
+swcstudio validate ./swc-folder
+swcstudio validate cell.swc
 swcstudio validate rule-guide
 ```
 
@@ -138,7 +138,7 @@ swcstudio validate rule-guide
 Example:
 
 ```bash
-swcstudio split ./data
+swcstudio split ./swc-folder
 ```
 
 ### `swcstudio auto-typing <folder>`
@@ -152,11 +152,7 @@ swcstudio split ./data
   when the user already knows the cell type.
 - Flag scoring is enabled by default. `--flag-strictness` controls how
   strict the bad-label flagger is; higher values are stricter and may
-  flag more cells.
-  Use `--flag-feature-mode baseline` to add optional
-  baseline-disagreement features, `--flag-feature-mode auto` to use those
-  features only when all required baseline predictor artifacts are
-  reachable, or `--no-flag` to skip flag scoring.
+  flag more cells. Use `--no-flag` to skip flag scoring.
 - Optional `--model-dir` points at a v12-compatible model bundle. The
   core required files are Stage 1, Stage 2, Stage 2b GNN, Branch3 rescue,
   and QC gate; flag model files enable learned flag scoring.
@@ -164,11 +160,10 @@ swcstudio split ./data
 Examples:
 
 ```bash
-swcstudio auto-typing ./data
-swcstudio auto-typing ./data --model-dir ~/swc-models
-swcstudio auto-typing ./data --cell-type pyramidal --flag-strictness 0.8
-swcstudio auto-typing ./data --flag-feature-mode baseline
-swcstudio auto-typing ./data --no-flag
+swcstudio auto-typing ./swc-folder
+swcstudio auto-typing ./swc-folder --model-dir ~/swc-models
+swcstudio auto-typing ./swc-folder --cell-type pyramidal --flag-strictness 0.8
+swcstudio auto-typing ./swc-folder --no-flag
 ```
 
 Run `swcstudio models status` first if you want to confirm the engine
@@ -183,8 +178,8 @@ can resolve the model files on your machine.
 Examples:
 
 ```bash
-swcstudio radii-clean ./data/single-soma.swc
-swcstudio radii-clean ./data
+swcstudio radii-clean cell.swc
+swcstudio radii-clean ./swc-folder
 ```
 
 ### `swcstudio simplify <target>`
@@ -196,8 +191,8 @@ swcstudio radii-clean ./data
 Examples:
 
 ```bash
-swcstudio simplify ./data/single-soma.swc
-swcstudio simplify ./data
+swcstudio simplify cell.swc
+swcstudio simplify ./swc-folder
 ```
 
 ### `swcstudio index-clean <target>`
@@ -209,8 +204,8 @@ swcstudio simplify ./data
 Examples:
 
 ```bash
-swcstudio index-clean ./data/single-soma.swc
-swcstudio index-clean ./data
+swcstudio index-clean cell.swc
+swcstudio index-clean ./swc-folder
 ```
 
 ### `swcstudio rule-guide`
@@ -226,7 +221,7 @@ swcstudio index-clean ./data
 Example:
 
 ```bash
-swcstudio auto-fix ./data/single-soma.swc
+swcstudio auto-fix cell.swc
 ```
 
 ### `swcstudio auto-label <file>`
@@ -241,21 +236,16 @@ swcstudio auto-fix ./data/single-soma.swc
   when the user already knows the cell type.
 - Flag scoring is enabled by default. `--flag-strictness` controls how
   strict the bad-label flagger is; higher values are stricter and may
-  flag more cells.
-  Use `--flag-feature-mode baseline` to add optional
-  baseline-disagreement features, `--flag-feature-mode auto` to use those
-  features only when all required baseline predictor artifacts are
-  reachable, or `--no-flag` to skip flag scoring.
+  flag more cells. Use `--no-flag` to skip flag scoring.
 - Optional `--model-dir` points at a v12-compatible model bundle.
 
 Examples:
 
 ```bash
-swcstudio auto-label ./data/single-soma.swc
-swcstudio auto-label ./data/single-soma.swc --model-dir ~/my-models
-swcstudio auto-label ./data/single-soma.swc --cell-type interneuron --flag-strictness 0.3
-swcstudio auto-label ./data/single-soma.swc --flag-feature-mode auto
-swcstudio auto-label ./data/single-soma.swc --no-flag
+swcstudio auto-label cell.swc
+swcstudio auto-label cell.swc --model-dir ~/my-models
+swcstudio auto-label cell.swc --cell-type interneuron --flag-strictness 0.3
+swcstudio auto-label cell.swc --no-flag
 ```
 
 To verify the engine can find its model files:
@@ -277,7 +267,7 @@ Flags:
 Example:
 
 ```bash
-swcstudio dendrogram-edit ./data/single-soma.swc --node-id 42 --new-type 3
+swcstudio dendrogram-edit cell.swc --node-id 42 --new-type 3
 ```
 
 ### `swcstudio set-type <file>`
@@ -292,7 +282,7 @@ Flags:
 Example:
 
 ```bash
-swcstudio set-type ./data/single-soma.swc --node-id 14169 --new-type 3
+swcstudio set-type cell.swc --node-id 14169 --new-type 3
 ```
 
 ### `swcstudio set-radius <file>`
@@ -307,7 +297,7 @@ Flags:
 Example:
 
 ```bash
-swcstudio set-radius ./data/single-soma.swc --node-id 42 --radius 0.75
+swcstudio set-radius cell.swc --node-id 42 --radius 0.75
 ```
 
 ## Geometry Commands
@@ -317,7 +307,7 @@ swcstudio set-radius ./data/single-soma.swc --node-id 42 --radius 0.75
 Move one node to an absolute XYZ position.
 
 ```bash
-swcstudio move-node ./data/single-soma.swc --node-id 42 --x 100 --y 120 --z 5
+swcstudio move-node cell.swc --node-id 42 --x 100 --y 120 --z 5
 ```
 
 ### `move-subtree`
@@ -325,7 +315,7 @@ swcstudio move-node ./data/single-soma.swc --node-id 42 --x 100 --y 120 --z 5
 Move a subtree by setting its root node to an absolute XYZ position.
 
 ```bash
-swcstudio move-subtree ./data/single-soma.swc --root-id 40 --x 100 --y 120 --z 5
+swcstudio move-subtree cell.swc --root-id 40 --x 100 --y 120 --z 5
 ```
 
 ### `connect`
@@ -333,7 +323,7 @@ swcstudio move-subtree ./data/single-soma.swc --root-id 40 --x 100 --y 120 --z 5
 Set the end node parent to the start node.
 
 ```bash
-swcstudio connect ./data/single-soma.swc --start-id 10 --end-id 22
+swcstudio connect cell.swc --start-id 10 --end-id 22
 ```
 
 ### `disconnect`
@@ -341,7 +331,7 @@ swcstudio connect ./data/single-soma.swc --start-id 10 --end-id 22
 Disconnect all parent-child edges along the path between two nodes.
 
 ```bash
-swcstudio disconnect ./data/single-soma.swc --start-id 10 --end-id 22
+swcstudio disconnect cell.swc --start-id 10 --end-id 22
 ```
 
 ### `delete-node`
@@ -349,8 +339,8 @@ swcstudio disconnect ./data/single-soma.swc --start-id 10 --end-id 22
 Delete one node. Use `--reconnect-children` when the node has children and you want them reattached to the deleted node’s parent.
 
 ```bash
-swcstudio delete-node ./data/single-soma.swc --node-id 1180
-swcstudio delete-node ./data/single-soma.swc --node-id 13 --reconnect-children
+swcstudio delete-node cell.swc --node-id 1180
+swcstudio delete-node cell.swc --node-id 13 --reconnect-children
 ```
 
 ### `delete-subtree`
@@ -358,7 +348,7 @@ swcstudio delete-node ./data/single-soma.swc --node-id 13 --reconnect-children
 Delete a full subtree rooted at one node.
 
 ```bash
-swcstudio delete-subtree ./data/single-soma.swc --root-id 40
+swcstudio delete-subtree cell.swc --root-id 40
 ```
 
 ### `insert`
@@ -366,7 +356,7 @@ swcstudio delete-subtree ./data/single-soma.swc --root-id 40
 Insert one node after `start-id` and optionally before `end-id`.
 
 ```bash
-swcstudio insert ./data/single-soma.swc --start-id 10 --end-id 22 --x 100 --y 120 --z 5
+swcstudio insert cell.swc --start-id 10 --end-id 22 --x 100 --y 120 --z 5
 ```
 
 ## Train Custom Auto-Typing Models
@@ -438,6 +428,21 @@ models the default, dataset layout, troubleshooting), see the
 
 ## Models
 
+### `swcstudio gpu-status`
+
+Check whether the active Python environment can run SWC-Studio with CUDA.
+This is mainly useful for pip/source installs; the one-click executable is
+intended to be the portable CPU build.
+
+```bash
+swcstudio gpu-status
+swcstudio gpu-status --json
+```
+
+The report shows PyTorch, PyTorch CUDA build, CUDA visibility,
+PyTorch Geometric, `nvidia-smi`, and recommended next steps. The GUI
+exposes the same check under Help -> GPU Readiness.
+
 ### `swcstudio models status`
 
 Print which model files the auto-typing engine can find and where it
@@ -450,8 +455,7 @@ swcstudio models status --model-dir ~/my-models
 ```
 
 Output is a search-path diagnostic plus a JSON summary of which model
-files were found, whether torch is available for the Stage 2b GNN, and
-whether optional baseline-disagreement predictor artifacts are reachable.
+files were found and whether torch is available for the Stage 2b GNN.
 
 ### Current Auto-Label Model Bundle
 
@@ -464,21 +468,11 @@ The current production auto-label path is the v12 QC-label-flag pipeline:
 - QC gate: `qc_gate.pkl`
 - Compact learned flags: `flag_model_pyramidal.joblib`,
   `flag_model_interneuron.joblib`, `flag_model_all.joblib`
-- Baseline-disagreement learned flags:
-  `flag_model_pyramidal_baseline.joblib`,
-  `flag_model_all_baseline.joblib`
 
-`--flag-feature-mode compact` uses the compact flagger and does not need
-external baseline predictor files. `--flag-feature-mode baseline` builds
-multi-baseline disagreement features from NeuroM-RF, L-Measure-RF,
-Sholl-RF, and Sholl-MLP predictor artifacts, then scores the
-baseline-disagreement flag model. `--flag-feature-mode auto` uses the
-baseline-disagreement flagger when all four baseline predictors are
-reachable and otherwise falls back to compact.
-
-The deployed baseline-disagreement flagger uses `baseline_oof_*`
-features. It does not require the older research-only `xmodel_*`
-multi-v12 ensemble features.
+`--flag-feature-mode compact` and `--flag-feature-mode simple` both use
+the bundled compact flagger. Older `baseline`, `auto`, and `complex`
+config values are treated as compact for backward compatibility; the
+slower research-only disagreement flag mode is not deployed in SWC-Studio.
 
 ## Plugins
 

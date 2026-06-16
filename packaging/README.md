@@ -19,6 +19,7 @@ For Windows packaging:
 
 - Windows host
 - Python environment with GUI + build dependencies installed
+- CPU-only PyTorch for the release executable build
 
 ## Build
 
@@ -42,6 +43,18 @@ Expected output:
 
 - `dist/SWC-Studio\`
 - `dist/SWC-Studio-windows.zip`
+
+The Windows build script fails fast if the active environment contains a
+CUDA PyTorch build. That prevents accidentally bundling a very large
+CUDA/PyTorch stack into the default one-click executable. If a maintainer
+intentionally wants an experimental GPU bundle, run:
+
+```powershell
+.\packaging\build_windows.ps1 -AllowCudaTorchBundle
+```
+
+The recommended public release remains the CPU executable. GPU users
+should use pip/source installation and follow `docs/GPU_INSTALL.md`.
 
 ## Git Policy
 

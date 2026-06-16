@@ -9,7 +9,8 @@ from pathlib import Path
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-SINGLE_SOMA = REPO_ROOT / "data" / "single-soma.swc"
+FIXTURE_DIR = REPO_ROOT / "tests" / "fixtures"
+SINGLE_SOMA = FIXTURE_DIR / "single-soma.swc"
 
 
 class GUISmokeTests(unittest.TestCase):

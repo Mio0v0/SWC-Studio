@@ -33,7 +33,8 @@ Use this path if you only need the desktop application and don't want to deal wi
    - **Windows** — extract anywhere, run the `.exe` inside.
 
 The auto-typing models are bundled inside the app, so the first auto-label
-call works without any download.
+call works without any download. Release executables are intended to be
+portable CPU builds. Use a pip or source install for GPU acceleration.
 
 ## Option 2 — `pip install` from PyPI
 
@@ -143,6 +144,7 @@ for the architecture details.
 ```bash
 swcstudio --help
 swcstudio models status
+swcstudio gpu-status
 swcstudio-gui --help
 ```
 
@@ -160,22 +162,27 @@ bundled v12 model files are reachable. You should see the core files
 `gnn_apical_basal.pt`, `gnn_branch3_rescue.pt`, and `qc_gate.pkl`
 listed as `[FOUND]`, plus flag model paths when flag scoring is bundled.
 
+`swcstudio gpu-status` is optional. It explains whether the active pip or
+source environment can use CUDA, and what is missing when it cannot. The
+GUI exposes the same check under Help -> GPU Readiness. For setup
+details, see [GPU Setup](GPU_INSTALL.md).
+
 ## First CLI checks
 
 Start with a read-only inspection command:
 
 ```bash
-swcstudio check ./data/single-soma.swc
-swcstudio validate ./data/single-soma.swc
+swcstudio check cell.swc
+swcstudio validate cell.swc
 ```
 
 Then try an edit command:
 
 ```bash
-swcstudio auto-label ./data/single-soma.swc
-swcstudio set-type ./data/single-soma.swc --node-id 14169 --new-type 3
-swcstudio simplify ./data/single-soma.swc
-swcstudio connect ./data/single-soma.swc --start-id 10 --end-id 22
+swcstudio auto-label cell.swc
+swcstudio set-type cell.swc --node-id 14169 --new-type 3
+swcstudio simplify cell.swc
+swcstudio connect cell.swc --start-id 10 --end-id 22
 ```
 
 Single-file edit commands write both the updated SWC and the matching

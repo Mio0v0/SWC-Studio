@@ -2,7 +2,7 @@
 """Train the Stage 1 cell-type classifier.
 
 Usage:
-    python -m hybrid.train_stage1 --data-dir data/benchmark_pyramidal_interneuron_v1_qc_diag_pruned
+    python -m swcstudio.core.auto_typing.train_stage1 --data-dir path/to/labeled-dataset
 
 Expected directory structure under --data-dir:
     pyramidal/
@@ -18,7 +18,8 @@ The script:
 1. Extracts global features from every SWC file
 2. Trains a two-class ensemble for pyramidal vs interneuron
 3. Reports cross-validation accuracy
-4. Saves the model to hybrid/models/cell_type_classifier.pkl
+4. Saves the model to the requested output path, or to the module default
+   `cell_type_classifier.pkl` path when no output override is supplied.
 """
 from __future__ import annotations
 
@@ -216,7 +217,6 @@ def main() -> int:
     if not args.data_dir.exists():
         print(f"Error: data directory not found: {args.data_dir}")
         print("Create it with cell-type subfolders (pyramidal/, interneuron/)")
-        print("Or run: python -m hybrid.download_allen_data")
         return 1
 
     train(args.data_dir, args.output, args.cv_folds)

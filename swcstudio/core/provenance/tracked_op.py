@@ -45,6 +45,13 @@ from pathlib import Path
 from typing import Any, Iterator
 
 import swcstudio
+from swcstudio.core.provenance.archive import (
+    archive_history_dir,
+    archive_name_for,
+    ensure_history_manifest,
+    ensure_history_materialized,
+    history_repo_info,
+)
 from swcstudio.core.provenance.ai_run import (
     AIRun,
     AIRunStatus,
@@ -118,7 +125,12 @@ def _output_dir_for(swc_path: str | os.PathLike[str]) -> Path:
 
 
 def history_dir_for(swc_path: str | os.PathLike[str]) -> Path:
-    """Return the ``.history/`` directory for ``swc_path``."""
+    """Return the transient working ``.history/`` directory for ``swc_path``.
+
+    The durable user-visible store is ``<stem>_history.swcstudio``.
+    Writers materialize this directory while committing, then archive it
+    and remove the working tree.
+    """
     return _output_dir_for(swc_path) / ".history"
 
 
@@ -141,11 +153,13 @@ def init_history(
     SQLite index has its schema. Idempotent.
     """
     hist = history_dir_for(swc_path)
+    ensure_history_materialized(swc_path, hist)
     hist.mkdir(parents=True, exist_ok=True)
     version_file = hist / "version"
     if not version_file.exists():
         version_file.write_text(f"{FORMAT_VERSION}\n", encoding="utf-8")
     init_refs(hist, branch=branch)
+    ensure_history_manifest(hist, swc_path)
     # Touch the index so subsequent reads/writes don't have to test for it.
     conn = open_index(hist)
     try:
@@ -265,6 +279,7 @@ class _TrackedContext:
                 self._commit()
         finally:
             self._lock.release()
+            archive_history_dir(self.hist, self.swc_path, remove_dir=True)
 
     # ------------------------------------------------------------------
     # caller-facing API used inside the with-block
@@ -423,11 +438,14 @@ class _TrackedContext:
         # SQLite (we just inserted the new commit, so it's there).
         ops_count = self._count_branch_commits(branch)
 
+        repo = history_repo_info(self.hist, self.swc_path)
         root_sha_short, file_name, created = self._root_line_inputs()
         root_line = format_root_line(
             root_sha=root_sha_short,
             file_name=file_name,
             created_utc=created,
+            repo=archive_name_for(self.swc_path),
+            repo_id=str(repo.get("repo_id", "")) or None,
         )
         tip_line = format_tip_line(
             tip=commit_sha,
@@ -436,6 +454,8 @@ class _TrackedContext:
             tool=f"{_tool_identity()['name']}@{_tool_identity()['version']}",
             actor=self._actor,
             updated_utc=self._started_at,
+            sidecar=archive_name_for(self.swc_path),
+            repo_id=str(repo.get("repo_id", "")) or None,
         )
 
         # Use the *output* bytes the caller produced (preserves their

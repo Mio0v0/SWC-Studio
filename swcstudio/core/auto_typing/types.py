@@ -48,6 +48,7 @@ class BatchResult:
     per_file: list[str]
     log_path: str | None
     files_flagged: int = 0
+    files_qc_failed: int = 0
 
 
 @dataclass

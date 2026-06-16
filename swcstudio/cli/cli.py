@@ -487,6 +487,15 @@ def build_parser() -> argparse.ArgumentParser:
     check_cmd = check.add_parser("check", help="Print the GUI-style issue list for one SWC file")
     check_cmd.add_argument("file", type=Path)
     _feature_json_arg(check_cmd)
+    gpu_status = check.add_parser(
+        "gpu-status",
+        help="Check whether the active Python environment can use CUDA for SWC-Studio.",
+    )
+    gpu_status.add_argument(
+        "--json",
+        action="store_true",
+        help="Print the structured readiness report as JSON.",
+    )
     sub = check
 
     # ------------------------------ batch
@@ -536,12 +545,9 @@ def build_parser() -> argparse.ArgumentParser:
     )
     batch_auto.add_argument(
         "--flag-feature-mode",
-        choices=("compact", "baseline", "auto"),
+        choices=("compact", "simple"),
         default="compact",
-        help=(
-            "Flag feature source. compact uses the bundled fast flagger; "
-            "baseline adds optional baseline-disagreement predictors."
-        ),
+        help="Flag feature source. Only the compact bundled flagger is supported.",
     )
     batch_auto.add_argument(
         "--no-flag",
@@ -605,12 +611,9 @@ def build_parser() -> argparse.ArgumentParser:
     )
     val_auto_label.add_argument(
         "--flag-feature-mode",
-        choices=("compact", "baseline", "auto"),
+        choices=("compact", "simple"),
         default="compact",
-        help=(
-            "Flag feature source. compact uses the bundled fast flagger; "
-            "baseline adds optional baseline-disagreement predictors."
-        ),
+        help="Flag feature source. Only the compact bundled flagger is supported.",
     )
     val_auto_label.add_argument(
         "--no-flag",
@@ -793,6 +796,7 @@ def _normalize_cli_argv(argv: list[str]) -> list[str]:
         "morphology",
         "geometry",
         "plugins",
+        "gpu-status",
     }:
         return argv
 
@@ -890,6 +894,19 @@ def main(argv: list[str] | None = None) -> int:
             _print_issue_check_results(file_path, issues)
             return 0
 
+        if args.tool == "gpu-status":
+            from swcstudio.core.gpu_status import (  # noqa: PLC0415
+                check_gpu_readiness,
+                format_gpu_readiness,
+            )
+
+            st = check_gpu_readiness()
+            if bool(getattr(args, "json", False)):
+                _print_json(st.to_dict())
+            else:
+                print(format_gpu_readiness(st))
+            return 0
+
         # -------- batch
         if args.tool == "batch" and args.feature == "validate":
             cfg_overrides = _parse_config_overrides(args.config_json)
@@ -911,7 +928,6 @@ def main(argv: list[str] | None = None) -> int:
             return 0
 
         if args.tool == "batch" and args.feature == "split":
-            # Converted to provenance layer (rewire checklist item 1.2 #16).
             # Split is structurally unlike the other batch verbs: each
             # input SWC produces N output SWCs (one per soma root).
             #
@@ -1058,7 +1074,6 @@ def main(argv: list[str] | None = None) -> int:
             return 0
 
         if args.tool == "batch" and args.feature == "radii-clean":
-            # Converted to provenance layer (rewire checklist item 1.2 #18).
             # The 'target' arg can be a file or a folder. File mode delegates
             # to the already-converted single-file path. Folder mode iterates
             # via _tracked_batch.
@@ -1128,7 +1143,6 @@ def main(argv: list[str] | None = None) -> int:
             return 0
 
         if args.tool == "batch" and args.feature == "simplify":
-            # Converted to provenance layer (rewire checklist item 1.2 #19).
             from swcstudio.core.provenance import OpKind
             from swcstudio.core.config import merge_config as _merge_simp
             from swcstudio.tools.morphology_editing.features.simplification import (
@@ -1164,8 +1178,7 @@ def main(argv: list[str] | None = None) -> int:
             return 0
 
         if args.tool == "batch" and args.feature == "index-clean":
-            # Converted to provenance layer (rewire checklist item 1.2 #20).
-            # NEW: each input SWC gets one commit on its own .history/;
+            # Each input SWC gets one commit on its own .history/;
             # no separate batch output folder is created. Outputs land at
             # <each>_swc_studio_output/<stem>_current.swc.
             from swcstudio.core.provenance import OpKind
@@ -1218,10 +1231,8 @@ def main(argv: list[str] | None = None) -> int:
             return 0
 
         if args.tool == "validation" and args.feature == "radii-clean":
-            # Converted to provenance layer (rewire checklist item 1.1 #6)
-            # for FILE mode. Folder/batch mode (checklist item 1.2 #18) is
-            # untouched here — it falls through to validation_clean_radii_path
-            # below.
+            # File mode records one provenance commit. Folder mode falls
+            # through to the shared validation path below.
             target = Path(args.target)
             if target.exists() and target.is_file():
                 from swcstudio.core.provenance import (
@@ -1285,7 +1296,6 @@ def main(argv: list[str] | None = None) -> int:
             return 0
 
         if args.tool == "validation" and args.feature == "auto-fix":
-            # Converted to provenance layer (rewire checklist item 1.1 #4).
             # Auto-fix carries extra metadata beyond the diff (which rules
             # fired, what issues were found). We:
             #   * print the validation results to stdout (user-visible),
@@ -1421,7 +1431,6 @@ def main(argv: list[str] | None = None) -> int:
             return 0
 
         if args.tool == "validation" and args.feature == "index-clean":
-            # Converted to provenance layer (rewire checklist item 1.1 #7).
             from swcstudio.core.provenance import (
                 OpKind,
                 current_swc_path_for,
@@ -1478,7 +1487,6 @@ def main(argv: list[str] | None = None) -> int:
 
         # -------- morphology
         if args.tool == "morphology" and args.feature == "dendrogram-edit":
-            # Converted to provenance layer (rewire checklist item 1.1 #3).
             from swcstudio.core.provenance import (
                 OpKind,
                 current_swc_path_for,
@@ -1530,8 +1538,7 @@ def main(argv: list[str] | None = None) -> int:
             return 0
 
         if args.tool == "morphology" and args.feature == "set-radius":
-            # Converted to provenance layer (rewire checklist item 1.1 #2).
-            # Same pattern as morphology set-type — see commit 990ee714.
+            # Same tracked-edit pattern as morphology set-type.
             from swcstudio.core.provenance import (
                 OpKind,
                 current_swc_path_for,
@@ -1578,8 +1585,7 @@ def main(argv: list[str] | None = None) -> int:
             return 0
 
         if args.tool == "morphology" and args.feature == "set-type":
-            # Converted to provenance layer per PROVENANCE_CONVERSION_GUIDE.md
-            # (rewire checklist item 1.1 #1). The mutation now flows through
+            # The mutation flows through
             # tracked_op so the edit is recorded as a commit in .history/;
             # the old timestamped output file + text report path is replaced
             # by a refreshed <stem>_current.swc with @PROV header.
@@ -1636,7 +1642,6 @@ def main(argv: list[str] | None = None) -> int:
         # -------- geometry
         if args.tool == "geometry" and args.feature:
             if args.feature == "simplify":
-                # Converted to provenance layer (rewire checklist item 1.1 #8).
                 from swcstudio.core.provenance import (
                     OpKind,
                     current_swc_path_for,
@@ -1693,7 +1698,6 @@ def main(argv: list[str] | None = None) -> int:
             # the source file. The old pre-parse of `df` is unnecessary now.
 
             if args.feature == "move-node":
-                # Converted to provenance layer (rewire checklist item 1.1 #9).
                 from swcstudio.core.provenance import OpKind, current_swc_path_for, tracked_op
                 with tracked_op(
                     file_path,

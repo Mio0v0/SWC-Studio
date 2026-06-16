@@ -23,7 +23,7 @@
          parent was a removed soma is rewired to the anchor's id.
 
 The combined ``normalize_swc`` wrapper applies (1) then (2). ``parse_swc``
-in hybrid.features uses this wrapper by default.
+in `swcstudio.core.auto_typing.features` uses this wrapper by default.
 """
 from __future__ import annotations
 
@@ -314,7 +314,8 @@ def normalize_swc(
     2. Consolidate connected multi-point soma components into a single
        anchor soma node per component.
 
-    Used by ``hybrid.features.parse_swc`` when ``normalize_types=True``.
+    Used by ``swcstudio.core.auto_typing.features.parse_swc`` when
+    ``normalize_types=True``.
     Returns ``(nodes, info)`` where info combines the diagnostics from
     both passes.
     """

@@ -25,7 +25,9 @@ _CACHE: dict[int, dict[str, str]] | None = None
 
 
 def custom_type_registry_path() -> Path:
-    override = os.environ.get("SWCTOOLS_CUSTOM_TYPES_PATH", "").strip()
+    override = os.environ.get("SWCSTUDIO_CUSTOM_TYPES_PATH", "").strip()
+    if not override:
+        override = os.environ.get("SWCTOOLS_CUSTOM_TYPES_PATH", "").strip()
     if override:
         return Path(override).expanduser()
     return Path.home() / ".swc_studio" / "custom_types.json"

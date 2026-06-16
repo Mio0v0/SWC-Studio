@@ -2,7 +2,7 @@
 
 The auto-typing engine itself is the v12 QC-label-flag pipeline. The
 runtime knobs end users edit are model directory overrides, optional
-cell-type override, and flag scoring strictness. They live in the same
+cell-type override, and compact flag scoring strictness. They live in the same
 JSON config the Batch Processing tool already persists, so the GUI / CLI
 continue to read and write a single file.
 """

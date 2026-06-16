@@ -1,6 +1,7 @@
 """Main window layout for the issue-driven SWC Studio workspace."""
 
 import os
+import sys
 import tempfile
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -824,8 +825,7 @@ class SWCMainWindow(QMainWindow):
         )
         window_menu.addAction(show_auto_guide_action)
 
-        # History (provenance) — see PROVENANCE_SPEC.md and
-        # PROVENANCE_CONVERSION_GUIDE.md for the full surface.
+        # History (provenance) - see PROVENANCE_SPEC.md for the full surface.
         history_menu = menu.addMenu("History")
         open_history_action = QAction("Open History Browser…", self)
         open_history_action.triggered.connect(self._on_open_history_browser)
@@ -843,6 +843,9 @@ class SWCMainWindow(QMainWindow):
         short_action = QAction("Shortcuts", self)
         short_action.triggered.connect(self._show_shortcuts)
         help_menu.addAction(short_action)
+        gpu_action = QAction("GPU Readiness...", self)
+        gpu_action.triggered.connect(self._show_gpu_readiness_dialog)
+        help_menu.addAction(gpu_action)
         help_menu.addSeparator()
         update_action = QAction("Check for Updates...", self)
         update_action.triggered.connect(self._check_for_updates)
@@ -1512,9 +1515,8 @@ class SWCMainWindow(QMainWindow):
     ) -> object | None:
         """Record a provenance commit for a single GUI mutation.
 
-        Stage-1 design (see docs/PROVENANCE_REWIRE_CHECKLIST.md, GUI
-        section): each Apply-button click is its own commit, mirroring
-        the in-memory undo stack one-for-one. Future stage-2 work may
+        Each Apply-button click is its own commit, mirroring
+        the in-memory undo stack one-for-one. Future work may
         switch this to tracked_session-per-document with sub-ops per
         click; the per-handler call sites won't need to change.
 
@@ -1967,7 +1969,6 @@ class SWCMainWindow(QMainWindow):
         )
 
     def _on_simplification_process_requested(self, config_overrides: dict):
-        # Converted to provenance layer (rewire checklist GUI item G16).
         source_doc = self._active_source_document()
         if source_doc is None or source_doc.df is None or source_doc.df.empty:
             self._append_log("Simplification: no active SWC document.", "WARN")
@@ -2152,7 +2153,7 @@ class SWCMainWindow(QMainWindow):
         # Write the active document to a temp SWC the worker will read.
         # The temp file is cleaned up in the worker-finished handler so
         # it survives across thread context switches.
-        tmp_fd, tmp_in = tempfile.mkstemp(prefix="swctools_auto_label_", suffix=".swc")
+        tmp_fd, tmp_in = tempfile.mkstemp(prefix="swcstudio_auto_label_", suffix=".swc")
         os.close(tmp_fd)
         tmp_path = Path(tmp_in)
         try:
@@ -2384,7 +2385,6 @@ class SWCMainWindow(QMainWindow):
         return write_text_report(log_path, format_auto_typing_report_text(payload))
 
     def _on_manual_radii_apply_requested(self, node_id: int, new_radius: float):
-        # Converted to provenance layer (rewire checklist GUI item G2).
         doc = self._active_source_document()
         if doc is None or doc.df is None or doc.df.empty:
             self._append_log("Manual Radii: no active SWC document.", "WARN")
@@ -2434,7 +2434,6 @@ class SWCMainWindow(QMainWindow):
         self._rerun_active_validation()
 
     def _on_validation_radii_apply_requested(self, result: object):
-        # Converted to provenance layer (rewire checklist GUI item G3).
         doc = self._active_source_document()
         if doc is None or doc.df is None or doc.df.empty:
             self._append_log("Auto Radii Editing: no active SWC document.", "WARN")
@@ -2548,7 +2547,6 @@ class SWCMainWindow(QMainWindow):
         self._rerun_active_validation()
 
     def _on_geometry_move_selection_requested(self, node_ids: object, anchor_id: int, x: float, y: float, z: float):
-        # Converted to provenance layer (rewire checklist GUI item G4).
         doc = self._active_source_document()
         if doc is None or doc.df is None or doc.df.empty:
             self._append_log("Geometry Editing: no active SWC document.", "WARN")
@@ -2587,7 +2585,6 @@ class SWCMainWindow(QMainWindow):
         self._append_log(f"Geometry Editing: moved {len(selected_node_ids)} selected node(s).", "INFO")
 
     def _on_geometry_reconnect_requested(self, source_id: int, target_id: int):
-        # Converted to provenance layer (rewire checklist GUI item G5).
         doc = self._active_source_document()
         if doc is None or doc.df is None or doc.df.empty:
             self._append_log("Geometry Editing: no active SWC document.", "WARN")
@@ -3275,7 +3272,6 @@ class SWCMainWindow(QMainWindow):
 
     # --------------------------------------------------- Sync from editor
     def _on_editor_df_changed(self, editor: EditorTab, df: pd.DataFrame):
-        # Converted to provenance layer (rewire checklist bonus item G20).
         # This fires for any direct in-table edit — labeling a node by
         # changing its type cell, editing a radius cell, dragging a node
         # in the 3D view, etc. The structured diff inside the commit
@@ -3716,7 +3712,6 @@ class SWCMainWindow(QMainWindow):
         self._on_issue_selected(issues[0])
 
     def _on_validation_index_clean_requested(self, new_df: object, id_map: object):
-        # Converted to provenance layer (rewire checklist GUI item G10).
         doc = self._active_source_document()
         if doc is None or doc.df is None or doc.df.empty:
             self._append_log("Validation: no active SWC document for Index Clean.", "WARN")
@@ -4654,7 +4649,6 @@ class SWCMainWindow(QMainWindow):
                 )
             if not changed:
                 event_details.append("No connected multi-node soma groups required consolidation.")
-            # Provenance: rewire checklist GUI item G19 (soma consolidate).
             from swcstudio.core.provenance import OpKind  # noqa: PLC0415
             self._record_tracked_commit(
                 doc, new_df, kind=OpKind.PLUGIN_OP,
@@ -4923,14 +4917,36 @@ class SWCMainWindow(QMainWindow):
         self._append_log(text, "HELP")
 
     def _show_about_dialog(self):
+        try:
+            from swcstudio.core import updater
+            versions = updater.current_versions()
+        except Exception:  # noqa: BLE001
+            versions = {"app": "unknown", "models": "unknown"}
+        install_flavor = "bundled executable" if getattr(sys, "frozen", False) else "pip/source environment"
         text = (
             "SWC-Studio is an issue-driven workspace for inspecting, repairing, "
             "and exporting neuron morphology files in SWC format.\n\n"
             "It provides a shared desktop GUI, CLI, and Python backend so the "
-            "same validation and editing logic can be used interactively or in scripts."
+            "same validation and editing logic can be used interactively or in scripts.\n\n"
+            f"App code version: {versions.get('app', 'unknown')}\n"
+            f"Models version: {versions.get('models', 'unknown')}\n"
+            f"Install flavor: {install_flavor}\n"
+            "Use Help -> GPU Readiness to check whether this environment can run GPU mode."
         )
         self._show_help_text_dialog("About SWC-Studio", text)
         self._append_log("Opened About dialog.", "INFO")
+
+    def _show_gpu_readiness_dialog(self):
+        try:
+            from swcstudio.core.gpu_status import format_gpu_readiness
+            text = format_gpu_readiness()
+        except Exception as e:  # noqa: BLE001
+            text = (
+                "Could not run the GPU readiness checker.\n\n"
+                f"{e.__class__.__name__}: {e}"
+            )
+        self._show_help_text_dialog("GPU Readiness", text)
+        self._append_log("Opened GPU readiness checker.", "INFO")
 
     # ----- History menu handlers (PROVENANCE_SPEC §14) -----
     def _on_open_history_browser(self):
@@ -4964,22 +4980,30 @@ class SWCMainWindow(QMainWindow):
             return
         try:
             from swcstudio.core.provenance import (
+                archive_history_dir,
+                archive_path_for,
                 history_dir_for,
+                history_archive_exists,
                 init_history,
                 migrate_legacy_output_dir,
                 needs_migration,
             )
             hist = history_dir_for(path)
-            if hist.exists():
+            archive = archive_path_for(path)
+            if hist.exists() or history_archive_exists(path):
+                if hist.exists():
+                    archive_history_dir(hist, path, remove_dir=True)
                 QMessageBox.information(
                     self,
                     "Initialize History",
-                    f"History is already initialized at {hist}.",
+                    f"History is already initialized at {archive}.",
                 )
                 return
             if needs_migration(path):
                 outcome = migrate_legacy_output_dir(path)
-                msg = "Initialized .history/."
+                if hist.exists():
+                    archive_history_dir(hist, path, remove_dir=True)
+                msg = f"Initialized history archive:\n{archive}"
                 if outcome.imported_commit:
                     msg += f"\nImported state from {outcome.imported_from.name}."
                 if outcome.legacy_files_kept:
@@ -4988,9 +5012,10 @@ class SWCMainWindow(QMainWindow):
                 self._append_log(msg.replace("\n", " "), "INFO")
             else:
                 init_history(path)
+                archive_history_dir(hist, path, remove_dir=True)
                 QMessageBox.information(
                     self, "Initialize History",
-                    f"Initialized .history/ at {hist}.",
+                    f"Initialized history archive at {archive}.",
                 )
                 self._append_log(f"Initialized history for {path}", "INFO")
         except Exception as e:

@@ -39,7 +39,10 @@ By default they are stored at:
 
 You can override that path by setting:
 
-- `SWCTOOLS_CUSTOM_TYPES_PATH`
+- `SWCSTUDIO_CUSTOM_TYPES_PATH`
+
+Older installs may still use `SWCTOOLS_CUSTOM_TYPES_PATH`; SWC-Studio
+continues to accept it as a fallback.
 
 Because the backend loads this registry on startup, a custom type defined today will still be available after closing and reopening the application on later days.
 

@@ -1,45 +1,22 @@
 """GraphSAGE apical-vs-basal head for pyramidal dendrite branches.
 
-Day 2-3 deliverable from CONTINUATION.md §6 + §9. A small graph neural
-network that re-decides apical vs basal for branches that Stage 2 has
-already classified as dendrite. Stage 2 stays unchanged for axon-vs-
-dendrite (it's already at F1 0.997 there); we only attack the remaining
-hand-crafted-feature ceiling on apical vs basal (current F1 0.9348 / 0.9722
-per CONTINUATION §5).
+This small graph neural network re-decides apical vs basal for branches
+that Stage 2 has already classified as dendrite. Stage 2 remains
+responsible for axon-vs-dendrite decisions.
 
-Architecture (CONTINUATION §6):
-    Input:  51 dendrite-relevant per-branch features (paper.gnn_dataset
-            DENDRITE_FEATURE_NAMES)
-    Layer 1: SAGEConv(51 -> hidden) + ReLU + Dropout
-    Layer 2: SAGEConv(hidden -> hidden) + ReLU + Dropout
-    Head:    Linear(hidden -> 2)
-    Edges:   parent <-> child branches in the cell tree (undirected)
-    Output:  2-class softmax (basal=0, apical=1) per branch
-    Loss:    CrossEntropy with ignore_index=-100 (non-pyramidal-dendrite
-             branches are masked via gnn_dataset's y=-100 convention)
-
-Training:
-    - Test split is the SAME hash-bucketed 169 pyramidal files from
-      hybrid/models/eval_split.json. Never seen during training.
-    - Within the 763 train pyramidals, run 5-fold CV. Per fold:
-        * Standardize features using train-fold mean/std
-        * Adam(lr=1e-3, weight_decay=5e-4)
-        * Up to 200 epochs, early stopping on val macro-F1 (patience 25)
-        * Track per-branch and per-cell macro-F1 on the val fold
-    - Final model: retrain on ALL 763 train cells using the best epoch
-      count seen in CV, save to paper/models/gnn_apical_basal.pt with
-      embedded scaler params and feature names.
+Architecture:
+    Input: dendrite-relevant per-branch features from
+           `gnn_dataset.DENDRITE_FEATURE_NAMES`
+    Layers: GraphSAGE blocks followed by a linear two-class head
+    Edges: parent <-> child branches in the cell tree (undirected)
+    Output: basal=0 or apical=1 per branch
+    Loss: CrossEntropy with ignore_index=-100 for masked branches
 
 Usage:
-    # Sanity-test on 1 fold, fewer epochs
-    python -m paper.gnn_apical_basal --quick
+    python -m swcstudio.core.auto_typing.gnn_apical_basal --quick
+    python -m swcstudio.core.auto_typing.gnn_apical_basal
 
-    # Full 5-fold CV + final retrain
-    python -m paper.gnn_apical_basal
-
-CLI flags (see _build_argparser):
-    --hidden, --dropout, --lr, --weight-decay, --epochs, --patience,
-    --n-folds, --batch-size, --quick, --skip-final, --no-cuda
+CLI flags are defined in `_build_argparser`.
 """
 from __future__ import annotations
 
@@ -68,10 +45,10 @@ from .gnn_dataset import (
     build_dataset,
 )
 
-ROOT = Path(__file__).resolve().parent.parent
-DEFAULT_DATA_DIR = ROOT / "data" / "benchmark_pyramidal_interneuron_v1_qc_diag_pruned"
-EVAL_SPLIT_PATH = ROOT / "hybrid" / "models" / "eval_split.json"
-DEFAULT_CKPT_PATH = ROOT / "paper" / "models" / "gnn_apical_basal.pt"
+PACKAGE_ROOT = Path(__file__).resolve().parents[2]
+DEFAULT_DATA_DIR = Path.cwd() / "labeled-dataset"
+EVAL_SPLIT_PATH = Path.cwd() / "eval_split.json"
+DEFAULT_CKPT_PATH = PACKAGE_ROOT / "data" / "models" / "gnn_apical_basal.pt"
 
 
 # ---------------------------------------------------------------------------

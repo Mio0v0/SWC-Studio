@@ -1,52 +1,38 @@
 """Input QC gate for the auto-labeling pipeline.
 
-Stage 1 of the three-stage selective-prediction pipeline:
-    1.  *Input QC*  (this module)        — reject unlabelable files
-    2.  Auto-label                        — run the 4-stage model
-    3.  Confidence-based flagging         — see hybrid.confidence
+QC runs before prediction. Files that fail QC are not auto-labeled.
 
 The QC gate performs two kinds of checks:
 
-  A.  STRUCTURAL  — deterministic rules on the SWC. Catches truly
-      unparseable / broken files: missing soma, multiple roots, orphan
-      nodes, non-finite coords, etc. Same checks as the corpus-scan
-      script (paper/_scan_corpus_qc.py), packaged for runtime use.
+  A. STRUCTURAL - deterministic rules on the SWC. These catch files the
+     engine should not label, such as malformed rows, duplicate node IDs,
+     multiple roots, orphan nodes, cycles, non-finite coordinates, or
+     invalid radii. These checks are intentionally type-agnostic: an
+     unlabeled input file with all node types set to 0 can pass QC.
 
-  B.  DISTRIBUTION  — out-of-distribution detection on the Stage 1
-      feature vector. Files whose features are far from the training
-      manifold are rejected even when they parse cleanly. Uses a
-      Mahalanobis-style distance fit on the training feature
-      distribution.
+  B. DISTRIBUTION - out-of-distribution detection on the Stage 1 feature
+     vector. Files whose features are far from the fitted training
+     manifold are rejected even when they parse cleanly.
 
-Output is a single ``QCResult`` with ``passed: bool`` and a list of
-human-readable ``reasons`` so reviewers know why a file was rejected.
-
-Usage:
-    from hybrid.qc_input import QCGate
-    gate = QCGate.load("paper/models/qc_gate.pkl")
-    qc = gate.evaluate(path_to_swc)
-    if qc.passed:
-        run_pipeline_on_nodes(...)
-    else:
-        # log qc.reasons; do not auto-label
-        ...
+Output is a single `QCResult` with `passed: bool` and a list of
+human-readable `reasons` so reviewers know why a file was rejected.
 """
 from __future__ import annotations
 
 import math
-import pickle
 from dataclasses import dataclass, field, asdict
 from pathlib import Path
+import pickle
 
 import numpy as np
 
-from .features import parse_swc, extract_feature_vector, FEATURE_NAMES, SWCNode
+from .features import extract_feature_vector, FEATURE_NAMES, SWCNode
 
 # -----------------------------------------------------------------------------
-# Constants — keep aligned with paper/_scan_corpus_qc.py
+# Constants used by the runtime structural QC gate.
 # -----------------------------------------------------------------------------
-VALID_TYPES = {0, 1, 2, 3, 4, 5, 6, 7}
-MIN_NODES = 10            # restored to iter-0 default (matches paper/_scan_corpus_qc.py)
+STANDARD_TYPES = {0, 1, 2, 3, 4, 5, 6, 7}
+MIN_NODES = 10
 MAX_NODES = 200_000
 
 
@@ -60,6 +46,10 @@ class QCResult:
     n_roots: int = 0
     n_orphan: int = 0
     n_other_type: int = 0
+    n_negative_type: int = 0
+    n_duplicate_id: int = 0
+    n_self_parent: int = 0
+    n_cycle: int = 0
     ood_distance: float | None = None
     ood_threshold: float | None = None
     feature_vector: list[float] | None = None
@@ -76,6 +66,86 @@ def _is_finite(v: float) -> bool:
     return not (math.isnan(v) or math.isinf(v))
 
 
+def _is_integer_float(v: float) -> bool:
+    return _is_finite(v) and float(v).is_integer()
+
+
+def _parse_swc_for_qc(path: Path) -> tuple[list[SWCNode], list[str]]:
+    """Parse SWC rows strictly enough for input QC.
+
+    The main feature parser is deliberately permissive because many
+    downstream tools can ignore comments or partial rows. QC needs a
+    sharper distinction: if a non-comment data row is malformed, the file
+    should fail before auto-labeling starts.
+    """
+    nodes: list[SWCNode] = []
+    reasons: list[str] = []
+    with open(path, "r", encoding="utf-8", errors="ignore") as fh:
+        for line_no, raw in enumerate(fh, start=1):
+            stripped = raw.strip()
+            if not stripped or stripped.startswith("#"):
+                continue
+            parts = stripped.split()
+            if len(parts) < 7:
+                reasons.append(f"malformed_row:{line_no}:expected_7_columns")
+                continue
+            try:
+                raw_id = float(parts[0])
+                raw_type = float(parts[1])
+                x = float(parts[2])
+                y = float(parts[3])
+                z = float(parts[4])
+                radius = float(parts[5])
+                raw_parent = float(parts[6])
+            except ValueError:
+                reasons.append(f"malformed_row:{line_no}:non_numeric")
+                continue
+
+            if not _is_integer_float(raw_id):
+                reasons.append(f"malformed_row:{line_no}:non_integer_id")
+                continue
+            if not _is_integer_float(raw_type):
+                reasons.append(f"malformed_row:{line_no}:non_integer_type")
+                continue
+            if not _is_integer_float(raw_parent):
+                reasons.append(f"malformed_row:{line_no}:non_integer_parent")
+                continue
+
+            nodes.append(
+                SWCNode(
+                    id=int(raw_id),
+                    type=int(raw_type),
+                    x=x,
+                    y=y,
+                    z=z,
+                    radius=radius,
+                    parent=int(raw_parent),
+                )
+            )
+    return nodes, reasons
+
+
+def _count_cycle_nodes(nodes: list[SWCNode]) -> int:
+    """Return the number of nodes whose parent chain enters a cycle."""
+    by_id = {n.id: n for n in nodes}
+    cycle_nodes: set[int] = set()
+    for node in nodes:
+        seen: dict[int, int] = {}
+        chain: list[int] = []
+        current = node.id
+        while current != -1 and current in by_id:
+            if current in seen:
+                cycle_nodes.update(chain[seen[current]:])
+                break
+            seen[current] = len(chain)
+            chain.append(current)
+            parent = by_id[current].parent
+            if parent == -1 or parent not in by_id:
+                break
+            current = parent
+    return len(cycle_nodes)
+
+
 def structural_qc(nodes: list[SWCNode]) -> tuple[bool, list[str], dict]:
     """Run deterministic structural checks. Returns (passed, reasons, counts)."""
     reasons: list[str] = []
@@ -85,6 +155,10 @@ def structural_qc(nodes: list[SWCNode]) -> tuple[bool, list[str], dict]:
         "n_roots": 0,
         "n_orphan": 0,
         "n_other_type": 0,
+        "n_negative_type": 0,
+        "n_duplicate_id": 0,
+        "n_self_parent": 0,
+        "n_cycle": 0,
     }
     if not nodes:
         return False, ["empty_after_parse"], counts
@@ -93,29 +167,36 @@ def structural_qc(nodes: list[SWCNode]) -> tuple[bool, list[str], dict]:
     if len(nodes) > MAX_NODES:
         reasons.append(f"too_many_nodes:{len(nodes)}>{MAX_NODES}")
 
+    ids = [n.id for n in nodes]
     by_id = {n.id: n for n in nodes}
     counts["n_soma"]      = sum(1 for n in nodes if n.type == 1)
     counts["n_roots"]     = sum(1 for n in nodes if n.parent == -1)
     counts["n_orphan"]    = sum(1 for n in nodes if n.parent != -1 and n.parent not in by_id)
-    counts["n_other_type"] = sum(1 for n in nodes if n.type not in VALID_TYPES)
+    counts["n_other_type"] = sum(1 for n in nodes if n.type not in STANDARD_TYPES)
+    counts["n_negative_type"] = sum(1 for n in nodes if n.type < 0)
+    counts["n_duplicate_id"] = len(ids) - len(set(ids))
+    counts["n_self_parent"] = sum(1 for n in nodes if n.parent == n.id)
+    counts["n_cycle"] = _count_cycle_nodes(nodes) if counts["n_duplicate_id"] == 0 else 0
 
-    if counts["n_soma"] == 0:
-        reasons.append("no_soma")
+    if any(n.id <= 0 for n in nodes):
+        reasons.append("non_positive_node_id")
     if counts["n_roots"] != 1:
         reasons.append(f"n_roots={counts['n_roots']}")
     if counts["n_orphan"] > 0:
         reasons.append(f"n_orphan={counts['n_orphan']}")
-    if counts["n_other_type"] > 0:
-        reasons.append(f"non_standard_label_count={counts['n_other_type']}")
+    if counts["n_negative_type"] > 0:
+        reasons.append(f"negative_type_count={counts['n_negative_type']}")
+    if counts["n_duplicate_id"] > 0:
+        reasons.append(f"duplicate_id_count={counts['n_duplicate_id']}")
+    if counts["n_self_parent"] > 0:
+        reasons.append(f"self_parent_count={counts['n_self_parent']}")
+    if counts["n_cycle"] > 0:
+        reasons.append(f"cycle_node_count={counts['n_cycle']}")
 
     if not all(_is_finite(n.x) and _is_finite(n.y) and _is_finite(n.z) for n in nodes):
         reasons.append("non_finite_coords")
     if not all(_is_finite(n.radius) and n.radius >= 0 for n in nodes):
         reasons.append("invalid_radii")
-
-    n_neurites = sum(1 for n in nodes if n.type in (2, 3, 4))
-    if n_neurites == 0:
-        reasons.append("no_neurites")
 
     return (len(reasons) == 0), reasons, counts
 
@@ -232,29 +313,40 @@ class QCGate:
         path = Path(path)
         # Parse
         try:
-            nodes = parse_swc(path)
+            nodes, parse_reasons = _parse_swc_for_qc(path)
         except Exception as exc:
             return QCResult(passed=False, reasons=[f"parse_error:{exc}"], path=str(path))
 
         # Structural
         struct_pass, struct_reasons, counts = structural_qc(nodes)
+        passed = struct_pass and not parse_reasons
         res = QCResult(
-            passed=struct_pass,
-            reasons=list(struct_reasons),
+            passed=passed,
+            reasons=list(parse_reasons) + list(struct_reasons),
             n_nodes=counts["n_nodes"],
             n_soma=counts["n_soma"],
             n_roots=counts["n_roots"],
             n_orphan=counts["n_orphan"],
             n_other_type=counts["n_other_type"],
+            n_negative_type=counts["n_negative_type"],
+            n_duplicate_id=counts["n_duplicate_id"],
+            n_self_parent=counts["n_self_parent"],
+            n_cycle=counts["n_cycle"],
             path=str(path),
         )
-        if not struct_pass:
+        if not res.passed:
             return res
 
         # OOD
         if self.ood_detector is not None:
             try:
-                fv = extract_feature_vector(nodes)
+                # Structural QC above inspects the raw parsed file. The OOD
+                # detector, however, was fit on the normalized Stage 1 feature
+                # path, so keep that distribution stable here.
+                from .swc_normalize import normalize_swc  # noqa: PLC0415
+
+                feature_nodes, _ = normalize_swc(nodes)
+                fv = extract_feature_vector(feature_nodes)
             except Exception as exc:
                 res.passed = False
                 res.reasons.append(f"feature_extraction_error:{exc}")

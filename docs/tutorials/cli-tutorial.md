@@ -8,7 +8,8 @@ This tutorial walks through the current command-line workflow for inspecting a f
 You need a working CLI install and one or more SWC files. If the command is not on your path, use module mode from [Getting Started](../GETTING_STARTED.md).
 ```
 
-The examples below use macOS or Linux path style. On Windows, replace `./data/...` with `.\data\...`.
+The examples below use macOS or Linux path style. On Windows, replace
+`./swc-folder/...` with `.\swc-folder\...`.
 
 ## Step 1: Verify the CLI
 
@@ -27,7 +28,7 @@ python -m swcstudio.cli.cli --help
 Start with the combined issue view:
 
 ```bash
-swcstudio check ./data/single-soma.swc
+swcstudio check cell.swc
 ```
 
 This command prints the same shared issue list logic used by the GUI. It is the fastest way to see:
@@ -40,7 +41,7 @@ This command prints the same shared issue list logic used by the GUI. It is the 
 ## Step 3: Run grouped validation
 
 ```bash
-swcstudio validate ./data/single-soma.swc
+swcstudio validate cell.swc
 ```
 
 Use this when you want the full grouped validation report rather than the broader issue summary from `check`.
@@ -58,15 +59,15 @@ Choose the command that matches the issue you want to fix.
 Examples:
 
 ```bash
-swcstudio index-clean ./data/single-soma.swc
-swcstudio auto-fix ./data/single-soma.swc
-swcstudio auto-label ./data/single-soma.swc
-swcstudio auto-label ./data/single-soma.swc --model-dir ~/my-models   # custom-trained models
-swcstudio auto-label ./data/single-soma.swc --cell-type pyramidal --flag-strictness 0.8
-swcstudio auto-label ./data/single-soma.swc --no-flag
-swcstudio set-type ./data/single-soma.swc --node-id 14169 --new-type 3
-swcstudio set-radius ./data/single-soma.swc --node-id 42 --radius 0.75
-swcstudio connect ./data/single-soma.swc --start-id 10 --end-id 22
+swcstudio index-clean cell.swc
+swcstudio auto-fix cell.swc
+swcstudio auto-label cell.swc
+swcstudio auto-label cell.swc --model-dir ~/my-models   # custom-trained models
+swcstudio auto-label cell.swc --cell-type pyramidal --flag-strictness 0.8
+swcstudio auto-label cell.swc --no-flag
+swcstudio set-type cell.swc --node-id 14169 --new-type 3
+swcstudio set-radius cell.swc --node-id 42 --radius 0.75
+swcstudio connect cell.swc --start-id 10 --end-id 22
 ```
 
 Single-file edit commands automatically write:
@@ -86,14 +87,14 @@ When you need the same operation across many files, use folder commands.
 Examples:
 
 ```bash
-swcstudio validate ./data
-swcstudio split ./data
-swcstudio auto-typing ./data
-swcstudio auto-typing ./data --model-dir ~/my-models   # custom-trained models
-swcstudio auto-typing ./data --cell-type unknown --flag-strictness 0.5
-swcstudio radii-clean ./data
-swcstudio simplify ./data
-swcstudio index-clean ./data
+swcstudio validate ./swc-folder
+swcstudio split ./swc-folder
+swcstudio auto-typing ./swc-folder
+swcstudio auto-typing ./swc-folder --model-dir ~/my-models   # custom-trained models
+swcstudio auto-typing ./swc-folder --cell-type unknown --flag-strictness 0.5
+swcstudio radii-clean ./swc-folder
+swcstudio simplify ./swc-folder
+swcstudio index-clean ./swc-folder
 ```
 
 ## Step 5b: Train your own auto-typing models
@@ -128,7 +129,7 @@ Stage 1 + Stage 2 + Stage 2b stack only.
 
 To make your custom models the new default everywhere (no `--model-dir`
 flag needed), copy them into your user data directory — see the
-[Auto-Typing Engine](../documentation/auto-typing-backends.md#using-your-custom-models)
+[Auto-Typing Engine](../documentation/auto-typing-backends.md#training-custom-models)
 page for the per-platform path.
 
 ## Step 6: Use temporary config overrides
@@ -138,7 +139,7 @@ Most commands accept `--config-json` so you can override parameters for one run 
 Example:
 
 ```bash
-swcstudio simplify ./data/single-soma.swc --config-json '{"thresholds":{"epsilon":1.2,"radius_tolerance":0.35}}'
+swcstudio simplify cell.swc --config-json '{"thresholds":{"epsilon":1.2,"radius_tolerance":0.35}}'
 ```
 
 ## Step 7: Review outputs and logs

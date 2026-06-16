@@ -3,8 +3,8 @@
 Implements PROVENANCE_SPEC §5: every produced SWC carries exactly two
 ``# @PROV`` lines at the top — a *root* line (origin, written once)
 and a *tip* line (current state, overwritten on every save). The full
-chain stays in ``.history/``; the file itself only carries this
-2-line "business card" pointer.
+chain stays in the sidecar history archive; the file itself only carries
+this 2-line "business card" pointer.
 
 The two lines are deliberately the **only** comment lines beginning
 with ``# @PROV`` we ever produce. That, combined with the spec §2 rule
@@ -54,6 +54,8 @@ def format_root_line(
     root_sha: str,
     file_name: str,
     created_utc: str,
+    repo: str | None = None,
+    repo_id: str | None = None,
 ) -> str:
     """Format the immutable root line written once at file creation.
 
@@ -66,6 +68,8 @@ def format_root_line(
         f"root={_short(root_sha)} "
         f"file={_safe(file_name)} "
         f"created={_safe(created_utc)}"
+        + (f" repo={_safe(repo)}" if repo else "")
+        + (f" repo_id={_safe(repo_id)}" if repo_id else "")
     )
 
 
@@ -78,13 +82,14 @@ def format_tip_line(
     actor: str,
     updated_utc: str,
     sidecar: str = ".history/",
+    repo_id: str | None = None,
 ) -> str:
     """Format the mutable tip line overwritten on every commit.
 
     Example::
 
         # @PROV tip=g7h8i9j0 parent=d4e5f6a7 ops=20 tool=swcstudio@0.2.0 \
-                actor=tuo updated=2024-01-01T11:45:22Z sidecar=.history/
+                actor=tuo updated=2024-01-01T11:45:22Z sidecar=neuron_001_history.swcstudio
     """
     return (
         f"{PROV_PREFIX} "
@@ -95,6 +100,7 @@ def format_tip_line(
         f"actor={_safe(actor)} "
         f"updated={_safe(updated_utc)} "
         f"sidecar={_safe(sidecar)}"
+        + (f" repo_id={_safe(repo_id)}" if repo_id else "")
     )
 
 

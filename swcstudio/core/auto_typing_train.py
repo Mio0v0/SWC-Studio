@@ -7,8 +7,8 @@ at the resulting model directory.
 The bundled production engine is the v12 QC-label-flag pipeline. In
 addition to the three custom-training artifacts below, full v12
 deployment also uses a Branch3 rescue checkpoint, QC gate, and optional
-learned flag models. This helper currently trains the core three-stage
-stack only.
+learned flag models. This helper currently trains the core Stage 1 +
+Stage 2 + Stage 2b stack only.
 
 Expected input dataset layout::
 

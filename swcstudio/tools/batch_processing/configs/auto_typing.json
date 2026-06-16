@@ -3,6 +3,7 @@
   "feature": "auto_typing",
   "flag_enabled": true,
   "flag_strictness": 0.5,
+  "flag_feature_mode": "compact",
   "cell_type": "unknown",
   "model_dir": "",
   "use_subtree_stage2": true,

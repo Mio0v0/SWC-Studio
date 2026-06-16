@@ -3,8 +3,8 @@
 Whenever an SWC is created from another via any SWC-Studio path
 (``split``, ``checkout -o``, plugin derivation), the new file's first
 commit records ``derived_from = {root_sha, commit_sha, path}``. The
-new file gets its own ``root_sha`` and its own ``.history/``; the
-``derived_from`` field is the cross-file edge connecting the two
+new file gets its own ``root_sha`` and its own sidecar history archive;
+the ``derived_from`` field is the cross-file edge connecting the two
 histories.
 
 This module provides:
@@ -28,6 +28,7 @@ from pathlib import Path
 from typing import Any
 
 from swcstudio.core.provenance.canonical import canonical_swc, sha256_hex
+from swcstudio.core.provenance.archive import open_history_for_read
 from swcstudio.core.provenance.tracked_op import history_dir_for
 
 __all__ = [
@@ -83,8 +84,9 @@ def derived_from_for_swc_path(
         try:
             from swcstudio.core.provenance.refs import read_branch, read_head
             hist = history_dir_for(src)
-            head = read_head(hist)
-            tip = read_branch(hist, head)
+            with open_history_for_read(src, hist) as live_hist:
+                head = read_head(live_hist)
+                tip = read_branch(live_hist, head)
             if tip:
                 source_commit_sha = tip
         except Exception:

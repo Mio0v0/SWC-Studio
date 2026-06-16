@@ -8,7 +8,7 @@ import types
 def install_hybrid_pickle_aliases() -> None:
     """Expose local deployment modules under the old ``hybrid.*`` names.
 
-    The accepted v12 pickles were trained in ``swc-autolabel-ml`` where
+    The accepted v12 pickles were trained in the research pipeline where
     helper classes lived under ``hybrid``. SWC-Studio vendors the same
     inference helpers under ``swcstudio.core.auto_typing``; these aliases
     let pickle resolve the original module names without depending on the

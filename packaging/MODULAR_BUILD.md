@@ -2,8 +2,10 @@
 
 The **monolithic** build (`packaging/swcstudio_gui.spec` + `build_macos.sh`)
 welds Python, all libraries, the swcstudio code, and the model files into one
-~700 MB PyInstaller bundle. Updating any one line of code requires the user
-to re-download the whole thing.
+PyInstaller bundle. Updating any one line of code requires the user to
+re-download the whole thing. Release executables should be built from a
+CPU-only PyTorch environment; building from a CUDA PyTorch environment can
+pull in a much larger CUDA runtime stack.
 
 The **modular** build (`packaging/swcstudio_gui_modular.spec` +
 `build_macos_modular.sh`) splits the bundle into three layers that update
@@ -11,9 +13,9 @@ independently:
 
 | Layer       | Lives in                                     | Typical size | Updates when                          |
 |-------------|----------------------------------------------|--------------|----------------------------------------|
-| Runtime     | `Contents/Frameworks/` (PyInstaller bundle)   | ~600 MB      | PyTorch / Qt / Python pin changes      |
+| Runtime     | `Contents/Frameworks/` (PyInstaller bundle)   | largest layer | PyTorch / Qt / Python pin changes      |
 | Code        | `Contents/Resources/app/swcstudio/`           | ~5 MB        | Most releases (bug fixes, features)    |
-| Models      | `Contents/Resources/models/`                  | ~60 MB       | When the GNN / sklearn pickles retrain |
+| Models      | `Contents/Resources/models/`                  | ~75-80 MB    | When the auto-labeling model bundle changes |
 
 End users fetch fresh **code** or **model** layers without re-downloading the
 heavy runtime. They only pay the ~700 MB cost when the runtime itself bumps
@@ -59,7 +61,12 @@ SWC-Studio.app/
 │           ├── VERSION
 │           ├── cell_type_classifier.pkl
 │           ├── branch_classifier.pkl
-│           └── gnn_apical_basal.pt
+│           ├── gnn_apical_basal.pt
+│           ├── gnn_branch3_rescue.pt
+│           ├── qc_gate.pkl
+│           ├── flag_model_pyramidal.joblib
+│           ├── flag_model_interneuron.joblib
+│           └── flag_model_all.joblib
 ```
 
 ## How updates flow at runtime
@@ -81,7 +88,7 @@ asset attached to each GitHub Release that looks like:
   "models": {
     "version": "0.1.0",
     "url":     "https://github.com/Mio0v0/SWC-Studio/releases/download/v0.2.0/swcstudio-models-v0.1.0.zip",
-    "size":    62914560,
+    "size":    78643200,
     "sha256":  "def..."
   },
   "runtime": {
@@ -109,6 +116,14 @@ directory**.
 The same mechanism works for `apply_update("models", manifest.models)` —
 no app restart required because models are loaded fresh on each
 auto-label call.
+
+## CPU Runtime And GPU Installs
+
+The public one-click executable should use a CPU PyTorch runtime. This
+keeps the download portable and avoids tying the release to one CUDA
+stack. GPU acceleration is supported through pip/source installs where
+the user can install the PyTorch/CUDA and PyTorch Geometric builds that
+match their machine. See `docs/GPU_INSTALL.md`.
 
 ## What pip users get
 
@@ -141,7 +156,7 @@ Release page:
 | `SWC-Studio-v0.2.0-macOS.zip`      | Full .app for new users (or runtime upgrade) |
 | `SWC-Studio-v0.2.0-Windows.zip`    | Full Windows package                    |
 | `swcstudio-code-v0.2.0.zip`        | Code-only update (~5 MB)                |
-| `swcstudio-models-v0.2.0.zip`      | Models-only update (~60 MB)             |
+| `swcstudio-models-v0.2.0.zip`      | Models-only update (~75-80 MB raw model files) |
 | `swcstudio-0.2.0-py3-none-any.whl` | pip wheel                               |
 | `update_manifest.json`             | the JSON manifest above                 |
 

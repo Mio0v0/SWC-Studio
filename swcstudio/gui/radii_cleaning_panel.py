@@ -22,6 +22,7 @@ from PySide6.QtWidgets import (
     QPlainTextEdit,
     QProgressDialog,
     QPushButton,
+    QSizePolicy,
     QVBoxLayout,
     QWidget,
 )
@@ -169,21 +170,22 @@ class RadiiCleaningPanel(QWidget):
         root.addWidget(desc)
 
         row = QHBoxLayout()
+        row.setSpacing(6)
         if self._allow_loaded_swc_run:
-            b_run_loaded = QPushButton("Run")
+            b_run_loaded = self._compact_button(QPushButton("Run"), 60)
             b_run_loaded.clicked.connect(self._on_run_loaded)
             row.addWidget(b_run_loaded)
         else:
-            self._btn_select_folder = QPushButton("Select Folder")
+            self._btn_select_folder = self._compact_button(QPushButton("Select Folder"), 136)
             self._btn_select_folder.clicked.connect(self._on_select_folder)
             row.addWidget(self._btn_select_folder)
 
-            self._btn_apply_folder = QPushButton("Apply Radii Cleaning")
+            self._btn_apply_folder = self._compact_button(QPushButton("Run"), 60)
             self._btn_apply_folder.setEnabled(False)
             self._btn_apply_folder.clicked.connect(self._on_run_folder)
             row.addWidget(self._btn_apply_folder)
 
-        b_cfg = QPushButton("Show JSON")
+        b_cfg = self._compact_button(QPushButton("Show JSON"), 108)
         b_cfg.clicked.connect(self._on_edit_cfg)
         row.addWidget(b_cfg)
 
@@ -275,6 +277,13 @@ class RadiiCleaningPanel(QWidget):
             "  color: #132238;"
             "}"
         )
+
+    def _compact_button(self, button: QPushButton, max_width: int | None = None) -> QPushButton:
+        button.setMinimumWidth(0)
+        button.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+        if max_width is not None:
+            button.setFixedWidth(max_width)
+        return button
 
     def set_loaded_swc(self, df: pd.DataFrame | None, filename: str = "", file_path: str = ""):
         if df is None or df.empty:

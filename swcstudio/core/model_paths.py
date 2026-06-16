@@ -14,8 +14,6 @@ Optional learned flag models add per-cell bad-label flag scoring:
 * ``flag_model_pyramidal.joblib``
 * ``flag_model_interneuron.joblib``
 * ``flag_model_all.joblib``
-* ``flag_model_pyramidal_baseline.joblib`` (optional heavy flagger)
-* ``flag_model_all_baseline.joblib`` (optional heavy flagger)
 
 Search order (first existing wins):
 
@@ -61,8 +59,6 @@ MODEL_FILES = {
     "flag_pyramidal": "flag_model_pyramidal.joblib",
     "flag_interneuron": "flag_model_interneuron.joblib",
     "flag_all": "flag_model_all.joblib",
-    "flag_pyramidal_baseline": "flag_model_pyramidal_baseline.joblib",
-    "flag_all_baseline": "flag_model_all_baseline.joblib",
 }
 
 ENV_VAR = "SWCSTUDIO_MODEL_DIR"
@@ -133,7 +129,7 @@ def resolve_model_path(
     If no local copy is found and ``auto_download=True`` (default),
     falls back to fetching the models package from GitHub Releases via
     :mod:`swcstudio.core.updater`. This is what makes pip-installed
-    users work out of the box without bundling 60 MB of models inside
+    users work out of the box without bundling the model layer inside
     the wheel — the first auto-label call triggers a one-time download
     into the user data dir, and subsequent calls find it cached.
 

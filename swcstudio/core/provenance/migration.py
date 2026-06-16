@@ -24,6 +24,7 @@ import re
 from pathlib import Path
 from typing import NamedTuple
 
+from swcstudio.core.provenance.archive import archive_path_for
 from swcstudio.core.provenance.ops import OpKind
 from swcstudio.core.provenance.tracked_op import (
     OpResult,
@@ -56,6 +57,8 @@ def needs_migration(swc_path: str | Path) -> bool:
     out_dir = _output_dir(swc_path)
     if not out_dir.exists():
         return False
+    if archive_path_for(swc_path).exists():
+        return False
     if (out_dir / ".history").exists():
         return False  # already migrated
     return any(_iter_legacy_artifacts(out_dir))
@@ -72,7 +75,7 @@ def migrate_legacy_output_dir(swc_path: str | Path) -> MigrationOutcome:
     hist = history_dir_for(p)
 
     # Already migrated.
-    if hist.exists():
+    if hist.exists() or archive_path_for(p).exists():
         return MigrationOutcome(
             history_initialized=False,
             imported_commit=None,

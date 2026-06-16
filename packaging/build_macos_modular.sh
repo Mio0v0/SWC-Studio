@@ -13,7 +13,7 @@
 #
 # Result: dist/SWC-Studio.app where Resources/ looks like:
 #     app/swcstudio/...   (~5 MB, swappable code)
-#     models/*.{pkl,pt}   (~60 MB, swappable models)
+#     models/*            (~75 MB raw model files, swappable models)
 
 set -euo pipefail
 

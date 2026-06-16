@@ -53,9 +53,13 @@ from PySide6.QtWidgets import (
 from swcstudio.core.provenance import (
     DEFAULT_BRANCH,
     OpKind,
+    archive_history_dir,
+    archive_path_for,
     create_tag,
     ensure_schema,
+    ensure_history_materialized,
     history_dir_for,
+    history_archive_exists,
     list_branches,
     list_tags,
     open_index,
@@ -79,8 +83,14 @@ class HistoryPanel(QWidget):
         super().__init__(parent)
         self._swc_path = Path(swc_path)
         self._hist = history_dir_for(self._swc_path)
+        ensure_history_materialized(self._swc_path, self._hist)
         self._build_ui()
         self.refresh()
+
+    def closeEvent(self, event) -> None:
+        if self._hist.exists():
+            archive_history_dir(self._hist, self._swc_path, remove_dir=True)
+        super().closeEvent(event)
 
     # ------------------------------------------------------------------
     # UI construction
@@ -204,7 +214,7 @@ class HistoryPanel(QWidget):
         if not self._hist.exists():
             self._table.setRowCount(0)
             self._detail.setPlainText(
-                f"No .history/ at {self._hist}\n\n"
+                f"No history archive at {archive_path_for(self._swc_path)}\n\n"
                 f"Run 'swcstudio history init {self._swc_path}' to start tracking."
             )
             return
@@ -554,4 +564,8 @@ def open_history_dialog(parent: Optional[QWidget], swc_path: str | Path) -> None
         # reload from disk so the GUI picks up the new state + @PROV header.
         panel.reverted_to_state.connect(lambda _sha, _body: reload_method(str(swc_path)))
 
-    dlg.exec()
+    try:
+        dlg.exec()
+    finally:
+        if panel._hist.exists():
+            archive_history_dir(panel._hist, panel._swc_path, remove_dir=True)

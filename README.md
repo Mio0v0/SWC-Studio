@@ -54,12 +54,14 @@ Use this path if you only need the desktop application and don't want to deal wi
 
 Models are bundled inside the app — no separate download.
 
+Release executables are intended to be portable CPU builds; use pip or
+source install for GPU acceleration.
+
 The bundled auto-labeling model is the current v12 QC-label-flag
 pipeline: Stage 1 cell typing, Stage 2 subtree labeling, Stage 2b
 apical/basal GNN, Branch3 rescue, QC gate, and learned bad-label flag
-scoring. Compact flag scoring is available out of the box. The optional
-baseline-disagreement flag mode is also supported when the NeuroM-RF,
-L-Measure-RF, Sholl-RF, and Sholl-MLP predictor artifacts are reachable.
+scoring. Compact flag scoring is available out of the box and is the
+only deployed flag mode in SWC-Studio.
 
 ### Option 2 — Researcher, `pip install` (recommended for scripted workflows)
 
@@ -70,6 +72,7 @@ pip install swcstudio
 swcstudio-gui          # launch the desktop GUI
 swcstudio --help       # CLI
 swcstudio models status
+swcstudio gpu-status
 ```
 
 Requires Python 3.10+ already installed on your system. The wheel itself is small (~300 KB); the heavy dependencies (PyTorch, PySide6, vispy, etc.) come along automatically. Models are downloaded on the first auto-label call (~80 MB, one-time, cached locally).
@@ -121,6 +124,7 @@ swcstudio-gui
 ```bash
 swcstudio --help
 swcstudio models status     # confirm the auto-typing models are reachable
+swcstudio gpu-status        # optional CUDA/PyTorch readiness check
 ```
 
 If the console scripts aren't on your path, fall back to module mode:
@@ -142,6 +146,15 @@ How you update depends on how you installed:
 
 Under the hood, releases are split into three independently-updatable layers — runtime (heavy libraries), code (`swcstudio/` package), and models — so most updates touch only the small layers. See [`packaging/MODULAR_BUILD.md`](packaging/MODULAR_BUILD.md) for the architecture and [`RELEASE.md`](RELEASE.md) for the release pipeline.
 
+## CPU Executable And GPU Installs
+
+The one-click executable is the reliable CPU distribution. A GPU
+PyTorch/CUDA bundle is much larger and less portable across driver and
+CUDA combinations. Advanced users who want GPU acceleration should use a
+pip or source install, then follow [`docs/GPU_INSTALL.md`](docs/GPU_INSTALL.md).
+Inside SWC-Studio, choose Help -> GPU Readiness or run
+`swcstudio gpu-status` to see what is installed and what is missing.
+
 ## Core Capabilities
 
 - issue-driven SWC validation and repair
@@ -151,17 +164,16 @@ Under the hood, releases are split into three independently-updatable layers —
 - manual morphology and geometry editing
 - shared GUI, CLI, and Python integration surface
 
-## Provenance & Versioning (new — in progress)
+## Provenance & Versioning
 
-A git-shaped per-file history layer is being added. See
+A git-shaped per-file history layer records SWC edits. See
 [`docs/PROVENANCE_SPEC.md`](docs/PROVENANCE_SPEC.md) for the full
-design contract and
-[`docs/PROVENANCE_CONVERSION_GUIDE.md`](docs/PROVENANCE_CONVERSION_GUIDE.md)
-for how existing handlers/plugins migrate. Once shipped, every
-mutation produces an append-only `.history/events.jsonl` + content-
-addressed `.zst` blob store + a SQLite query index, with a bounded
-`# @PROV` chain embedded in the SWC header so the file is self-
-describing. AI ops capture an MLflow-shaped run record plus a full
+design contract. Every mutation updates a
+visible encrypted `<stem>_history.swcstudio` repo archive containing the
+append-only event log, content-addressed `.zst` blob store, refs, and
+SQLite query index. SWC headers carry a bounded `# @PROV` pointer to
+that archive and its repo ID, so renamed files can be reattached to
+their history. AI ops capture an MLflow-shaped run record plus a full
 environment fingerprint for reproducibility. CLI: `swcstudio history
 {log,show,checkout,branch,switch,tag,checkpoint,reproduce,reindex,verify,gc,export-crate}`.
 

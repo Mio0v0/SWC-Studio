@@ -1,13 +1,12 @@
 """Inference shim for the apical-vs-basal GraphSAGE head.
 
-Used by the production pipeline (`hybrid.pipeline.run_pipeline_on_nodes`)
-when `use_gnn=True`. Stays in `paper/` rather than `hybrid/` so the core
-pipeline keeps no torch dependency unless the GNN is actually requested.
+Used by `swcstudio.core.auto_typing.pipeline.run_pipeline_on_nodes`
+when the Stage 2b GNN is enabled.
 
 API:
     state = load_gnn(path, device=None)            -> GNNState
     preds = score_morphology(state, mb)            -> dict[branch_id -> (label, conf)]
-        - mb is a `hybrid.branch_features.MorphologyBranches`.
+        - mb is a `swcstudio.core.auto_typing.branch_features.MorphologyBranches`.
         - Returned labels use the SWC type-column convention:
               3 = basal/dendrite, 4 = apical
         - Returned conf is the softmax probability of the chosen class.
@@ -16,7 +15,7 @@ API:
 
 The model and scaler are loaded once into a `GNNState` and reused across
 files (the pipeline calls `score_morphology` per cell). The Data graphs
-are built on the fly via `paper.gnn_dataset.morphology_to_data`.
+are built on the fly via `.gnn_dataset.morphology_to_data`.
 """
 from __future__ import annotations
 
@@ -56,7 +55,7 @@ def load_gnn(
     path: Path | str = DEFAULT_CKPT_PATH,
     device: Optional[torch.device] = None,
 ) -> GNNState:
-    """Load a checkpoint produced by `paper.gnn_apical_basal.save_checkpoint`."""
+    """Load a checkpoint produced by `.gnn_apical_basal.save_checkpoint`."""
     if device is None:
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     payload = torch.load(Path(path), map_location=device, weights_only=False)

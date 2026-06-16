@@ -97,8 +97,6 @@ CONFIDENCE_NUMERIC_FEATURES = [
     "branch3_from_apical_frac",
 ]
 CONFIDENCE_CATEGORICAL_FEATURES = ["stage1_pred_conf_run"]
-EXTRA_NUMERIC_PREFIXES = ("xmodel_", "baseline_")
-
 _FLAG_CACHE: dict[str, dict[str, Any]] = {}
 
 
@@ -425,23 +423,17 @@ def score_flag(
 ) -> dict[str, Any]:
     bundle = _load_bundle(flag_model_path)
     required_numeric = [str(c) for c in bundle.get("numeric_features", [])]
-    unsupported = [c for c in required_numeric if c.startswith("xmodel_")]
+    unsupported = [
+        c for c in required_numeric
+        if c.startswith("xmodel_") or c.startswith("baseline_")
+    ]
     if unsupported:
         raise RuntimeError(
-            "Selected flag model requires multi-v12 xmodel features that are "
-            "not enabled in this SWC-Studio deployment."
+            "Selected flag model requires slow research-only disagreement "
+            "features that are not deployed in SWC-Studio."
         )
 
     feature_df = _engineer_features(pd.DataFrame([feature_row]))
-    missing_baseline = [
-        c for c in required_numeric
-        if c.startswith("baseline_") and c not in feature_df.columns
-    ]
-    if missing_baseline:
-        raise RuntimeError(
-            "Selected flag model requires baseline-disagreement features, "
-            "but they were not computed for this run."
-        )
     for col in required_numeric:
         if col not in feature_df.columns:
             feature_df[col] = np.nan
@@ -475,8 +467,6 @@ def score_flag(
         "flagged": flagged,
         "selected_model": bundle.get("selected_model_name"),
         "selected_feature_set": bundle.get("selected_feature_set"),
-        "selected_feature_mode": bundle.get("feature_mode") or (
-            "baseline" if any(c.startswith("baseline_") for c in required_numeric) else "compact"
-        ),
-        "n_baseline_features": sum(c.startswith("baseline_") for c in required_numeric),
+        "selected_feature_mode": "compact",
+        "n_baseline_features": 0,
     }

@@ -52,8 +52,8 @@ docs/_build/
 # Local tool/agent workspace
 # ----------------------------
 .agents/
-swctools/gui/NEW_SWC/
-swctools/gui/__error_log__.txt
+swcstudio/gui/NEW_SWC/
+swcstudio/gui/__error_log__.txt
 
 # ----------------------------
 # Runtime logs and generated reports

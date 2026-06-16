@@ -1,23 +1,21 @@
-"""Confidence aggregation + two-level flagging for the auto-labeling pipeline.
+"""Confidence aggregation helpers for the auto-labeling pipeline.
 
-The hybrid pipeline already produces per-node confidences (Stage 2 RF
-predict_proba, optionally overridden by the Stage 3 GNN apical/basal
-softmax). This module turns those raw confidences into:
+The pipeline produces per-node confidences from the learned labeling
+stages. This module turns those raw confidences into:
 
   1. per-branch confidence    — mean confidence over the nodes in a branch
   2. per-cell aggregates       — mean / median / fraction of low-confidence nodes
   3. two-level flagging        — per-branch and per-cell flags against
                                  calibrated thresholds
 
-The thresholds themselves are loaded from a JSON config that the
-calibration script (paper/_calibrate_flags.py) produces from a held-out
-validation split.
+The deployed compact flagger lives in `flagging.py`; this module remains
+available for confidence summaries and simpler calibrated flag reports.
 
 Typical usage:
-    from hybrid.confidence import (
+    from swcstudio.core.auto_typing.confidence import (
         ConfidenceConfig, summarize_confidence, apply_two_level_flag,
     )
-    from hybrid.pipeline import run_pipeline_on_nodes
+    from swcstudio.core.auto_typing.pipeline import run_pipeline_on_nodes
 
     result = run_pipeline_on_nodes(nodes, ...)
     cfg = ConfidenceConfig.load(path)           # or .default()

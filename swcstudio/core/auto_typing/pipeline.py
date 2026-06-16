@@ -28,8 +28,8 @@ from .cell_type_detector import (
 # locked into the wrong Stage 2 branch by a hard Stage-1 label.
 #
 # Set env var ``SWCAL_NO_SOFT_HANDOFF=1`` to force a hard cascade for
-# the ablation row in the paper. Module-level env-read keeps the
-# evaluator-side change to one CLI flag (see paper/run_ablations.py).
+# ablation or debugging runs. Module-level env-read keeps the
+# evaluator-side change to one environment flag.
 DEFAULT_SOFT_HANDOFF_THRESHOLD = (
     0.0 if os.environ.get("SWCAL_NO_SOFT_HANDOFF") == "1"
     else float(os.environ.get("SWCAL_SOFT_HANDOFF_THRESHOLD", "0.65"))

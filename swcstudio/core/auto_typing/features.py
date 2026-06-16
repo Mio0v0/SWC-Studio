@@ -185,8 +185,8 @@ FEATURE_NAMES: list[str] = [
     "bif_angle_std",               # std of bifurcation angles
 ]
 
-# Ablation hook: paper/run_ablations.py sets SWCAL_NO_PCA=1 to retrain
-# Stage 1 without the PCA features. Filter the names list so both
+# Ablation hook: external training scripts can set SWCAL_NO_PCA=1 to
+# retrain Stage 1 without the PCA features. Filter the names list so both
 # training and inference use the same reduced dimensionality. The
 # extraction code below still populates the PCA keys in the feature
 # dict (they're cheap), but extract_feature_vector reads only the

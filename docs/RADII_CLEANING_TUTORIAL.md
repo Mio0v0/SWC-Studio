@@ -2,7 +2,9 @@
 
 Radii Cleaning fixes abnormal radius values while preserving branch continuity.
 
-OS note: replace `./data/...` with `.\data\...` on Windows. If `swcstudio` is not on PATH, use module mode (`python -m swcstudio.cli.cli ...` on macOS/Linux, `py -m swcstudio.cli.cli ...` on Windows).
+OS note: replace `/` with `\` in paths on Windows. If `swcstudio` is
+not on PATH, use module mode (`python -m swcstudio.cli.cli ...` on
+macOS/Linux, `py -m swcstudio.cli.cli ...` on Windows).
 
 Shared backend module:
 
@@ -100,19 +102,19 @@ Under `rules`:
 Clean one file with the current JSON-configured three-pass method:
 
 ```bash
-swcstudio radii-clean ./data/single-soma.swc
+swcstudio radii-clean cell.swc
 ```
 
 Clean one file while overriding rules for this run:
 
 ```bash
-swcstudio radii-clean ./data/single-soma.swc --config-json '{"rules":{"local_outlier":{"max_percent_deviation":0.4}}}'
+swcstudio radii-clean cell.swc --config-json '{"rules":{"local_outlier":{"max_percent_deviation":0.4}}}'
 ```
 
 Validation command path (same backend):
 
 ```bash
-swcstudio radii-clean ./data/single-soma.swc
+swcstudio radii-clean cell.swc
 ```
 
 ## Outputs and logs

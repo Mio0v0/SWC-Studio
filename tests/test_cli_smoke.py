@@ -11,9 +11,9 @@ from pathlib import Path
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-DATA_DIR = REPO_ROOT / "data"
-SINGLE_SOMA = DATA_DIR / "single-soma.swc"
-MULTI_SOMA = DATA_DIR / "multi-soma.swc"
+FIXTURE_DIR = REPO_ROOT / "tests" / "fixtures"
+SINGLE_SOMA = FIXTURE_DIR / "single-soma.swc"
+MULTI_SOMA = FIXTURE_DIR / "multi-soma.swc"
 
 
 def _read_swc_rows(path: Path) -> list[tuple[int, int]]:

@@ -1,7 +1,7 @@
 """RO-Crate export — v1 minimal implementation (PROVENANCE_SPEC §20).
 
-Bundles an SWC + its full ``.history/`` + AI metadata + per-AI-run
-``reproduce.yaml`` files into a portable directory matching the
+Bundles an SWC + its full materialized history + AI metadata +
+per-AI-run ``reproduce.yaml`` files into a portable directory matching the
 `RO-Crate <https://www.researchobject.org/ro-crate/>`_ shape:
 
 ::

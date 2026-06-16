@@ -44,30 +44,21 @@ Dataclass for auto-typing input options:
 - `flag_enabled: bool` (default `True`) - run learned bad-label flag scoring
 - `flag_strictness: float` (default `0.5`) - controls how conservative
   flagging is; higher values are stricter and may flag more cells
-- `flag_feature_mode: str` (default `"compact"`) - `"compact"` uses the
-  fast deployed flagger; `"baseline"` adds optional baseline-disagreement
-  features; `"auto"` uses baseline features only when all optional artifacts
-  are reachable
+- `flag_feature_mode: str` (default `"compact"`) - compatibility field;
+  SWC-Studio deploys the compact flagger only. `"simple"` is accepted
+  as an alias. Older `"baseline"`, `"auto"`, and `"complex"` values are
+  treated as `"compact"`.
 
-Current flag feature modes:
+Current flag feature mode:
 
-- `compact` - uses the bundled compact learned flagger and only features
-  available from the v12 inference pass.
-- `baseline` - computes multi-baseline disagreement features from the
-  optional NeuroM-RF, L-Measure-RF, Sholl-RF, and Sholl-MLP predictor
-  artifacts, then scores the bundled baseline-disagreement flagger.
-- `auto` - uses `baseline` when all four baseline predictors are reachable;
-  otherwise falls back to `compact`.
-
-The deployed baseline-disagreement flagger expects `baseline_oof_*`
-features and does not require the older research-only `xmodel_*`
-multi-v12 ensemble feature set.
+- `compact` - uses the bundled compact learned flagger and features
+  available from the deployed v12 inference path.
 
 #### `BatchResult`
 
 Returned by folder runs (`run_batch` / `batch_auto_typing`). Fields
 include `folder`, `out_dir`, `zip_path`, `files_total`, `files_processed`,
-`files_failed`, `total_nodes`, `total_type_changes`,
+`files_failed`, `files_qc_failed`, `total_nodes`, `total_type_changes`,
 `total_radius_changes`, `failures`, `per_file`, `log_path`,
 `files_flagged`.
 
@@ -102,8 +93,8 @@ selector — the engine is a single ML pipeline. The
   Stage 1, or provide `"pyramidal"` / `"interneuron"` to bypass it
 - `flag_enabled` (bool, default `True`) - enable learned flag scoring
 - `flag_strictness` (float, default `0.5`) - control flag conservatism
-- `flag_feature_mode` (str, default `"compact"`) - `compact`, `baseline`,
-  or `auto`
+- `flag_feature_mode` (str, default `"compact"`) - compatibility field;
+  compact flagging is always used
 
 #### `batch_radii_cleaning(folder, *, config_overrides=None) -> dict`
 
@@ -150,9 +141,8 @@ Runs the shared auto-typing engine on a single file. The
 When flag scoring runs, `FileResult.flag_result` includes the selected
 model path, `requested_feature_mode`, `actual_feature_mode`,
 `rank_score`, `prob_bad`, the selected threshold, `flagged`, and
-`n_baseline_features`. In a baseline-disagreement run,
-`actual_feature_mode == "baseline"` and `n_baseline_features` should be
-greater than zero.
+`n_baseline_features`. In SWC-Studio, `actual_feature_mode` is
+`"compact"` and `n_baseline_features` is zero.
 
 #### `swcstudio.core.auto_typing.run_file(file_path, opts, *, model_dir=None, output_path=None, write_output=True, write_log=True, use_subtree_stage2=True) -> FileResult`
 
@@ -172,15 +162,7 @@ indicator and by the CLI to fail fast before doing any work.
 
 #### `swcstudio.core.auto_typing.backend_status(*, model_dir=None) -> dict`
 
-Structured status report — which model files were found, where, and
-whether torch is available for the Stage 2b GNN, and whether optional
-baseline-disagreement predictor artifacts are reachable.
-
-The status report includes `flag_pyramidal_baseline_ok`,
-`flag_all_baseline_ok`, and `baseline_predictors_ok`. The first two mean
-the learned baseline-disagreement flag model bundles are present; the
-last means the optional baseline predictor pickles needed to build the
-runtime disagreement features are also reachable.
+Structured status report - which model files were found, where, and whether torch is available for the Stage 2b GNN. The deployed flag models are the compact `flag_model_*.joblib` bundles.
 
 #### `swcstudio.core.auto_typing_train.train_user_models(data_dir, output_dir, *, train_gnn=True, ...) -> TrainingResult`
 

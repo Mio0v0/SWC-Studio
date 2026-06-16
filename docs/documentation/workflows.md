@@ -75,7 +75,10 @@ Default registry location:
 
 Optional override:
 
-- `SWCTOOLS_CUSTOM_TYPES_PATH`
+- `SWCSTUDIO_CUSTOM_TYPES_PATH`
+
+Older installs may still use `SWCTOOLS_CUSTOM_TYPES_PATH`; SWC-Studio
+continues to accept it as a fallback.
 
 See [Custom Types and Labels](custom-types-and-labels.md) for the exact behavior.
 

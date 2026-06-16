@@ -38,13 +38,13 @@ Current config file:
 Run simplification on one file:
 
 ```bash
-swcstudio simplify ./data/single-soma.swc
+swcstudio simplify cell.swc
 ```
 
 Use temporary overrides for one run:
 
 ```bash
-swcstudio simplify ./data/single-soma.swc --config-json '{"thresholds":{"epsilon":1.2,"radius_tolerance":0.35},"flags":{"keep_tips":true,"keep_bifurcations":true}}'
+swcstudio simplify cell.swc --config-json '{"thresholds":{"epsilon":1.2,"radius_tolerance":0.35},"flags":{"keep_tips":true,"keep_bifurcations":true}}'
 ```
 
 Current single-file behavior:

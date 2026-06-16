@@ -19,6 +19,7 @@ reports-and-outputs
 If you are new to the project, read these pages first:
 
 - [Setup](setup.md)
+- [GPU Setup](../GPU_INSTALL.md)
 - [Workflows](workflows.md)
 - [Validation and Repair](validation-and-repair.md)
 - [Auto-Typing Engine](auto-typing-backends.md)

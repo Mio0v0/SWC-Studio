@@ -127,10 +127,10 @@ class ValidationAutoLabelPanel(QWidget):
         root.setAlignment(Qt.AlignTop)
 
         desc = QLabel(
-            "Auto-label every node of the current SWC. Three-stage ML "
-            "pipeline: (1) detect cell type, (2) classify each dendrite "
-            "branch as axon / basal / apical, (3) refine with topology "
-            "rules."
+            "Auto-label every node of the current SWC with the QC-label-flag "
+            "pipeline: input QC, cell-type detection or override, subtree "
+            "labeling, pyramidal apical/basal GNN rescue, topology cleanup, "
+            "and compact bad-label flag scoring."
         )
         desc.setWordWrap(True)
         desc.setStyleSheet("font-size: 12px; color: #555;")
@@ -143,15 +143,20 @@ class ValidationAutoLabelPanel(QWidget):
         model_lbl.setStyleSheet("font-size: 12px; color: #333;")
         self._model_row.addWidget(model_lbl)
         self._edit_model_dir = QLineEdit()
-        self._edit_model_dir.setPlaceholderText("Leave blank to use bundled / user-data models")
+        self._edit_model_dir.setPlaceholderText("Leave blank for default models")
+        self._edit_model_dir.setToolTip("Leave blank to use bundled / user-data models.")
+        self._edit_model_dir.setFixedWidth(260)
         self._edit_model_dir.editingFinished.connect(self._refresh_backend_status)
-        self._model_row.addWidget(self._edit_model_dir, stretch=1)
+        self._model_row.addWidget(self._edit_model_dir)
         self._btn_browse_model = QPushButton("Browse…")
+        self._btn_browse_model.setText("Browse...")
+        self._btn_browse_model.setFixedWidth(96)
         self._btn_browse_model.clicked.connect(self._on_browse_model_dir)
         self._model_row.addWidget(self._btn_browse_model)
         self._backend_status_lbl = QLabel("")
         self._backend_status_lbl.setStyleSheet("font-size: 11px; color: #888;")
         self._model_row.addWidget(self._backend_status_lbl)
+        self._model_row.addStretch()
         root.addLayout(self._model_row)
 
         option_row = QHBoxLayout()
@@ -167,17 +172,6 @@ class ValidationAutoLabelPanel(QWidget):
         self._flag_enabled = QCheckBox("Flag")
         self._flag_enabled.setChecked(True)
         option_row.addWidget(self._flag_enabled)
-        flag_mode_lbl = QLabel("Features:")
-        flag_mode_lbl.setStyleSheet("font-size: 12px; color: #333;")
-        option_row.addWidget(flag_mode_lbl)
-        self._flag_feature_combo = QComboBox()
-        self._flag_feature_combo.addItem("Simple", "compact")
-        self._flag_feature_combo.addItem("Complex", "baseline")
-        self._flag_feature_combo.addItem("Auto", "auto")
-        self._flag_feature_combo.setToolTip(
-            "Simple uses the compact flagger. Complex uses baseline-disagreement features when available."
-        )
-        option_row.addWidget(self._flag_feature_combo)
         strict_lbl = QLabel("Strictness:")
         strict_lbl.setStyleSheet("font-size: 12px; color: #333;")
         option_row.addWidget(strict_lbl)
@@ -248,11 +242,7 @@ class ValidationAutoLabelPanel(QWidget):
 
     @staticmethod
     def _display_feature_mode(raw: object) -> str:
-        value = str(raw or "compact").strip().lower()
-        if value.startswith("baseline"):
-            return "Complex"
-        if value == "auto":
-            return "Auto"
+        _ = raw
         return "Simple"
 
     def current_options(self) -> BatchOptions:
@@ -266,7 +256,7 @@ class ValidationAutoLabelPanel(QWidget):
             cell_type=self._cell_type_combo.currentData() or "unknown",
             flag_enabled=self._flag_enabled.isChecked(),
             flag_strictness=float(self._flag_slider.value()) / 100.0,
-            flag_feature_mode=self._flag_feature_combo.currentData() or "compact",
+            flag_feature_mode="compact",
         )
 
     def current_settings(self) -> dict:
@@ -277,7 +267,7 @@ class ValidationAutoLabelPanel(QWidget):
             "cell_type": self._cell_type_combo.currentData() or "unknown",
             "flag_enabled": self._flag_enabled.isChecked(),
             "flag_strictness": float(self._flag_slider.value()) / 100.0,
-            "flag_feature_mode": self._flag_feature_combo.currentData() or "compact",
+            "flag_feature_mode": "compact",
         }
 
     def _on_browse_model_dir(self) -> None:
@@ -363,7 +353,6 @@ class ValidationAutoLabelPanel(QWidget):
         self._btn_browse_model.setEnabled(not running)
         self._cell_type_combo.setEnabled(not running)
         self._flag_enabled.setEnabled(not running)
-        self._flag_feature_combo.setEnabled(not running)
         self._flag_slider.setEnabled(not running)
         self._flag_strictness_spin.setEnabled(not running)
         if running and status_text:

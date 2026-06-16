@@ -19,8 +19,8 @@ Data leakage prevention:
   column is used only as the target label and for soma detection.
 
 Usage:
-    python -m hybrid.train_stage2 --data-dir data/benchmark_pyramidal_interneuron_v1_qc_diag_pruned
-    python -m hybrid.train_stage2 --data-dir data/benchmark_pyramidal_interneuron_v1_qc_diag_pruned --test-size 0.2
+    python -m swcstudio.core.auto_typing.train_stage2 --data-dir path/to/labeled-dataset
+    python -m swcstudio.core.auto_typing.train_stage2 --data-dir path/to/labeled-dataset --test-size 0.2
 """
 from __future__ import annotations
 

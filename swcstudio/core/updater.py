@@ -15,8 +15,8 @@ The app ships in two flavors:
                  (PyTorch, Qt, vispy, sklearn). Rare bumps.
   Application    Your Python code (``swcstudio/`` package).          5 MB zip
                  Changes most often.
-  Models         Trained sklearn pickles + GNN checkpoint            60 MB zip
-                 (``cell_type_classifier.pkl`` etc.).
+  Models         Trained sklearn pickles, torch checkpoints, QC      ~75-80 MB
+                 gate, and compact flag models.
   ============== ================================================== ============
 
 The bundled .app contains its own internal copy of each piece. When the

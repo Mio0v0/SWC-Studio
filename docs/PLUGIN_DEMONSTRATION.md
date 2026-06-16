@@ -120,7 +120,7 @@ opts = BatchOptions(soma=True, axon=True, apic=False, basal=True, rad=False, zip
 # engine. To run a plugin-registered method instead, dispatch through
 # the plugin registry directly:
 fn = resolve_method("batch_processing.auto_typing", "lab_summary")
-print(fn("./data", opts, {}))
+print(fn("./swc-folder", opts, {}))
 PY
 ```
 

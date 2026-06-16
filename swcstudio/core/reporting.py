@@ -14,7 +14,7 @@ from typing import Any
 
 import pandas as pd
 
-from swcstudio import __version__ as SWCTOOLS_VERSION
+from swcstudio import __version__ as SWCSTUDIO_VERSION
 from swcstudio.core.custom_types import load_custom_type_definitions
 from swcstudio.core.validation_catalog import group_rows_by_category, rule_for_key
 
@@ -423,6 +423,8 @@ def format_auto_typing_report_text(payload: dict[str, Any]) -> str:
     lines.append(f"Output folder: {payload.get('out_dir', '')}")
     lines.append(f"SWC files detected: {payload.get('files_total', 0)}")
     lines.append(f"Processed: {payload.get('files_processed', 0)}")
+    if "files_qc_failed" in payload:
+        lines.append(f"QC rejected: {payload.get('files_qc_failed', 0)}")
     lines.append(f"Failed: {payload.get('files_failed', 0)}")
     lines.append(f"Total nodes processed: {payload.get('total_nodes', 0)}")
     lines.append(f"Type changes: {payload.get('total_type_changes', 0)}")
@@ -506,7 +508,7 @@ def format_morphology_session_log_text(
     lines: list[str] = []
     lines.append("SWC Session Report")
     lines.append("------------------")
-    lines.append(f"Tool Version: SWC-Studio {SWCTOOLS_VERSION}")
+    lines.append(f"Tool Version: SWC-Studio {SWCSTUDIO_VERSION}")
     lines.append(f"Source file: {source_file}")
     lines.append(f"Session started: {session_started}")
     lines.append(f"Session ended: {session_ended}")

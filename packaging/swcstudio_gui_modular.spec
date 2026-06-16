@@ -12,13 +12,19 @@ Difference from swcstudio_gui.spec:
   ``Contents/Resources/models/`` and can be replaced by the auto-updater.
 
 Result: code-only updates ship as ~5 MB zips that replace just the
-``swcstudio/`` folder. Model-only updates ship as ~60 MB zips.
+``swcstudio/`` folder. Model-only updates ship as a separate model
+bundle.
 """
 
 from importlib.metadata import PackageNotFoundError, version as pkg_version
 from pathlib import Path
 
-from PyInstaller.utils.hooks import collect_data_files, collect_submodules, copy_metadata
+from PyInstaller.utils.hooks import (
+    collect_data_files,
+    collect_dynamic_libs,
+    collect_submodules,
+    copy_metadata,
+)
 
 ROOT_DIR = Path.cwd()
 ENTRYPOINT = ROOT_DIR / "swcstudio_bootstrap.py"
@@ -26,6 +32,11 @@ try:
     APP_VERSION = pkg_version("swcstudio")
 except PackageNotFoundError:
     APP_VERSION = "0.1.0"
+
+
+def _exclude_xgboost_tests(name):
+    return not name.startswith("xgboost.testing")
+
 
 # --- Data ---
 # The bootstrap doesn't import swcstudio at module level, so we have to
@@ -35,15 +46,21 @@ datas = []
 datas += collect_data_files("vispy")
 datas += collect_data_files("torch_geometric", include_py_files=True)
 datas += collect_data_files("torch", include_py_files=True)
+datas += collect_data_files("xgboost", includes=["VERSION"])
 datas += copy_metadata("neurom")
 datas += copy_metadata("morphio")
 datas += copy_metadata("vispy")
 datas += copy_metadata("scikit-learn")
 datas += copy_metadata("torch")
 datas += copy_metadata("torch_geometric")
+datas += copy_metadata("xgboost")
+datas += copy_metadata("zstandard")
+datas += copy_metadata("pyzipper")
 # Note: swcstudio's data files (model pickles, tools/*.json) are NOT
 # bundled here. They land in Contents/Resources/app/ via the post-build
 # copy step.
+
+binaries = collect_dynamic_libs("xgboost")
 
 # --- Hidden imports ---
 # Without these, PyInstaller can't see what the late `__import__` of
@@ -52,6 +69,7 @@ hiddenimports = (
     collect_submodules("vispy.app.backends")
     + collect_submodules("sklearn")
     + collect_submodules("scipy")
+    + collect_submodules("xgboost", filter=_exclude_xgboost_tests)
     + collect_submodules("torch_geometric")
     + [
         "PySide6.QtOpenGLWidgets",
@@ -60,12 +78,17 @@ hiddenimports = (
         "vispy.app.backends._qt",
         "vispy.app.backends._pyside6",
         "torch",
+        "xgboost",
         "numpy",
         "pandas",
         "scipy",
         "sklearn",
         "morphio",
         "neurom",
+        "zstandard",
+        "pyzipper",
+        "pyzipper.zipfile",
+        "pyzipper.zipfile_aes",
     ]
 )
 
@@ -81,12 +104,14 @@ module_collection_mode = {
 # swcstudio package even if some import path drags it in by accident.
 excludes = [
     "swcstudio",
+    "xgboost.testing",
+    "hypothesis",
 ]
 
 a = Analysis(
     [str(ENTRYPOINT)],
     pathex=[str(ROOT_DIR)],
-    binaries=[],
+    binaries=binaries,
     datas=datas,
     hiddenimports=hiddenimports,
     hookspath=[],
