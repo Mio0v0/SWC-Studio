@@ -87,6 +87,11 @@ The intended loop is:
 3. let the issue route you to the matching repair tool
 4. apply a fix
 5. rerun validation
-6. save the updated file and review the generated logs
+6. review the new per-file history operation and any requested report
+
+Type-suspicion analysis normally runs in a background worker so the
+rest of the issue list can appear first. If validation immediately
+follows an applied auto-label result, the GUI reuses that result instead
+of running the same inference again.
 
 This is the same logic described in the GUI workflow and reflected by the CLI command set.

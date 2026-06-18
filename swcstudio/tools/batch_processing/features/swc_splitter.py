@@ -6,6 +6,14 @@ from pathlib import Path
 from typing import Any
 
 from swcstudio.core.config import load_feature_config, merge_config
+from swcstudio.core.provenance import (
+    OpKind,
+    canonical_swc,
+    derived_from_for_swc_path,
+    derived_from_payload,
+    sha256_hex,
+    tracked_op,
+)
 from swcstudio.core.reporting import (
     format_split_report_text,
     operation_output_dir_for_folder,
@@ -65,6 +73,7 @@ def split_folder(folder: str, *, config_overrides: dict | None = None) -> dict[s
     trees_saved = 0
     failures: list[str] = []
     output_files: list[str] = []
+    output_commits: list[dict[str, Any]] = []
 
     naming_cfg = dict(cfg.get("naming", {}))
     output_mode = str(naming_cfg.get("output_mode", "single_output_subdir")).lower()
@@ -80,6 +89,13 @@ def split_folder(folder: str, *, config_overrides: dict | None = None) -> dict[s
                 continue
 
             files_split += 1
+            source_provenance = derived_from_for_swc_path(fp)
+            if source_provenance is None:
+                source_provenance = derived_from_payload(
+                    source_root_sha=sha256_hex(canonical_swc(fp.read_bytes())),
+                    source_commit_sha="sha256:" + ("0" * 64),
+                    source_path=fp.name,
+                )
             if output_mode == "per_file_subdir":
                 file_out_dir = out_dir / fp.stem
                 file_out_dir.mkdir(parents=True, exist_ok=True)
@@ -94,8 +110,26 @@ def split_folder(folder: str, *, config_overrides: dict | None = None) -> dict[s
                     timestamp=run_timestamp,
                     variant=f"tree_{idx}",
                 )
-                out_path.write_text(sub_text, encoding="utf-8")
+                with tracked_op(
+                    out_path,
+                    kind=OpKind.SPLIT,
+                    params={
+                        "source": fp.name,
+                        "tree_index": idx,
+                        "tree_count": len(trees),
+                    },
+                    message=f"GUI batch split tree {idx}/{len(trees)} from {fp.name}",
+                    derived_from=source_provenance,
+                ) as op:
+                    op.set_output(sub_text.encode("utf-8"))
                 trees_saved += 1
+                output_commits.append(
+                    {
+                        "file": str(out_path.relative_to(out_dir)),
+                        "commit_sha": op.result.commit_sha if op.result else None,
+                        "operation_id": op.result.operation_label if op.result else None,
+                    }
+                )
                 if output_mode == "per_file_subdir":
                     output_files.append(str(out_path.relative_to(out_dir)))
                 else:
@@ -111,6 +145,7 @@ def split_folder(folder: str, *, config_overrides: dict | None = None) -> dict[s
         "files_skipped": files_skipped,
         "trees_saved": trees_saved,
         "output_files": output_files,
+        "output_commits": output_commits,
         "failures": failures,
     }
 

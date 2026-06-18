@@ -100,7 +100,11 @@ def compute_swc_diff(
     # Topology: removals first, then adds, then reparents (stable order
     # makes diff blobs byte-stable for identical inputs).
     for nid in sorted(before_ids - after_ids):
-        payload.topology_changes.append({"kind": "remove", "id": nid})
+        payload.topology_changes.append({
+            "kind": "remove",
+            "id": nid,
+            "row": before_rows[nid]["raw"],
+        })
 
     for nid in sorted(after_ids - before_ids):
         payload.topology_changes.append({

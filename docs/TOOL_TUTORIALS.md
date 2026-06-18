@@ -46,11 +46,9 @@ Current single-file edit behavior:
 - apical labeling is detected automatically when appropriate
 - `--cell-type pyramidal` / `--cell-type interneuron` bypasses Stage 1 when the user already knows the cell type
 - flag scoring is enabled by default; `--flag-strictness` tunes loose vs conservative flagging and `--no-flag` disables it
-
-
-- the updated SWC is written automatically
-- the matching log is written automatically
-- both go into the source file's `*_swc_studio_output` directory
+- the source SWC is updated automatically
+- the operation is recorded in `<stem>_history.swcstudio`
+- SWC/SWC+ comment headers are preserved while `# @PROV` pointers are updated
 
 ## Process a folder
 

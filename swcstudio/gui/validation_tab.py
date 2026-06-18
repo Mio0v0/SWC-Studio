@@ -17,7 +17,6 @@ from PySide6.QtWidgets import QFileDialog, QHBoxLayout, QLabel, QPlainTextEdit, 
 from swcstudio.core.config import feature_config_path, load_feature_config
 from swcstudio.core.reporting import (
     format_validation_report_text,
-    validation_log_path_for_file,
     write_text_report,
 )
 from swcstudio.core.validation import _split_swc_by_soma_roots
@@ -467,7 +466,8 @@ class ValidationTabWidget(QWidget):
         if not self._report:
             return
         if self._source_file_path:
-            default_path = str(validation_log_path_for_file(self._source_file_path))
+            source = Path(self._source_file_path)
+            default_path = str(source.parent / f"{source.stem}_validation_report.txt")
         else:
             default_path = str(Path.cwd() / f"{self._source_stem}_validation_report.txt")
         path, _ = QFileDialog.getSaveFileName(

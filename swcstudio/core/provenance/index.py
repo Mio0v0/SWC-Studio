@@ -169,7 +169,12 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
 # ----------------------------------------------------------------------
 
 
-def insert_event(conn: sqlite3.Connection, event: Event, *, node_changes_for_op: dict[int, list[dict[str, Any]]] | None = None) -> None:
+def insert_event(
+    conn: sqlite3.Connection,
+    event: Event,
+    *,
+    node_changes_for_op: dict[int, list[dict[str, Any]]] | None = None,
+) -> list[int]:
     """Insert one event into the index.
 
     The optional ``node_changes_for_op`` maps the integer op-index
@@ -178,11 +183,15 @@ def insert_event(conn: sqlite3.Connection, event: Event, *, node_changes_for_op:
     after computing the structured diff so detailed queries
     (``every change to node 47``) work without re-reading diff blobs.
 
+    Returns the per-history operation IDs assigned in ``event.ops``
+    order. Every SWC has its own sequence: ``op-1``, ``op-2``, ...
+
     Idempotent on the commit sha — calling twice with the same event
     is a no-op (INSERT OR IGNORE on commits, then op rows fall through
     the foreign-key check). This makes rebuild_index restartable.
     """
     derived = event.derived_from or {}
+    operation_ids: list[int] = []
     conn.execute("BEGIN")
     try:
         # commits row
@@ -216,7 +225,7 @@ def insert_event(conn: sqlite3.Connection, event: Event, *, node_changes_for_op:
         # writes too — we don't want duplicates.
         if cur.rowcount == 0:
             conn.execute("COMMIT")
-            return
+            return operation_ids
 
         # ops rows
         for i, op in enumerate(event.ops or []):
@@ -231,6 +240,7 @@ def insert_event(conn: sqlite3.Connection, event: Event, *, node_changes_for_op:
                 (event.id, i, str(op.get("kind", "")), params_json, summary_json, ai_ref),
             )
             op_row_id = cur2.lastrowid
+            operation_ids.append(int(op_row_id))
 
             # node_changes rows (caller-supplied; tracked_op pre-computes
             # the structured diff so we don't decompress blobs here)
@@ -255,6 +265,7 @@ def insert_event(conn: sqlite3.Connection, event: Event, *, node_changes_for_op:
             # via insert_ai_run since that requires reading the AI-run
             # blob; here we only record the reference.
         conn.execute("COMMIT")
+        return operation_ids
     except Exception:
         conn.execute("ROLLBACK")
         raise

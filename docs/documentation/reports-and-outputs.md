@@ -1,6 +1,6 @@
 # Reports and Outputs
 
-This page explains where `SWC-Studio` writes outputs and how logs are structured.
+This page explains where `SWC-Studio` writes outputs and how history/reports are structured.
 
 ```{toctree}
 :hidden:
@@ -11,15 +11,15 @@ Logs And Reports <../LOGS_AND_REPORTS>
 
 ## Shared reporting layer
 
-The GUI and CLI use the same reporting helpers in `swcstudio.core.reporting`. That shared layer is responsible for:
+Text reports use the shared helpers in `swcstudio.core.reporting`. That shared layer is responsible for:
 
 - output directory naming
 - operation report naming
 - validation report formatting
-- GUI session log formatting
-- per-operation text logs for CLI edits
+- explicit text reports for report/export workflows
 
-Because the report builders are shared, logs from different interfaces use the same conventions.
+GUI morphology history is stored separately in the encrypted
+`<stem>_history.swcstudio` archive.
 
 ## Default single-file output directory
 
@@ -27,21 +27,18 @@ For a source file:
 
 - `<parent>/<stem>.swc`
 
-the default output directory is:
+the default report/export directory is:
 
 - `<parent>/<stem>_swc_studio_output/`
 
-That directory is used for:
+That directory is used mainly for:
 
 - validation reports
-- single-file CLI edit results
-- single-file CLI edit logs
-- GUI session logs
-- GUI saved copies
 
 ## Current CLI behavior for edit commands
 
-Single-file edit commands write outputs automatically. You do not need a separate `--write` flag.
+Mutating CLI edit commands update the source SWC directly. You do not
+need a separate `--write` flag.
 
 When you run single-file edit commands such as:
 
@@ -56,25 +53,38 @@ When you run single-file edit commands such as:
 
 the CLI writes:
 
-- an updated SWC file into the default output folder
-- a matching text report into the same folder
+- the updated source SWC
+- a per-file history archive: `<stem>_history.swcstudio`
 
-## GUI session behavior
+Mutating batch commands record each processed SWC in place, with an
+independent history and operation-ID sequence for every file. They do
+not create a shared mutation-output folder. Text reports remain for
+validation/report-only commands, while `split`, `history
+checkout`, and `history checkpoint` intentionally create separate SWC
+files.
 
-The GUI keeps a session-level log for a document.
+## GUI history behavior
 
-Typical GUI outputs:
+Tracked GUI morphology edits update the source SWC directly and record
+the operation in the per-file history archive.
 
-- session log
-  - `<stem>_session_log_<timestamp>.txt`
-- saved copy
-  - `<stem>_closed_<timestamp>.swc`
+Typical GUI history files:
 
-Those files are also written into the default `*_swc_studio_output` directory for the source file.
+- source SWC with compact `# @PROV` pointer lines
+- encrypted history archive
+  - `<stem>_history.swcstudio`
+
+The History Browser opens on the Operation History tab. Each file has
+its own chronological operation IDs (`op-1`, `op-2`, `op-3`, ...).
+Each row summarizes date/time, actor, operation name, parameters, and
+changed-node counts; expanding a row shows node-level old/new values.
+Restore operations identify the operation/version they restored from.
+Exact version IDs and SHA details are available in the Commit History
+tab for technical review.
 
 ## What the logs contain
 
-Depending on the operation, reports can include:
+Depending on the operation, reports or history records can include:
 
 - grouped validation summaries
 - thresholds and metrics

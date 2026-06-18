@@ -1,6 +1,6 @@
 # CLI Tutorial
 
-This tutorial walks through the current command-line workflow for inspecting a file, applying edits, and reviewing the generated outputs.
+This tutorial walks through the current command-line workflow for inspecting a file, applying edits, and reviewing history/results.
 
 ## Before you start
 
@@ -72,10 +72,11 @@ swcstudio connect cell.swc --start-id 10 --end-id 22
 
 Single-file edit commands automatically write:
 
-- the updated SWC file
-- the matching operation log
+- the updated source SWC file
+- an operation record in `<stem>_history.swcstudio`
 
-to the default `*_swc_studio_output` directory for the source file.
+The source SWC receives compact `# @PROV` pointer lines, and existing
+SWC/SWC+ comment headers are preserved.
 Auto-label uses the v12 QC-label-flag engine. Leave cell type as
 unknown to run Stage 1, or pass `--cell-type pyramidal` /
 `--cell-type interneuron` when the user already knows the type.
@@ -96,6 +97,10 @@ swcstudio radii-clean ./swc-folder
 swcstudio simplify ./swc-folder
 swcstudio index-clean ./swc-folder
 ```
+
+Mutating batch commands update each processed source SWC in place and
+record operation history for each file. `split` is the main exception
+because it intentionally creates new derived SWC files.
 
 ## Step 5b: Train your own auto-typing models
 
@@ -142,17 +147,27 @@ Example:
 swcstudio simplify cell.swc --config-json '{"thresholds":{"epsilon":1.2,"radius_tolerance":0.35}}'
 ```
 
-## Step 7: Review outputs and logs
+## Step 7: Review history and outputs
 
-For single-file edits, open the source file's default output folder:
+For mutating edits, look next to the source SWC:
 
-- `<stem>_swc_studio_output`
+- `<stem>.swc`
+- `<stem>_history.swcstudio`
 
-Typical files there include:
+Use history commands to inspect or materialize previous states:
 
-- edited SWC copies
-- validation reports
-- per-operation text logs
+```bash
+swcstudio history log cell.swc
+swcstudio history show cell.swc op-1
+swcstudio history checkpoint cell.swc op-1 --label review
+```
+
+`history log` prints operation IDs such as `op-1`. Add
+`--technical` if you need exact version/SHA details for debugging or
+reproducibility.
+
+Validation/report-only commands can still write text reports, and
+`split` writes separate derived SWC files.
 
 ## Related pages
 

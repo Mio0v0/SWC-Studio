@@ -126,23 +126,33 @@ def _parse_swc_for_qc(path: Path) -> tuple[list[SWCNode], list[str]]:
 
 
 def _count_cycle_nodes(nodes: list[SWCNode]) -> int:
-    """Return the number of nodes whose parent chain enters a cycle."""
-    by_id = {n.id: n for n in nodes}
+    """Return the number of nodes that are members of parent cycles.
+
+    Each node is resolved at most once. The previous implementation
+    restarted the full parent walk from every node, which became
+    quadratic on long valid chains (tens of seconds for large SWCs).
+    """
+    parent_by_id = {node.id: node.parent for node in nodes}
+    resolved: set[int] = set()
     cycle_nodes: set[int] = set()
-    for node in nodes:
-        seen: dict[int, int] = {}
+    for start in parent_by_id:
+        if start in resolved:
+            continue
+        positions: dict[int, int] = {}
         chain: list[int] = []
-        current = node.id
-        while current != -1 and current in by_id:
-            if current in seen:
-                cycle_nodes.update(chain[seen[current]:])
+        current = start
+        while (
+            current != -1
+            and current in parent_by_id
+            and current not in resolved
+        ):
+            if current in positions:
+                cycle_nodes.update(chain[positions[current]:])
                 break
-            seen[current] = len(chain)
+            positions[current] = len(chain)
             chain.append(current)
-            parent = by_id[current].parent
-            if parent == -1 or parent not in by_id:
-                break
-            current = parent
+            current = parent_by_id[current]
+        resolved.update(chain)
     return len(cycle_nodes)
 
 

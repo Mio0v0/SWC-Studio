@@ -131,7 +131,7 @@ def _iter_legacy_artifacts(out_dir: Path):
     """Yield paths considered "pre-history" artifacts.
 
     Anything in the output dir that is NOT inside ``.history/`` and
-    NOT the new ``<stem>_current.swc`` counts. Includes
+    NOT the refreshed source SWC counts. Includes
     ``_closed_*.swc``, text reports, batch reports, etc.
     """
     if not out_dir.exists():

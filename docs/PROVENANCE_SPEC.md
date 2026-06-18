@@ -1,10 +1,11 @@
 # Provenance & Versioning Spec (v1)
 
-**Status:** draft, locked design decisions; pending implementation.
+**Status:** implemented for GUI-tracked morphology edits; remaining
+history features are extended incrementally.
 
 This document specifies the provenance, versioning, and reproducibility
-system for SWC-Studio. It replaces the current sidecar-text-report
-behavior described in `LOGS_AND_REPORTS.md`.
+system for SWC-Studio. For GUI morphology editing, it replaces the old
+session text-log behavior described in `LOGS_AND_REPORTS.md`.
 
 The goals (in priority order):
 
@@ -31,16 +32,15 @@ SQLite index", inspired by:
 
 ## 1. On-disk layout
 
-History lives **per file** as a visible archive next to the SWC, plus
-the existing output directory for materialized current/checkpoint SWCs
-and a **project-level index** at the parent folder root.
+History lives **per file** as a visible archive next to the SWC. The
+source SWC is the current editable state and receives compact `@PROV`
+pointer lines. A **project-level index** can also be built at the parent
+folder root.
 
 ```
 neuron_001.swc
 neuron_001_history.swcstudio       # visible encrypted history repo archive
-neuron_001_swc_studio_output/
-    neuron_001_current.swc          # latest materialized state
-    <user-marked checkpoints>.swc   # optional, see §7
+<user-marked checkpoints>.swc       # optional, see section 7
 
 Inside neuron_001_history.swcstudio after SWC-Studio decrypts/materializes it:
     history/
@@ -61,9 +61,9 @@ Inside neuron_001_history.swcstudio after SWC-Studio decrypts/materializes it:
 ```
 
 - Per-file `<stem>_history.swcstudio` is the **source of truth**.
-  SWC-Studio materializes it into a transient `.history/` work tree
-  only while reading or writing, then re-encrypts it and removes the
-  work tree.
+  SWC-Studio materializes it into a transient work tree under the OS
+  temp directory only while reading or writing, then re-encrypts it and
+  removes the work tree.
 - SWC-Studio writes/reads the archive with AES zip encryption through
   `pyzipper`. By default it uses an app-managed password so the sidecar
   is not a normal user-editable zip folder. Advanced users can set
@@ -307,23 +307,30 @@ Verbs:
 | `branch <name> [from=<sha>]` | creates a new branch at the given sha (default: HEAD) |
 | `switch <name>` | sets HEAD to the named branch |
 | `tag <name> [<sha>]` | creates an immutable named pointer |
-| `revert <sha>` | shortcut: branches from `<sha>` with auto-name `revert-<short>-<ts>` and switches |
 
 Mutating ops always commit on the active branch. To mutate from a past
 state, branch first.
 
-## 7. Output-file model (hybrid)
+The GUI's **Revert to selected state** action does not move or rewrite
+existing history. It creates a new commit on the active branch whose
+content matches the selected operation/version, and records the source
+operation and technical version in that new commit's parameters.
 
-Per output directory:
+## 7. Output-file model
 
-- `<stem>_current.swc` — always present, overwritten on each commit on
-  the active branch.
-- `<stem>_<label>.swc` — optional, materialized only when the user
-  marks a commit as a checkpoint via `swcstudio history checkpoint
-  <sha> --label <label>` or the GUI's "Mark as checkpoint" action.
+For GUI-tracked morphology edits:
 
-No automatic timestamped per-op output files. The full set of past
-states is always retrievable via `checkout`.
+- `<stem>.swc` - the source file is the current materialized state and
+  is overwritten on each committed edit.
+- `<stem>_history.swcstudio` - visible encrypted history archive stored
+  next to the source SWC.
+- `<stem>_<label>.swc` - optional, materialized only when the user marks
+  an operation/state as a checkpoint via `swcstudio history checkpoint <op-id|sha>
+  --label <label>` or the GUI's "Mark as checkpoint" action.
+
+No automatic `_current.swc` or timestamped per-op GUI copies are
+written. The full set of past states is always retrievable via history
+checkout/checkpoint actions.
 
 ## 8. The `tracked_op()` API
 
@@ -341,50 +348,56 @@ with tracked_op(
     message="Auto-label apical/basal",
     is_ai=True,
 ) as op:
-    new_swc_bytes = run_auto_label(op.input_swc_bytes, ...)
+    new_swc_bytes = run_auto_label(op.input_bytes, ...)
     op.set_output(new_swc_bytes)
-    op.add_metric("nodes_labeled", 1283)
 ```
 
 Lifecycle:
 
-1. Materialize `<stem>_history.swcstudio` into the transient `.history/`
-   work tree, or initialize a new work tree if no archive exists.
+1. Materialize `<stem>_history.swcstudio` into the transient temp work
+   tree, or initialize a new work tree if no archive exists.
 2. Acquire `.history/lock`. Fail loudly if already held.
-3. Read the active branch tip. Snapshot input.
-4. If `is_ai=True`, snapshot env fingerprint (or reference an existing one).
+3. Read the active branch tip and capture the input state.
+4. If `is_ai=True`, capture an environment fingerprint (or reference an existing one).
 5. Run the body.
 6. Validate output was set; compute `output_sha`.
 7. Compute structured diff vs input; write diff blob.
 8. If `is_ai=True`, finalize and write AI-run blob.
 9. Write commit event to `events.jsonl` (atomic append).
 10. Update `refs/branches/<active>` to new commit sha (atomic rename).
-11. If commit count on this branch is a multiple of 50, write a snapshot blob.
-12. Update SQLite index (within same SQLite transaction).
-13. Rewrite `<stem>_current.swc` with updated `@PROV` tip line.
-14. Release lock.
-15. Re-encrypt the `.history/` work tree into `<stem>_history.swcstudio`
+11. Update the rebuildable SQLite index.
+12. Rewrite the source `<stem>.swc` with updated `@PROV` tip line while
+    preserving non-`@PROV` comment headers, including SWC+ blocks.
+13. Release lock.
+14. Re-encrypt the temp work tree into `<stem>_history.swcstudio`
     and remove the work tree.
 
 Errors at any step roll back: no partial events, no orphan blobs are
 referenced, lock is released in `finally`.
 
-GUI sessions wrap a long-lived `tracked_session()` context; sub-ops
-are appended to a single commit on `tracked_session.__exit__`.
+Current GUI editing actions create one tracked commit per applied
+operation. Mutating GUI batch tools also create one independent commit
+per source file, so each file keeps its own operation-number sequence
+and a failure in one file does not merge or corrupt another file's
+history.
 
-## 9. Snapshots
+## 9. State reconstruction
 
-A full canonicalized SWC blob is written to `objects/` every 50 ops on
-each branch, and unconditionally for the first commit on a branch.
-Snapshot blobs are tagged in the event with `kind: "snapshot"`.
+The current v1 implementation does not yet write periodic full-state
+snapshot blobs. The source SWC is the materialized state at the active
+branch tip, while each history event stores a structured diff.
 
 `checkout(sha)` algorithm:
 
-1. Walk parents from `sha` to find the nearest snapshot ≤ `sha`.
-2. Replay diffs forward from snapshot to `sha`.
-3. Return the materialized bytes.
+1. Start from the current materialized source SWC at the active branch
+   tip.
+2. Walk backward toward the requested ancestor, applying inverse diffs
+   for intervening commits.
+3. Return the reconstructed canonical SWC bytes.
 
-Worst case replay: 49 diffs.
+Periodic snapshots are a future optimization. If added, they can bound
+replay work without changing operation IDs or the append-only event
+history.
 
 ## 10. Concurrency
 
@@ -501,72 +514,72 @@ A colleague with `swcstudio reproduce reproduce.yaml`:
 
 ## 13. CLI surface (v1)
 
-Full v1: all 12 commands ship in the first release.
+The current CLI ships these 13 history commands:
 
 ```
-swcstudio history log [<file>] [--branch=<n>] [--actor=<u>] [--limit=N]
-swcstudio history show <sha> [--format=text|json|diff]
-swcstudio history checkout <sha> [-o <path>]
-swcstudio history branch <name> [--from=<sha>]
-swcstudio history switch <name>
-swcstudio history tag <name> [<sha>]
-swcstudio history checkpoint <sha> --label <label>
-swcstudio history reproduce <sha> [-o reproduce.yaml]
-swcstudio history reindex [<file>|--project=<dir>]
-swcstudio history verify [<file>]
-swcstudio history gc [<file>]              # remove unreachable blobs
+swcstudio history log <file> [--branch=<n>] [--actor=<u>] [--limit=N] [--technical]
+swcstudio history show <file> <op-id|sha> [--format=text|json] [--technical]
+swcstudio history checkout <file> <op-id|sha> [-o <path>]
+swcstudio history branch <file> [<name>] [--from=<op-id|sha>]
+swcstudio history switch <file> <name>
+swcstudio history tag <file> [<name>] [<op-id|sha>]
+swcstudio history checkpoint <file> <op-id|sha> --label <label>
+swcstudio history reproduce <file> <op-id|sha> [-o reproduce.yaml]
+swcstudio history reindex <file>
+swcstudio history verify <file>
+swcstudio history gc <file> [--dry-run]    # remove unreachable blobs
 swcstudio history export-crate <file> -o <dir>   # RO-Crate bundle
+swcstudio history init <file>
 ```
 
 | Command | Purpose |
 |---|---|
-| `log` | Chronological list of commits on the active branch (or a chosen one). |
-| `show` | Detailed view of one commit (ops, params, diff summary, AI metadata). |
-| `checkout` | Materialize a past state as a read-only `.swc`. HEAD untouched. |
-| `branch` | Create a named branch at a chosen commit (default HEAD). |
+| `log` | Chronological operation list by default; `--technical` shows commit/version IDs. |
+| `show` | Detailed view of one operation by default; `--technical` shows commit/version details. |
+| `checkout` | Materialize a past operation/state as a read-only `.swc`. HEAD untouched. |
+| `branch` | Create a named branch at a chosen operation/state (default HEAD). |
 | `switch` | Set HEAD to an existing branch. |
-| `tag` | Bookmark a commit with an immutable name. |
-| `checkpoint` | Materialize a past commit as a labeled `.swc` next to `current.swc`. |
+| `tag` | Bookmark an operation/state with an immutable name. |
+| `checkpoint` | Materialize a past operation/state as a labeled `.swc` next to the source SWC. |
 | `reproduce` | Emit a `reproduce.yaml` so a colleague can recompute an AI result. |
 | `reindex` | Rebuild `index.sqlite` from `events.jsonl`. |
 | `verify` | Hash-check every blob; report mismatches. |
 | `gc` | Remove unreferenced blobs from `objects/`. |
 | `export-crate` | Bundle file + history + AI metadata as an RO-Crate directory. |
+| `init` | Initialize history explicitly and migrate a legacy output sidecar when present. |
 
 ## 14. GUI surface (v1)
+
+The GUI presents Operation History first. Exact commit/SHA-based version
+details are kept in the Commit History tab for debugging and
+reproducibility.
 
 - **Timeline panel** — chronological list of commits on the active
   branch. Each row shows ts, actor, op kinds, summary counts. Click
   for detail.
 - **Branch picker** — dropdown of branches; "create branch from this
-  commit" action on any commit.
+  selected operation/state.
 - **Detail view** — for a selected commit: ops, sub-op params, diff
   summary; for AI ops, env + reproduce.yaml export.
+- **Operation History** — expandable operation rows. Operation IDs are
+  per-file, chronological labels (`op-1`, `op-2`, `op-3`, ...), even when
+  files are processed together in a batch. Each row summarizes time,
+  actor, operation type, parameters, and changed-node count; its child
+  rows show node-level old/new values. Restore operations include the
+  operation/version they restored from. This is the default user-facing view.
 
 GUI v1 does **not** include: in-app three-way diff viewer, merge UI,
 visual DAG renderer. Those are v2.
 
-## 15. Replacement of the existing reporting layer
+## 15. Replacement of GUI session text logs
 
-The current `format_*_report_text` helpers in
-`swcstudio.core.reporting` are **removed in v1**. The text-report
-files produced by the old code path are no longer generated.
+GUI morphology sessions no longer write `_session_log_*.txt` files by
+default. Operation summaries and node-level old/new values are read from
+the encrypted history archive and displayed in the History Browser.
 
-Their replacement is `swcstudio history show <sha> --format=text`,
-implemented inside `swcstudio.core.provenance.render` as a single
-generic renderer over commits, ops, and AI-run blobs (one renderer,
-not one per op kind).
-
-Removal plan:
-
-1. Implement the new `provenance.render` module.
-2. Delete every `format_*_report_text` symbol from
-   `swcstudio.core.reporting` and every call site (CLI handlers, GUI
-   panels, batch features). Imports become hard errors so nothing
-   silently falls back to the old code path.
-3. Plugins that imported the old helpers must migrate to
-   `provenance.render.commit_text(commit_sha)`. This is a breaking
-   change announced in the v0.3.0 release notes.
+Mutating GUI batch tools commit each source SWC to its own history.
+Validation/report-only exports can still write normal text reports
+through `swcstudio.core.reporting`; those are separate from GUI history.
 
 ## 16. Migration from existing output dirs
 
@@ -641,10 +654,9 @@ Never automatic in v1.
 
 ## 19. Cross-file lineage
 
-Whenever a new SWC is created from an existing one through any
-SWC-Studio path — `split`, `checkout -o other.swc`, derivation in a
-plugin, or any other tool that ends up calling `tracked_op()` — the
-new file's first commit records its source as a parent:
+Whenever a new SWC is created from an existing one through a
+lineage-aware SWC-Studio path, such as batch `split`, the new file's
+first commit records its source as a parent:
 
 ```json
 "derived_from": {

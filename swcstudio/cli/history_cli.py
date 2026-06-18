@@ -31,6 +31,7 @@ from swcstudio.core.provenance import (
     current_swc_path_for,
     delete_branch,
     ensure_history_materialized,
+    ensure_schema,
     history_dir_for,
     history_archive_exists,
     init_history,
@@ -41,6 +42,8 @@ from swcstudio.core.provenance import (
     migrate_legacy_output_dir,
     needs_migration,
     open_index,
+    operation_display_name,
+    operation_display_parameters,
     rebuild_index,
     read_branch,
     read_head,
@@ -73,23 +76,33 @@ def add_history_subparser(sub: argparse._SubParsersAction) -> None:
     hsub = history.add_subparsers(dest="history_cmd")
 
     # log
-    log = hsub.add_parser("log", help="Show commit history for a file")
+    log = hsub.add_parser("log", help="Show operation history for a file")
     log.add_argument("file", type=Path)
     log.add_argument("--branch")
     log.add_argument("--actor")
     log.add_argument("--since")
     log.add_argument("--until")
     log.add_argument("--limit", type=int)
+    log.add_argument(
+        "--technical",
+        action="store_true",
+        help="Show commit/version IDs, branches, and SHA details instead of the operation-first view.",
+    )
 
     # show
-    show = hsub.add_parser("show", help="Show details for one commit")
+    show = hsub.add_parser("show", help="Show details for one operation or technical version")
     show.add_argument("file", type=Path)
-    show.add_argument("sha", help="Full or short commit sha")
+    show.add_argument("ref", help="Operation id from `history log` (for example op-12) or a technical SHA")
     show.add_argument(
         "--format",
         choices=("text", "json"),
         default="text",
         dest="fmt",
+    )
+    show.add_argument(
+        "--technical",
+        action="store_true",
+        help="Interpret the reference as a commit/version SHA and show technical details.",
     )
 
     # checkout
@@ -98,18 +111,18 @@ def add_history_subparser(sub: argparse._SubParsersAction) -> None:
         help="Materialize a past state as a read-only SWC",
     )
     checkout.add_argument("file", type=Path)
-    checkout.add_argument("sha")
+    checkout.add_argument("ref", help="Operation id from `history log` or a technical SHA")
     checkout.add_argument(
         "-o", "--output",
         type=Path,
-        help="Where to write the materialized SWC (default: <stem>_<short_sha>.swc next to the source)",
+        help="Where to write the materialized SWC (default: <stem>_<version>.swc next to the source)",
     )
 
     # branch
     branch = hsub.add_parser("branch", help="List branches or create a new one")
     branch.add_argument("file", type=Path)
     branch.add_argument("name", nargs="?", help="If given, create this branch")
-    branch.add_argument("--from", dest="from_sha", help="Commit sha to branch from (default HEAD)")
+    branch.add_argument("--from", dest="from_ref", help="Operation id or technical SHA to branch from (default HEAD)")
 
     # switch
     switch = hsub.add_parser("switch", help="Switch the active branch")
@@ -120,24 +133,24 @@ def add_history_subparser(sub: argparse._SubParsersAction) -> None:
     tag = hsub.add_parser("tag", help="List tags or create one")
     tag.add_argument("file", type=Path)
     tag.add_argument("name", nargs="?")
-    tag.add_argument("sha", nargs="?", help="Commit sha (default HEAD tip)")
+    tag.add_argument("ref", nargs="?", help="Operation id or technical SHA (default current state)")
 
     # checkpoint
     cp = hsub.add_parser(
         "checkpoint",
-        help="Materialize a past commit as a labeled .swc next to current.swc",
+        help="Materialize a past operation/state as a labeled .swc next to the source SWC",
     )
     cp.add_argument("file", type=Path)
-    cp.add_argument("sha")
+    cp.add_argument("ref", help="Operation id from `history log` or a technical SHA")
     cp.add_argument("--label", required=True)
 
     # reproduce
     rep = hsub.add_parser(
         "reproduce",
-        help="Emit a reproduce.yaml for an AI commit",
+        help="Emit a reproduce.yaml for an AI operation/state",
     )
     rep.add_argument("file", type=Path)
-    rep.add_argument("sha")
+    rep.add_argument("ref", help="Operation id from `history log` or a technical SHA")
     rep.add_argument("-o", "--output", type=Path)
 
     # reindex
@@ -196,32 +209,307 @@ def dispatch_history(args: argparse.Namespace) -> int:
 
 def _cmd_log(args) -> int:
     with _history_store(args.file) as hist:
-        out = render_history_log_text(
-            hist,
-            branch=args.branch,
-            actor=args.actor,
-            since=args.since,
-            until=args.until,
-            limit=args.limit,
-        )
+        if bool(getattr(args, "technical", False)):
+            out = render_history_log_text(
+                hist,
+                branch=args.branch,
+                actor=args.actor,
+                since=args.since,
+                until=args.until,
+                limit=args.limit,
+            )
+        else:
+            out = _render_operation_log_text(
+                hist,
+                branch=args.branch,
+                actor=args.actor,
+                since=args.since,
+                until=args.until,
+                limit=args.limit,
+            )
     print(out, end="")
     return 0
 
 
 def _cmd_show(args) -> int:
     with _history_store(args.file) as hist:
-        if args.fmt == "json":
-            ev = _resolve_event_or_die(hist, args.sha)
+        if args.fmt == "json" and not bool(getattr(args, "technical", False)):
+            print(json.dumps(_operation_json(hist, args.ref), indent=2, sort_keys=True))
+        elif args.fmt == "json":
+            ev = _resolve_event_or_die(hist, args.ref)
             print(json.dumps(ev.to_json_obj(), indent=2, sort_keys=True))
+        elif bool(getattr(args, "technical", False)):
+            print(render_commit_text(hist, args.ref), end="")
         else:
-            print(render_commit_text(hist, args.sha), end="")
+            print(_render_operation_detail_text(hist, args.ref), end="")
     return 0
+
+
+def _render_operation_log_text(
+    hist: Path,
+    *,
+    branch: str | None = None,
+    actor: str | None = None,
+    since: str | None = None,
+    until: str | None = None,
+    limit: int | None = None,
+) -> str:
+    conn = open_index(hist)
+    try:
+        ensure_schema(conn)
+        sql = """
+            SELECT
+                o.op_id, o.kind, o.params_json, o.summary_json,
+                c.ts, c.os_user, c.branch, c.message,
+                COUNT(DISTINCT n.node_id) AS changed_nodes
+            FROM ops o
+            JOIN commits c ON c.sha = o.commit_sha
+            LEFT JOIN node_changes n ON n.op_id = o.op_id
+            WHERE 1=1
+        """
+        params: list[object] = []
+        if branch:
+            sql += " AND c.branch = ?"
+            params.append(branch)
+        if actor:
+            sql += " AND c.os_user = ?"
+            params.append(actor)
+        if since:
+            sql += " AND c.ts >= ?"
+            params.append(since)
+        if until:
+            sql += " AND c.ts <= ?"
+            params.append(until)
+        sql += """
+            GROUP BY o.op_id
+            ORDER BY o.op_id DESC
+        """
+        if limit:
+            sql += " LIMIT ?"
+            params.append(int(limit))
+        rows = list(conn.execute(sql, params))
+        if not rows:
+            return "(no operations)\n"
+        widths = {
+            "op": max(5, max(len(f"op-{int(r['op_id'])}") for r in rows)),
+            "time": max(len(str(r["ts"] or "")) for r in rows),
+            "actor": max(5, max(len(str(r["os_user"] or "")) for r in rows)),
+            "action": max(
+                9,
+                max(
+                    len(operation_display_name(
+                        str(r["kind"] or ""),
+                        _json_obj(r["params_json"]),
+                    ))
+                    for r in rows
+                ),
+            ),
+        }
+        out = [
+            f"{'op':<{widths['op']}}  "
+            f"{'time':<{widths['time']}}  "
+            f"{'actor':<{widths['actor']}}  "
+            f"{'action':<{widths['action']}}  "
+            "changed  summary"
+        ]
+        out.append("-" * (sum(widths.values()) + 28))
+        for row in rows:
+            params_obj = _json_obj(row["params_json"])
+            display_params = operation_display_parameters(
+                str(row["kind"] or ""),
+                params_obj,
+            )
+            summary_obj = _json_obj(row["summary_json"])
+            changed = _changed_count(summary_obj, int(row["changed_nodes"] or 0))
+            summary = str(row["message"] or "").strip() or _format_params(display_params)
+            op_label = f"op-{int(row['op_id'])}"
+            out.append(
+                f"{op_label:<{widths['op']}}  "
+                f"{str(row['ts'] or ''):<{widths['time']}}  "
+                f"{str(row['os_user'] or ''):<{widths['actor']}}  "
+                f"{operation_display_name(str(row['kind'] or ''), params_obj):<{widths['action']}}  "
+                f"{changed:<7}  {summary}"
+            )
+        return "\n".join(out).rstrip() + "\n"
+    finally:
+        conn.close()
+
+
+def _operation_json(hist: Path, ref: str) -> dict:
+    conn = open_index(hist)
+    try:
+        ensure_schema(conn)
+        records = _operation_records_for_ref(conn, hist, ref)
+        if len(records) == 1:
+            return records[0]
+        return {"operations": records}
+    finally:
+        conn.close()
+
+
+def _render_operation_detail_text(hist: Path, ref: str) -> str:
+    payload = _operation_json(hist, ref)
+    records = payload.get("operations") if "operations" in payload else [payload]
+    out: list[str] = []
+    for idx, rec in enumerate(records):
+        if idx:
+            out.append("")
+        out.append(f"Operation {rec['operation_id']}")
+        out.append("-" * (10 + len(str(rec["operation_id"]))))
+        out.append(f"Time: {rec.get('time', '')}")
+        out.append(f"Actor: {rec.get('actor', '')}")
+        out.append(f"Action: {rec.get('action', '')}")
+        out.append(f"Changed nodes: {rec.get('changed_nodes', 0)}")
+        if rec.get("message"):
+            out.append(f"Summary: {rec['message']}")
+        params = dict(rec.get("parameters", {}) or {})
+        if params:
+            out.append("")
+            out.append("Parameters:")
+            for key in sorted(params):
+                out.append(f"  {key}: {params[key]}")
+        changes = list(rec.get("node_changes", []) or [])
+        out.append("")
+        out.append("Node changes:")
+        if not changes:
+            out.append("  (no node-level rows recorded)")
+        else:
+            out.append("  node        field       old -> new")
+            out.append("  " + "-" * 52)
+            for ch in changes[:200]:
+                out.append(
+                    f"  {str(ch.get('node_id', '')):<10}  "
+                    f"{str(ch.get('field', '')):<10}  "
+                    f"{_empty_if_none(ch.get('before'))} -> {_empty_if_none(ch.get('after'))}"
+                )
+            if len(changes) > 200:
+                out.append(f"  ... {len(changes) - 200} more node change(s)")
+    return "\n".join(out).rstrip() + "\n"
+
+
+def _operation_records_for_ref(conn, hist: Path, ref: str) -> list[dict]:
+    op_id = _parse_op_ref(ref)
+    params: tuple[object, ...]
+    if op_id is not None:
+        where = "o.op_id = ?"
+        params = (op_id,)
+    else:
+        ev = _resolve_event_or_die(hist, ref)
+        where = "o.commit_sha = ?"
+        params = (ev.id,)
+
+    rows = list(conn.execute(
+        f"""
+        SELECT
+            o.op_id, o.op_index, o.kind, o.params_json, o.summary_json,
+            c.sha, c.ts, c.os_user, c.branch, c.message,
+            COUNT(DISTINCT n.node_id) AS changed_nodes
+        FROM ops o
+        JOIN commits c ON c.sha = o.commit_sha
+        LEFT JOIN node_changes n ON n.op_id = o.op_id
+        WHERE {where}
+        GROUP BY o.op_id
+        ORDER BY o.op_id DESC
+        """,
+        params,
+    ))
+    if not rows:
+        raise FileNotFoundError(f"unknown operation {ref!r}")
+    return [_operation_record(conn, row) for row in rows]
+
+
+def _operation_record(conn, row) -> dict:
+    params_obj = _json_obj(row["params_json"])
+    display_params = operation_display_parameters(
+        str(row["kind"] or ""),
+        params_obj,
+    )
+    summary_obj = _json_obj(row["summary_json"])
+    changes = [
+        {
+            "node_id": int(ch["node_id"]),
+            "field": str(ch["field"] or ""),
+            "before": ch["before"],
+            "after": ch["after"],
+        }
+        for ch in conn.execute(
+            """
+            SELECT node_id, field, before, after
+            FROM node_changes
+            WHERE op_id = ?
+            ORDER BY node_id ASC, field ASC
+            """,
+            (int(row["op_id"]),),
+        )
+    ]
+    return {
+        "operation_id": f"op-{int(row['op_id'])}",
+        "time": str(row["ts"] or ""),
+        "actor": str(row["os_user"] or ""),
+        "action": operation_display_name(str(row["kind"] or ""), params_obj),
+        "kind": str(row["kind"] or ""),
+        "message": str(row["message"] or ""),
+        "changed_nodes": _changed_count(summary_obj, int(row["changed_nodes"] or 0)),
+        "parameters": display_params,
+        "summary": summary_obj,
+        "node_changes": changes,
+    }
+
+
+def _parse_op_ref(ref: str) -> int | None:
+    text = str(ref or "").strip().lower()
+    if text.startswith("op-"):
+        text = text[3:]
+    elif text.startswith("op:"):
+        text = text[3:]
+    return int(text) if text.isdigit() else None
+
+
+def _json_obj(text: object) -> dict:
+    if not text:
+        return {}
+    try:
+        obj = json.loads(str(text))
+    except Exception:
+        return {}
+    return obj if isinstance(obj, dict) else {}
+
+
+def _changed_count(summary: dict, fallback: int) -> int:
+    if not summary:
+        return int(fallback)
+    return int(
+        summary.get("nodes_added", 0)
+        + summary.get("nodes_removed", 0)
+        + summary.get("nodes_modified", 0)
+        + summary.get("reparented", 0)
+    )
+
+
+def _format_params(params: dict) -> str:
+    if not params:
+        return ""
+    pieces: list[str] = []
+    for key in sorted(params):
+        value = params.get(key)
+        if isinstance(value, dict):
+            pieces.append(f"{key}: <dict:{len(value)}>")
+        elif isinstance(value, list):
+            pieces.append(f"{key}: <list:{len(value)}>")
+        else:
+            pieces.append(f"{key}: {value}")
+    text = "; ".join(pieces)
+    return text if len(text) <= 180 else text[:177] + "..."
+
+
+def _empty_if_none(value: object) -> str:
+    return "" if value is None else str(value)
 
 
 def _cmd_checkout(args) -> int:
     with _history_store(args.file, write=True) as hist:
-        ev = _resolve_event_or_die(hist, args.sha)
-        bytes_at_sha = _materialize_state_at(hist, ev.id)
+        ev = _resolve_history_ref_or_die(hist, args.ref)
+        bytes_at_sha = _materialize_state_at(hist, ev.id, swc_path=args.file)
     short = ev.id.removeprefix("sha256:")[:12]
     if args.output:
         out_path = Path(args.output)
@@ -244,14 +532,14 @@ def _cmd_branch(args) -> int:
                 print(f"{star} {name:<20} {short}")
             return 0
         # Create
-        if args.from_sha is None:
+        if args.from_ref is None:
             head = read_head(hist)
             sha = read_branch(hist, head)
             if sha is None:
                 print(f"error: cannot branch from empty branch {head!r}", file=sys.stderr)
                 return 1
         else:
-            sha = _resolve_event_or_die(hist, args.from_sha).id
+            sha = _resolve_history_ref_or_die(hist, args.from_ref).id
         write_branch(hist, args.name, sha)
     print(f"created branch {args.name!r} at {sha.removeprefix('sha256:')[:12]}")
     return 0
@@ -271,14 +559,14 @@ def _cmd_tag(args) -> int:
                 sha = read_tag(hist, name)
                 print(f"{name:<24} {(sha or '').removeprefix('sha256:')[:12]}")
             return 0
-        if args.sha is None:
+        if args.ref is None:
             head = read_head(hist)
             sha = read_branch(hist, head)
             if sha is None:
                 print(f"error: cannot tag empty branch {head!r}", file=sys.stderr)
                 return 1
         else:
-            sha = _resolve_event_or_die(hist, args.sha).id
+            sha = _resolve_history_ref_or_die(hist, args.ref).id
         create_tag(hist, args.name, sha)
     print(f"created tag {args.name!r} -> {sha.removeprefix('sha256:')[:12]}")
     return 0
@@ -286,8 +574,8 @@ def _cmd_tag(args) -> int:
 
 def _cmd_checkpoint(args) -> int:
     with _history_store(args.file, write=True) as hist:
-        ev = _resolve_event_or_die(hist, args.sha)
-        body = _materialize_state_at(hist, ev.id)
+        ev = _resolve_history_ref_or_die(hist, args.ref)
+        body = _materialize_state_at(hist, ev.id, swc_path=args.file)
     src = Path(args.file)
     out_dir = current_swc_path_for(src).parent
     label = "".join(c if c.isalnum() or c in "-_" else "_" for c in args.label)
@@ -299,10 +587,10 @@ def _cmd_checkpoint(args) -> int:
 
 def _cmd_reproduce(args) -> int:
     with _history_store(args.file) as hist:
-        ev = _resolve_event_or_die(hist, args.sha)
+        ev = _resolve_history_ref_or_die(hist, args.ref)
         ai_refs = [op.get("ai_run_ref") for op in ev.ops if op.get("ai_run_ref")]
         if not ai_refs:
-            print(f"error: commit {args.sha} has no AI runs", file=sys.stderr)
+            print(f"error: {args.ref} has no AI runs", file=sys.stderr)
             return 1
 
         store = ObjectStore(hist / "objects")
@@ -440,6 +728,27 @@ def _history_store(file_path: Path, *, write: bool = False):
         yield live_hist
 
 
+def _resolve_history_ref_or_die(hist: Path, ref: str):
+    """Resolve an operation id or technical commit SHA to a commit event."""
+    op_id = _parse_op_ref(ref)
+    if op_id is None:
+        return _resolve_event_or_die(hist, ref)
+
+    conn = open_index(hist)
+    try:
+        ensure_schema(conn)
+        row = conn.execute(
+            "SELECT commit_sha FROM ops WHERE op_id = ?",
+            (op_id,),
+        ).fetchone()
+    finally:
+        conn.close()
+
+    if row is None:
+        raise FileNotFoundError(f"unknown operation {ref!r}")
+    return _resolve_event_or_die(hist, str(row["commit_sha"]))
+
+
 def _resolve_event_or_die(hist: Path, sha_or_prefix: str):
     """Find an event by full sha or unique short prefix.
 
@@ -463,11 +772,11 @@ def _resolve_event_or_die(hist: Path, sha_or_prefix: str):
     return matches[0]
 
 
-def _materialize_state_at(hist: Path, commit_sha: str) -> bytes:
+def _materialize_state_at(hist: Path, commit_sha: str, *, swc_path: str | Path | None = None) -> bytes:
     """Reconstruct canonical SWC bytes at ``commit_sha``.
 
     v1 strategy (no snapshot blobs yet): anchor at the active branch's
-    ``current.swc`` (which we always materialize at the tip), then
+    source SWC (which we always materialize at the tip), then
     walk **backward from the tip toward the target**, inverting each
     intervening diff. Once we reach the target, its own diff is the
     last one we DON'T undo — we want to land at the target's output
@@ -519,14 +828,18 @@ def _materialize_state_at(hist: Path, commit_sha: str) -> bytes:
                 f"cannot reach commit {commit_sha} from any branch tip"
             )
 
-    # Anchor at current.swc (state at tip), strip @PROV header, then
+    # Anchor at the source SWC (state at tip), strip @PROV header, then
     # undo every diff between tip and target (exclusive of target's own
     # diff — undoing target's diff would land us at target's *input*
     # state, which is one commit too far back).
-    cur_path = current_swc_path_for(_swc_for_history(hist))
+    cur_path = (
+        current_swc_path_for(swc_path)
+        if swc_path is not None
+        else current_swc_path_for(_swc_for_history(hist))
+    )
     if not cur_path.exists():
         raise FileNotFoundError(
-            f"no current.swc to anchor checkout at {commit_sha}"
+            f"no source SWC to anchor checkout at {commit_sha}"
         )
     from swcstudio.core.provenance.header import strip_prov_lines
     state = strip_prov_lines(cur_path.read_bytes())
@@ -548,6 +861,32 @@ def _materialize_state_at(hist: Path, commit_sha: str) -> bytes:
         except (BlobNotFoundError, ValueError):
             pass
     return state
+
+
+def _materialize_state_before(
+    hist: Path,
+    commit_sha: str,
+    *,
+    swc_path: str | Path | None = None,
+) -> bytes:
+    """Reconstruct the SWC state immediately before ``commit_sha``.
+
+    A commit can contain multiple atomic sub-operations, so this restores
+    the input state before the whole selected history point.
+    """
+    event = _resolve_event_or_die(hist, commit_sha)
+    state = _materialize_state_at(hist, event.id, swc_path=swc_path)
+    if not event.diff_ref:
+        return state
+
+    store = ObjectStore(hist / "objects")
+    try:
+        diff = json.loads(store.get(event.diff_ref.removeprefix("sha256:")))
+    except (BlobNotFoundError, ValueError) as exc:
+        raise FileNotFoundError(
+            f"cannot reconstruct the state before {commit_sha}: missing or invalid diff"
+        ) from exc
+    return _undo_diff(state, diff)
 
 
 def _find_branch_tip_containing(hist: Path, by_id: dict, commit_sha: str) -> str | None:
@@ -572,9 +911,13 @@ def _undo_diff(state: bytes, diff: dict) -> bytes:
     will replace this with O(1) anchoring.
     """
     rows = {}
+    header_lines: list[str] = []
     for line in state.decode("utf-8").splitlines():
         s = line.strip()
-        if not s or s.startswith("#"):
+        if not s:
+            continue
+        if s.startswith("#"):
+            header_lines.append(line)
             continue
         parts = s.split()
         if len(parts) < 7:
@@ -609,16 +952,17 @@ def _undo_diff(state: bytes, diff: dict) -> bytes:
             if nid in rows:
                 rows[nid][6] = str(c.get("before"))
 
-    out_lines = [" ".join(rows[k]) for k in sorted(rows)]
+    out_lines = [*header_lines, *(" ".join(rows[k]) for k in sorted(rows))]
     return ("\n".join(out_lines) + "\n").encode("utf-8")
 
 
 def _swc_for_history(hist: Path) -> Path:
-    """Reverse-map a materialized .history/ dir back to the SWC it tracks.
+    """Best-effort legacy reverse-map from a history dir to its SWC.
 
-    The transient .history/ work tree lives at
-    <stem>_swc_studio_output/.history/, so the SWC is at
-    <parent>/<stem>.swc.
+    Current callers pass ``swc_path`` explicitly to
+    ``_materialize_state_at`` because transient history work trees live
+    under the OS temp directory. This fallback only supports older
+    materialized layouts.
     """
     out_dir = hist.parent
     if out_dir.name.endswith("_swc_studio_output"):

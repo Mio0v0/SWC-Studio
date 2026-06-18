@@ -6,15 +6,8 @@ from pathlib import Path
 from typing import Any
 
 from swcstudio.core.config import load_feature_config, merge_config
-from swcstudio.core.geometry_editing import reindex_dataframe_with_map
-from swcstudio.core.reporting import (
-    operation_output_dir_for_folder,
-    operation_output_path_for_file,
-    operation_report_path_for_folder,
-    timestamp_slug,
-    write_text_report,
-)
-from swcstudio.core.swc_io import parse_swc_text_preserve_tokens, write_swc_to_bytes_preserve_tokens
+from swcstudio.core.provenance import OpKind, run_tracked_batch
+from swcstudio.tools.validation.features.index_clean import index_clean_text
 from swcstudio.plugins.registry import register_builtin_method, resolve_method
 
 TOOL = "batch_processing"
@@ -28,90 +21,26 @@ DEFAULT_CONFIG: dict[str, Any] = {
 }
 
 
-def _write_batch_report(out_dir: Path, name: str, lines: list[str]) -> str:
-    out_dir.mkdir(parents=True, exist_ok=True)
-    report_path = out_dir / name
-    return write_text_report(report_path, "\n".join(lines).rstrip() + "\n")
-
-
 def _builtin_run(folder: str, config: dict[str, Any]) -> dict[str, Any]:
-    folder_path = Path(folder)
-    if not folder_path.exists() or not folder_path.is_dir():
-        raise NotADirectoryError(folder)
+    def _transform(_path: Path, text: str) -> dict[str, Any]:
+        return index_clean_text(text, config_overrides=config)
 
-    swc_files = sorted(
-        [p for p in folder_path.iterdir() if p.is_file() and p.suffix.lower() == ".swc"],
-        key=lambda p: p.name.lower(),
+    return run_tracked_batch(
+        folder,
+        kind=OpKind.INDEX_CLEAN,
+        transform=_transform,
+        params_for=lambda _path, result: {
+            "original_node_count": int(result.get("original_node_count", 0)),
+            "new_node_count": int(result.get("new_node_count", 0)),
+            "remapped_id_count": int(result.get("remapped_id_count", 0)),
+        },
+        summary_for=lambda path, result: (
+            f"{path.name}: {int(result.get('original_node_count', 0))} nodes -> "
+            f"{int(result.get('new_node_count', 0))} nodes, "
+            f"remapped IDs: {int(result.get('remapped_id_count', 0))}"
+        ),
+        message="GUI batch index clean",
     )
-    if not swc_files:
-        raise FileNotFoundError(f"No .swc files found in: {folder}")
-
-    run_timestamp = timestamp_slug()
-    out_dir = operation_output_dir_for_folder(folder_path, "batch_index_clean", timestamp=run_timestamp)
-
-    processed = 0
-    failures: list[str] = []
-    per_file: list[str] = []
-
-    for swc_path in swc_files:
-        try:
-            text = swc_path.read_text(encoding="utf-8", errors="ignore")
-            df = parse_swc_text_preserve_tokens(text)
-            clean_df, id_map = reindex_dataframe_with_map(df)
-            out_path = operation_output_path_for_file(
-                swc_path,
-                "batch_index_clean",
-                output_dir=out_dir,
-                timestamp=run_timestamp,
-            )
-            out_path.write_bytes(write_swc_to_bytes_preserve_tokens(clean_df))
-            processed += 1
-            changed = sum(1 for old_id, new_id in dict(id_map).items() if int(old_id) != int(new_id))
-            per_file.append(
-                f"{swc_path.name}: {len(df)} nodes -> {len(clean_df)} nodes, remapped IDs: {changed}"
-            )
-        except Exception as e:  # noqa: BLE001
-            failures.append(f"{swc_path.name}: {e}")
-
-    lines = [
-        "Batch Index Clean Report",
-        "------------------------",
-        f"Folder: {folder_path}",
-        f"Output folder: {out_dir}",
-        f"Detected SWC files: {len(swc_files)}",
-        f"Processed: {processed}",
-        f"Failed: {len(failures)}",
-        "",
-        "Per-file summary:",
-        *per_file[:100],
-    ]
-    if len(per_file) > 100:
-        lines.append(f"... ({len(per_file) - 100} more)")
-    if failures:
-        lines.extend(["", "Errors:", *failures[:50]])
-        if len(failures) > 50:
-            lines.append(f"... ({len(failures) - 50} more)")
-
-    report_path = _write_batch_report(
-        out_dir,
-        operation_report_path_for_folder(
-            folder_path,
-            "batch_index_clean",
-            output_dir=out_dir,
-            timestamp=run_timestamp,
-        ).name,
-        lines,
-    )
-    return {
-        "folder": str(folder_path),
-        "out_dir": str(out_dir),
-        "files_total": len(swc_files),
-        "files_processed": processed,
-        "files_failed": len(failures),
-        "per_file": per_file,
-        "failures": failures,
-        "log_path": report_path,
-    }
 
 
 register_builtin_method(FEATURE_KEY, "default", _builtin_run)

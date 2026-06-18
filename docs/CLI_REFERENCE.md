@@ -71,14 +71,11 @@ This must be a JSON object and is merged into the feature config for that run.
 
 ## Output Behavior for Single-File Edits
 
-Single-file edit commands now always write both:
+Single-file edit commands now update the source SWC directly and record
+the operation in the per-file history archive:
 
-- a processed SWC copy
-- an operation log
-
-Default location:
-
-- `<input_folder>/<stem>_swc_studio_output/`
+- source file: `<input_folder>/<stem>.swc`
+- history archive: `<input_folder>/<stem>_history.swcstudio`
 
 This applies to:
 
@@ -92,7 +89,12 @@ This applies to:
 - `set-radius`
 - all geometry edit commands
 
-No extra `--write` flag is needed.
+The source SWC receives compact `# @PROV` pointer lines, and existing
+SWC/SWC+ comment headers are preserved. No extra `--write` flag is
+needed. Text reports are still produced by report-only commands such as
+validation runs, and explicit commands such as `split`, `history
+checkout`, and `history checkpoint` intentionally materialize separate
+files.
 
 ## `check`
 
@@ -145,6 +147,8 @@ swcstudio split ./swc-folder
 
 - Purpose: auto-labeling for every SWC in one folder.
 - Engine: v12 QC-label-flag pipeline.
+- Each passing source SWC is updated in place and gets its own history archive.
+- QC-rejected or failed files are skipped and listed in the JSON summary.
 - Prints a short engine summary before processing.
 - Soma, axon, and basal labeling are always enabled
 - The engine detects cell type automatically unless `--cell-type` is
@@ -172,8 +176,8 @@ can resolve the model files on your machine.
 ### `swcstudio radii-clean <target>`
 
 - Purpose: clean abnormal radii on a file or folder using the shared radii-clean backend
-- File target: writes the cleaned SWC and one operation report
-- Folder target: runs the batch radii-clean workflow
+- File target: updates the source SWC and records operation history
+- Folder target: records each processed SWC in place
 
 Examples:
 
@@ -230,6 +234,7 @@ swcstudio auto-fix cell.swc
   GUI Auto Label Editing panel
 - Engine: same v12 QC-label-flag pipeline used by `swcstudio auto-typing`
 - Changes only node types; geometry, parent IDs, and radii are preserved
+- Updates the source SWC in place and records operation history
 - Soma, axon, and basal labeling are always enabled
 - The engine detects cell type automatically unless `--cell-type` is
   provided. Use `--cell-type pyramidal` or `--cell-type interneuron`
@@ -358,6 +363,25 @@ Insert one node after `start-id` and optionally before `end-id`.
 ```bash
 swcstudio insert cell.swc --start-id 10 --end-id 22 --x 100 --y 120 --z 5
 ```
+
+## History Commands
+
+History commands inspect or materialize states from
+`<stem>_history.swcstudio`.
+
+```bash
+swcstudio history log cell.swc
+swcstudio history show cell.swc op-1
+swcstudio history checkout cell.swc op-1 -o review_copy.swc
+swcstudio history checkpoint cell.swc op-1 --label review
+```
+
+- `history log` shows user-facing operation IDs by default.
+- `history show <op-id>` shows operation details and node-level old/new values.
+- `checkout`, `checkpoint`, `tag`, `branch --from`, and `reproduce`
+  accept either an operation ID such as `op-1` or a technical SHA.
+- Add `--technical` to `history log` or `history show` when you need
+  exact internal version/SHA details.
 
 ## Train Custom Auto-Typing Models
 

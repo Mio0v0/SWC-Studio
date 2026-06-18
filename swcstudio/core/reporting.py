@@ -207,13 +207,6 @@ def validation_log_path_for_file(path: str | Path) -> Path:
     return operation_report_path_for_file(path, "validation_run")
 
 
-def morphology_session_log_path(path: str | Path, *, direct_parent: bool = False) -> Path:
-    p = Path(path)
-    log_dir = p.parent if direct_parent else log_dir_for_file(p)
-    base = log_dir / f"{p.stem}_session_log_{_timestamp_slug()}.txt"
-    return _unique_path(base)
-
-
 def correction_summary_log_path_for_file(path: str | Path) -> Path:
     return report_path_for_file(path, "correction_summary")
 
@@ -497,28 +490,26 @@ def format_simplification_report_text(payload: dict[str, Any]) -> str:
     return "\n".join(lines).rstrip() + "\n"
 
 
-def format_morphology_session_log_text(
+def _format_operation_entries_report_text(
     *,
     source_file: str,
-    session_started: str,
-    session_ended: str,
+    generated_at: str,
     operations: list[dict[str, Any]],
 ) -> str:
     operations = list(operations or [])
     lines: list[str] = []
-    lines.append("SWC Session Report")
-    lines.append("------------------")
+    lines.append("SWC Operation Report")
+    lines.append("--------------------")
     lines.append(f"Tool Version: SWC-Studio {SWCSTUDIO_VERSION}")
     lines.append(f"Source file: {source_file}")
-    lines.append(f"Session started: {session_started}")
-    lines.append(f"Session ended: {session_ended}")
+    lines.append(f"Generated: {generated_at}")
     lines.append("")
     lines.extend(_label_type_legend_lines())
     lines.append("")
     lines.append("Change Summary")
     lines.append("--------------")
     if not operations:
-        lines.append("No morphology changes were recorded in this session.")
+        lines.append("No morphology changes were recorded.")
         return "\n".join(lines).rstrip() + "\n"
 
     field_order = ["id", "type", "parent", "radius", "x", "y", "z"]
@@ -833,10 +824,9 @@ def format_operation_report_text(
         change_rows=change_rows,
         op_time=stamp.split(" ")[-1] if " " in stamp else stamp,
     )
-    return format_morphology_session_log_text(
+    return _format_operation_entries_report_text(
         source_file=str(source_file),
-        session_started=stamp,
-        session_ended=stamp,
+        generated_at=stamp,
         operations=[operation],
     )
 

@@ -36,7 +36,7 @@ class BatchOptions:
 @dataclass
 class BatchResult:
     folder: str
-    out_dir: str
+    out_dir: str | None
     zip_path: str | None
     files_total: int
     files_processed: int
@@ -49,6 +49,7 @@ class BatchResult:
     log_path: str | None
     files_flagged: int = 0
     files_qc_failed: int = 0
+    commits: list[dict[str, Any]] | None = None
 
 
 @dataclass

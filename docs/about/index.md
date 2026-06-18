@@ -36,7 +36,7 @@ The GUI is built around an issue-driven repair loop:
 3. let the selected issue route you to the matching repair tool
 4. apply a fix
 5. rerun validation
-6. save the updated file with logs
+6. review the per-file operation history and any requested reports
 
 The CLI and Python API expose the same underlying operations for scripted or batch use.
 
@@ -59,7 +59,7 @@ Those tools cover:
 - geometry editing
 - simplification
 - folder-level batch workflows
-- standardized logs and output folders
+- per-file history plus standardized reports and export folders
 
 ## Documentation Map
 

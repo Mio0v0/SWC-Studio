@@ -22,7 +22,6 @@ from swcstudio.plugins import (
     list_plugins,
     load_plugin_module,
 )
-from swcstudio.tools.batch_processing.features.auto_typing import run_folder as run_auto_typing
 from swcstudio.tools.batch_processing.features.batch_validation import validate_folder
 from swcstudio.tools.batch_processing.features.index_clean import run_folder as batch_index_clean_folder
 from swcstudio.tools.batch_processing.features.radii_cleaning import clean_path as batch_clean_radii_path
@@ -60,12 +59,8 @@ from swcstudio.tools.visualization.features.mesh_editing import build_mesh_from_
 from swcstudio.core.validation_catalog import group_rows_by_category, rule_for_key
 from swcstudio.core.reporting import (
     format_validation_report_text,
-    operation_output_path_for_file,
-    operation_report_path_for_file,
-    resolve_requested_output_path_for_file,
     validation_index_clean_detail_lines,
     validation_log_path_for_file,
-    write_operation_report_for_file,
     write_text_report,
 )
 
@@ -434,45 +429,6 @@ def _build_cli_issue_list(file_path: Path, *, config_overrides: dict | None = No
     text = file_path.read_text(encoding="utf-8", errors="ignore")
     df = parse_swc_text_preserve_tokens(text)
     return build_issue_list(df, report)
-
-
-def _write_geometry_output(
-    input_path: Path,
-    df,
-    *,
-    operation_name: str,
-) -> str:
-    output_path = operation_output_path_for_file(input_path, operation_name)
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    output_path.write_bytes(write_swc_to_bytes_preserve_tokens(df))
-    return str(output_path)
-
-
-def _write_cli_operation_report(
-    source_path: Path,
-    *,
-    operation_name: str,
-    title: str,
-    summary: str,
-    details: list[str] | None = None,
-    old_df=None,
-    new_df=None,
-    id_map: dict[int, int] | None = None,
-    change_rows: list[dict] | None = None,
-    output_dir: str | Path | None = None,
-) -> str:
-    return write_operation_report_for_file(
-        source_path,
-        operation_name,
-        title=title,
-        summary=summary,
-        details=list(details or []),
-        old_df=old_df,
-        new_df=new_df,
-        id_map=id_map,
-        change_rows=change_rows,
-        output_dir=output_dir,
-    )
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -1042,6 +998,8 @@ def main(argv: list[str] | None = None) -> int:
 
         if args.tool == "batch" and args.feature == "auto-typing":
             _print_auto_typing_guide()
+            from swcstudio.core.provenance import OpKind, current_swc_path_for, tracked_op
+
             opts = BatchOptions(
                 soma=True,
                 axon=True,
@@ -1063,14 +1021,119 @@ def main(argv: list[str] | None = None) -> int:
             if not ok:
                 print(f"ERROR: auto-typing engine unavailable.\n{reason}", file=sys.stderr)
                 return 2
-            out = run_auto_typing(
-                str(args.folder),
-                options=opts,
-                config_overrides=cfg_overrides,
+
+            folder = Path(args.folder)
+            if not folder.is_dir():
+                raise NotADirectoryError(str(folder))
+            swc_files = sorted(
+                [p for p in folder.iterdir() if p.is_file() and p.suffix.lower() == ".swc"],
+                key=lambda p: p.name.lower(),
             )
-            _print_json(out.__dict__)
-            if getattr(out, "log_path", None):
-                print(f"\nReport file: {out.log_path}")
+            if not swc_files:
+                raise FileNotFoundError(f"No .swc files found in: {folder}")
+
+            processed = 0
+            total_nodes = 0
+            total_type_changes = 0
+            total_radius_changes = 0
+            files_flagged = 0
+            files_qc_failed = 0
+            failures: list[str] = []
+            per_file: list[str] = []
+            commits: list[dict] = []
+
+            for swc_path in swc_files:
+                try:
+                    # Run first, commit second. This prevents QC-rejected files
+                    # from creating empty history archives.
+                    out = validation_auto_label_file(
+                        str(swc_path),
+                        options=opts,
+                        config_overrides=cfg_overrides,
+                        output_path=None,
+                        write_output=False,
+                        write_log=False,
+                    )
+                except Exception as e:  # noqa: BLE001
+                    msg = f"{swc_path.name}: {e}"
+                    failures.append(msg)
+                    if "QC rejected" in str(e):
+                        files_qc_failed += 1
+                    per_file.append(msg)
+                    continue
+
+                out_counts = dict(out.get("out_type_counts", {}) or {})
+                flag_result = dict(out.get("flag_result", {}) or {})
+                params = {
+                    "cell_type": opts.cell_type,
+                    "flag_enabled": bool(opts.flag_enabled),
+                    "flag_strictness": float(opts.flag_strictness),
+                    "flag_feature_mode": opts.flag_feature_mode,
+                    "model_dir": cfg_overrides.get("model_dir"),
+                    "nodes_total": int(out.get("nodes_total", 0)),
+                    "type_changes": int(out.get("type_changes", 0)),
+                    "cell_type_result": out.get("cell_type"),
+                    "cell_type_source": out.get("cell_type_source"),
+                    "stage1_confidence": out.get("stage1_confidence"),
+                    "flagged": bool(flag_result.get("flagged", False)),
+                    "flag_score": flag_result.get("rank_score"),
+                }
+                with tracked_op(
+                    swc_path,
+                    kind=OpKind.AUTO_LABEL,
+                    params=params,
+                    message=(
+                        "batch auto-label "
+                        f"type_changes={int(out.get('type_changes', 0))} "
+                        f"cell_type={out.get('cell_type') or 'unknown'}"
+                    ),
+                    is_ai=True,
+                ) as op:
+                    op.set_output(bytes(out.get("bytes") or b""))
+
+                processed += 1
+                total_nodes += int(out.get("nodes_total", 0))
+                total_type_changes += int(out.get("type_changes", 0))
+                total_radius_changes += int(out.get("radius_changes", 0))
+                if bool(flag_result.get("flagged", False)):
+                    files_flagged += 1
+                commits.append(
+                    {
+                        "file": swc_path.name,
+                        "output_path": str(current_swc_path_for(swc_path)),
+                        "commit_sha": op.result.commit_sha,
+                        "branch": op.result.branch,
+                    }
+                )
+                per_file.append(
+                    f"{swc_path.name}: nodes={int(out.get('nodes_total', 0))}, "
+                    f"type_changes={int(out.get('type_changes', 0))}, "
+                    f"cell_type={out.get('cell_type') or 'unknown'} "
+                    f"({out.get('cell_type_source') or 'stage1'}), "
+                    f"flag={bool(flag_result.get('flagged', False))}, "
+                    f"out_types(soma/axon/basal/apic)="
+                    f"{out_counts.get(1, 0)}/{out_counts.get(2, 0)}/"
+                    f"{out_counts.get(3, 0)}/{out_counts.get(4, 0)}"
+                )
+
+            _print_json(
+                {
+                    "folder": str(folder),
+                    "files_total": len(swc_files),
+                    "files_processed": processed,
+                    "files_failed": len(failures),
+                    "files_qc_failed": files_qc_failed,
+                    "total_nodes": total_nodes,
+                    "total_type_changes": total_type_changes,
+                    "total_radius_changes": total_radius_changes,
+                    "files_flagged": files_flagged,
+                    "per_file": per_file,
+                    "failures": failures,
+                    "commits": commits,
+                    "log_path": None,
+                    "out_dir": None,
+                }
+            )
             return 0
 
         if args.tool == "batch" and args.feature == "radii-clean":
@@ -1180,7 +1243,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.tool == "batch" and args.feature == "index-clean":
             # Each input SWC gets one commit on its own .history/;
             # no separate batch output folder is created. Outputs land at
-            # <each>_swc_studio_output/<stem>_current.swc.
+            # directly to each source SWC.
             from swcstudio.core.provenance import OpKind
             from swcstudio.tools.validation.features.index_clean import index_clean_text
 
@@ -1371,6 +1434,8 @@ def main(argv: list[str] | None = None) -> int:
             return 0
 
         if args.tool == "validation" and args.feature == "auto-label":
+            from swcstudio.core.provenance import OpKind, current_swc_path_for, tracked_op
+
             opts = BatchOptions(
                 soma=True,
                 axon=True,
@@ -1392,42 +1457,61 @@ def main(argv: list[str] | None = None) -> int:
             if not ok:
                 print(f"ERROR: auto-typing engine unavailable.\n{reason}", file=sys.stderr)
                 return 2
-            old_df = parse_swc_text_preserve_tokens(Path(args.file).read_text(encoding="utf-8", errors="ignore"))
+            src = Path(args.file)
+            if not src.exists():
+                raise FileNotFoundError(str(src))
             out = validation_auto_label_file(
-                str(args.file),
+                str(src),
                 options=opts,
                 config_overrides=cfg_overrides,
                 output_path=None,
-                write_output=True,
+                write_output=False,
                 write_log=False,
             )
             out_counts = dict(out.get("out_type_counts", {}) or {})
             flag_result = dict(out.get("flag_result", {}) or {})
-            out["operation_log_path"] = _write_cli_operation_report(
-                Path(args.file),
-                operation_name="validation_auto_label",
-                title="Validation Auto Label Editing Run",
-                summary=(
-                    "Applied auto label editing to current SWC; "
-                    f"type_changes={int(out.get('type_changes', 0))}"
+            params = {
+                "cell_type": opts.cell_type,
+                "flag_enabled": bool(opts.flag_enabled),
+                "flag_strictness": float(opts.flag_strictness),
+                "flag_feature_mode": opts.flag_feature_mode,
+                "model_dir": cfg_overrides.get("model_dir"),
+                "nodes_total": int(out.get("nodes_total", 0)),
+                "type_changes": int(out.get("type_changes", 0)),
+                "cell_type_result": out.get("cell_type"),
+                "cell_type_source": out.get("cell_type_source"),
+                "stage1_confidence": out.get("stage1_confidence"),
+                "flagged": bool(flag_result.get("flagged", False)),
+                "flag_score": flag_result.get("rank_score"),
+                "out_type_counts": out_counts,
+            }
+            with tracked_op(
+                src,
+                kind=OpKind.AUTO_LABEL,
+                params=params,
+                message=(
+                    "auto-label "
+                    f"type_changes={int(out.get('type_changes', 0))} "
+                    f"cell_type={out.get('cell_type') or 'unknown'}"
                 ),
-                details=[
-                    f"Input: {args.file}",
-                    f"Nodes: {int(out.get('nodes_total', 0))}",
-                    f"Type changes: {int(out.get('type_changes', 0))}",
-                    f"Cell type: {out.get('cell_type') or 'unknown'} ({out.get('cell_type_source') or 'stage1'})",
-                    f"Flagged: {bool(flag_result.get('flagged', False))}",
-                    f"Flag score: {float(flag_result.get('rank_score', 0.0)):.4f}" if flag_result else "Flag score: n/a",
-                    "Out types (1/2/3/4): "
-                    f"{out_counts.get(1, 0)}/{out_counts.get(2, 0)}/{out_counts.get(3, 0)}/{out_counts.get(4, 0)}",
-                ],
-                old_df=old_df,
-                new_df=out.get("dataframe"),
+                is_ai=True,
+            ) as op:
+                op.set_output(bytes(out.get("bytes") or b""))
+
+            out.update(
+                {
+                    "output_path": str(current_swc_path_for(src)),
+                    "operation_log_path": None,
+                    "commit_sha": op.result.commit_sha,
+                    "branch": op.result.branch,
+                    "input_sha": op.result.input_sha,
+                    "output_sha": op.result.output_sha,
+                    "diff_ref": op.result.diff_ref,
+                    "ai_run_ref": op.result.ai_run_ref,
+                }
             )
             out_print = {k: v for k, v in out.items() if k not in {"dataframe", "bytes", "result_obj"}}
             _print_json(out_print)
-            if out.get("operation_log_path"):
-                print(f"\nOperation report: {out.get('operation_log_path')}")
             return 0
 
         if args.tool == "validation" and args.feature == "index-clean":
@@ -1588,7 +1672,7 @@ def main(argv: list[str] | None = None) -> int:
             # The mutation flows through
             # tracked_op so the edit is recorded as a commit in .history/;
             # the old timestamped output file + text report path is replaced
-            # by a refreshed <stem>_current.swc with @PROV header.
+            # by refreshing the source SWC with an @PROV header.
             from swcstudio.core.provenance import (
                 OpKind,
                 current_swc_path_for,

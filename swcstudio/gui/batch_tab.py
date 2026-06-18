@@ -211,7 +211,8 @@ class BatchTabWidget(QWidget):
             "Auto-label every SWC file in a folder with the QC-label-flag "
             "pipeline: input QC, cell-type detection or override, subtree "
             "labeling, pyramidal apical/basal GNN rescue, topology cleanup, "
-            "and compact bad-label flag scoring."
+            "and compact bad-label flag scoring. Each source SWC is updated "
+            "and recorded independently in its own history."
         )
         desc.setWordWrap(True)
         desc.setStyleSheet("font-size: 12px; color: #555;")
@@ -463,7 +464,7 @@ class BatchTabWidget(QWidget):
 
         desc = QLabel(
             "Run the same Simplification workflow on all SWC files in a folder.\n"
-            "Output folder: <selected>/<selected>_batch_simplify_<timestamp>"
+            "Each source SWC is updated in place and gets its own history operation."
         )
         desc.setWordWrap(True)
         desc.setStyleSheet("font-size: 12px; color: #555;")
@@ -495,7 +496,7 @@ class BatchTabWidget(QWidget):
 
         desc = QLabel(
             "Reorder and reindex all SWC files in a folder so parents come before children and IDs become continuous.\n"
-            "Output folder: <selected>/<selected>_batch_index_clean_<timestamp>"
+            "Each source SWC is updated in place and gets its own history operation."
         )
         desc.setWordWrap(True)
         desc.setStyleSheet("font-size: 12px; color: #555;")
@@ -733,7 +734,7 @@ class BatchTabWidget(QWidget):
         lines = [
             "Auto-labeling batch processing completed.",
             f"Folder: {getattr(result, 'folder', '')}",
-            f"Output folder: {getattr(result, 'out_dir', '')}",
+            "Each processed source file was updated and recorded in its own history.",
             f"SWC files detected: {getattr(result, 'files_total', 0)}",
             f"Processed: {getattr(result, 'files_processed', 0)}",
             f"QC rejected: {getattr(result, 'files_qc_failed', 0)}",
@@ -847,10 +848,10 @@ class BatchTabWidget(QWidget):
         per_file = list(out.get("per_file", []))
         failures = list(out.get("failures", []))
         lines = [
-            "Batch Simplification Report",
-            "---------------------------",
+            "Batch Simplification Completed",
+            "------------------------------",
             f"Folder: {out.get('folder', folder_path)}",
-            f"Output folder: {out.get('out_dir', '')}",
+            "Each processed source file was updated and recorded in its own history.",
             f"Detected SWC files: {int(out.get('files_total', 0))}",
             f"Processed: {int(out.get('files_processed', 0))}",
             f"Failed: {int(out.get('files_failed', 0))}",
@@ -896,10 +897,10 @@ class BatchTabWidget(QWidget):
         per_file = list(out.get("per_file", []))
         failures = list(out.get("failures", []))
         lines = [
-            "Batch Index Clean Report",
-            "------------------------",
+            "Batch Index Clean Completed",
+            "---------------------------",
             f"Folder: {out.get('folder', folder_path)}",
-            f"Output folder: {out.get('out_dir', '')}",
+            "Each processed source file was updated and recorded in its own history.",
             f"Detected SWC files: {int(out.get('files_total', 0))}",
             f"Processed: {int(out.get('files_processed', 0))}",
             f"Failed: {int(out.get('files_failed', 0))}",

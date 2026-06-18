@@ -35,9 +35,9 @@ The `User Guide` section is organized around how the software is actually used:
 - `Validation and Repair`
   - what creates issues, how repairs are suggested, where the check details live
 - `Custom Types and Labels`
-  - persistent custom labels, dendrogram editing, saved metadata, log behavior
+  - persistent custom labels, dendrogram editing, saved metadata, history/report behavior
 - `Reports and Outputs`
-  - output folders, session logs, operation logs, saved copies
+  - output folders, history archives, reports, and optional saved copies
 
 ## Tutorials structure
 

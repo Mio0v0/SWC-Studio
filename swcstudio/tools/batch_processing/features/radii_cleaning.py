@@ -14,13 +14,16 @@ from typing import Any
 import pandas as pd
 
 from swcstudio.core.config import load_feature_config, merge_config
+from swcstudio.core.provenance import (
+    OpKind,
+    config_params,
+    run_tracked_batch,
+)
 from swcstudio.core.radii_cleaning import clean_radii_dataframe, radii_stats_by_type
 from swcstudio.core.reporting import (
     format_radii_cleaning_report_text,
-    operation_output_dir_for_folder,
     operation_output_path_for_file,
     operation_report_path_for_file,
-    operation_report_path_for_folder,
     radii_cleaning_log_path_for_file,
     resolve_requested_output_path_for_file,
     timestamp_slug,
@@ -273,66 +276,36 @@ def clean_file(
 def clean_folder(folder: str, *, config_overrides: dict | None = None) -> dict[str, Any]:
     cfg = merge_config(get_config(), config_overrides)
 
-    in_dir = Path(folder)
-    if not in_dir.exists() or not in_dir.is_dir():
-        raise NotADirectoryError(folder)
-
-    run_timestamp = timestamp_slug()
-    out_dir = operation_output_dir_for_folder(in_dir, "batch_radii_cleaning", timestamp=run_timestamp)
-
-    swc_files = _list_swc_files(in_dir)
-    failures: list[str] = []
-    per_file: list[dict[str, Any]] = []
-    total_changes = 0
-
-    for fp in swc_files:
-        try:
-            text = fp.read_text(encoding="utf-8", errors="ignore")
-            out = clean_swc_text(text, config_overrides=cfg)
-            out_path = operation_output_path_for_file(
-                fp,
-                "batch_radii_cleaning",
-                output_dir=out_dir,
-                timestamp=run_timestamp,
-            )
-            out_path.write_bytes(out["bytes"])
-            c = int(out["changes"])
-            details = list(out.get("change_details", []))
-            total_changes += c
-            per_file.append(
-                {
-                    "file": fp.name,
-                    "radius_changes": c,
-                    "out_file": str(out_path),
-                    "change_count": len(details),
-                    "change_lines": _format_change_lines(details),
-                }
-            )
-        except Exception as e:  # noqa: BLE001
-            failures.append(f"{fp.name}: {e}")
-
-    out_report = {
-        "mode": "folder",
-        "folder": str(in_dir),
-        "out_dir": str(out_dir),
-        "files_total": len(swc_files),
-        "files_processed": len(per_file),
-        "files_failed": len(failures),
-        "total_radius_changes": total_changes,
-        "per_file": per_file,
-        "failures": failures,
-        "config_used": cfg,
-    }
-
-    out_report["log_path"] = write_text_report(
-        operation_report_path_for_folder(
-            in_dir,
-            "batch_radii_cleaning",
-            output_dir=out_dir,
-            timestamp=run_timestamp,
+    out_report = run_tracked_batch(
+        folder,
+        kind=OpKind.RADII_CLEAN,
+        transform=lambda _path, text: clean_swc_text(
+            text,
+            config_overrides=cfg,
         ),
-        format_radii_cleaning_report_text(out_report),
+        params_for=lambda _path, result: {
+            **config_params(config_overrides, cfg),
+            "passes": int(result.get("passes", 0)),
+            "radius_changes": int(result.get("changes", 0)),
+        },
+        summary_for=lambda path, result: {
+            "file": path.name,
+            "radius_changes": int(result.get("changes", 0)),
+            "out_file": str(path),
+            "change_count": len(list(result.get("change_details", []) or [])),
+            "change_lines": _format_change_lines(
+                list(result.get("change_details", []) or [])
+            ),
+        },
+        message="GUI batch radii clean",
     )
+    out_report["mode"] = "folder"
+    out_report["total_radius_changes"] = sum(
+        int(row.get("radius_changes", 0))
+        for row in out_report.get("per_file", [])
+        if isinstance(row, dict)
+    )
+    out_report["config_used"] = cfg
     return out_report
 
 

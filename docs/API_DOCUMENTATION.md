@@ -60,7 +60,9 @@ Returned by folder runs (`run_batch` / `batch_auto_typing`). Fields
 include `folder`, `out_dir`, `zip_path`, `files_total`, `files_processed`,
 `files_failed`, `files_qc_failed`, `total_nodes`, `total_type_changes`,
 `total_radius_changes`, `failures`, `per_file`, `log_path`,
-`files_flagged`.
+`files_flagged`, and `commits`. `out_dir` and `log_path` are `None` for
+the tracked in-place batch feature; each `commits` item identifies the
+file's independent commit SHA, branch, and operation ID.
 
 #### `FileResult`
 
@@ -78,13 +80,17 @@ Runs validation over all SWC files in a folder.
 
 #### `batch_split_folder(folder, *, config_overrides=None) -> dict`
 
-Splits each SWC by soma-root trees.
+Splits each SWC by soma-root trees. Each derived output receives its own
+history archive and lineage back to the source; the result includes
+`output_commits`.
 
 #### `batch_auto_typing(folder, *, options=None, config_overrides=None) -> BatchResult`
 
 Runs the auto-typing engine over a folder. There is no backend
-selector — the engine is a single ML pipeline. The
-`config_overrides` dict accepts:
+selector — the engine is a single ML pipeline. This convenience
+feature updates each source independently and returns
+its commit details in `BatchResult.commits`. The `config_overrides` dict
+accepts:
 
 - `model_dir` (str) — override the model search path
 - `use_subtree_stage2` (bool, default `True`) — whether Stage 2
@@ -98,15 +104,18 @@ selector — the engine is a single ML pipeline. The
 
 #### `batch_radii_cleaning(folder, *, config_overrides=None) -> dict`
 
-Runs radii cleaning on a folder.
+Runs radii cleaning on a folder, updating and tracking each source file
+independently.
 
 #### `batch_simplify_folder(folder, *, config_overrides=None) -> dict`
 
-Runs simplification on all SWC files in a folder.
+Runs simplification on all SWC files in a folder, updating and tracking
+each source file independently.
 
 #### `batch_index_clean_folder(folder, *, config_overrides=None) -> dict`
 
-Runs index clean on all SWC files in a folder.
+Runs index clean on all SWC files in a folder, updating and tracking
+each source file independently.
 
 #### `radii_clean_path(path, *, config_overrides=None) -> dict`
 
@@ -144,6 +153,11 @@ model path, `requested_feature_mode`, `actual_feature_mode`,
 `n_baseline_features`. In SWC-Studio, `actual_feature_mode` is
 `"compact"` and `n_baseline_features` is zero.
 
+The CLI `swcstudio auto-label` command wraps this in the provenance
+history layer and updates the source SWC in place. The Python helper
+keeps its explicit `output_path` / `write_output` options for scripted
+workflows that need separate files.
+
 #### `swcstudio.core.auto_typing.run_file(file_path, opts, *, model_dir=None, output_path=None, write_output=True, write_log=True, use_subtree_stage2=True) -> FileResult`
 
 Direct engine entry point for a single file. The convenience wrappers
@@ -152,7 +166,9 @@ into this.
 
 #### `swcstudio.core.auto_typing.run_batch(folder, opts, *, model_dir=None, use_subtree_stage2=True) -> BatchResult`
 
-Direct engine entry point for a folder run.
+Direct engine entry point for a folder run. Unlike the tracked
+`batch_auto_typing` convenience feature, this lower-level engine retains
+its explicit output-directory/zip behavior for scripted workflows.
 
 #### `swcstudio.core.auto_typing.is_available(*, model_dir=None) -> tuple[bool, str]`
 

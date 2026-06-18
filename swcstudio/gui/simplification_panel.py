@@ -63,7 +63,7 @@ class SimplificationPanel(QWidget):
 
         desc = QLabel(
             "Run applies simplification directly to the current SWC.\n"
-            "The change is recorded in the session log like the other editing tools."
+            "The change is recorded in history like the other editing tools."
         )
         desc.setWordWrap(True)
         desc.setStyleSheet("font-size: 12px; color: #555;")

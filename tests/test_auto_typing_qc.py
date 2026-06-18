@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -82,6 +83,34 @@ class AutoTypingQCTests(unittest.TestCase):
 
         self.assertFalse(result.passed)
         self.assertIn("duplicate_id_count=1", result.reasons)
+
+    def test_parent_cycle_counts_only_cycle_members(self) -> None:
+        rows = _unlabeled_chain()
+        rows[3] = "4 0 4.0 0.0 0.0 0.5 6"
+        rows[4] = "5 0 5.0 0.0 0.0 0.5 4"
+        rows[5] = "6 0 6.0 0.0 0.0 0.5 5"
+
+        result = self._evaluate_rows(rows)
+
+        self.assertFalse(result.passed)
+        self.assertEqual(result.n_cycle, 3)
+        self.assertIn("cycle_node_count=3", result.reasons)
+
+    def test_long_chain_cycle_check_is_linear_enough_for_large_swc(self) -> None:
+        path = self.tmp / "large-chain.swc"
+        _write_swc(path, _unlabeled_chain(50_000))
+
+        started = time.perf_counter()
+        result = QCGate().evaluate(path)
+        elapsed = time.perf_counter() - started
+
+        self.assertTrue(result.passed, result.reasons)
+        self.assertEqual(result.n_cycle, 0)
+        self.assertLess(
+            elapsed,
+            3.0,
+            f"50k-node structural QC took {elapsed:.3f}s",
+        )
 
 
 if __name__ == "__main__":

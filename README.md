@@ -61,7 +61,10 @@ The bundled auto-labeling model is the current v12 QC-label-flag
 pipeline: Stage 1 cell typing, Stage 2 subtree labeling, Stage 2b
 apical/basal GNN, Branch3 rescue, QC gate, and learned bad-label flag
 scoring. Compact flag scoring is available out of the box and is the
-only deployed flag mode in SWC-Studio.
+only deployed flag mode in SWC-Studio. The first inference initializes
+the ML runtime and models; later in-process runs reuse cached model
+objects, and an applied GUI result is reused by the next validation
+refresh instead of repeating type-suspicion inference.
 
 ### Option 2 — Researcher, `pip install` (recommended for scripted workflows)
 
@@ -173,7 +176,9 @@ visible encrypted `<stem>_history.swcstudio` repo archive containing the
 append-only event log, content-addressed `.zst` blob store, refs, and
 SQLite query index. SWC headers carry a bounded `# @PROV` pointer to
 that archive and its repo ID, so renamed files can be reattached to
-their history. AI ops capture an MLflow-shaped run record plus a full
+their history. User-facing operations are numbered independently for
+each file as `op-1`, `op-2`, and so on, including files handled by a
+batch. AI ops capture an MLflow-shaped run record plus a full
 environment fingerprint for reproducibility. CLI: `swcstudio history
 {log,show,checkout,branch,switch,tag,checkpoint,reproduce,reindex,verify,gc,export-crate}`.
 

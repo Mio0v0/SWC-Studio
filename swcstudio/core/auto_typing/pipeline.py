@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import os
 import pickle
+import threading
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -45,6 +46,8 @@ from .subtree_features import extract_primary_subtrees
 from .stage3_refine import RefinementResult, refine
 
 STAGE2_MODEL = Path(__file__).parent / "models" / "branch_classifier.pkl"
+_STAGE2_BUNDLE_CACHE: dict[tuple[str, int, int], dict] = {}
+_STAGE2_BUNDLE_CACHE_LOCK = threading.RLock()
 
 
 @dataclass
@@ -58,12 +61,27 @@ class PipelineResult:
 
 def _load_stage2_bundle(model_path: Path) -> dict:
     """Load the Stage 2 bundle, supporting both old (single model) and
-    new (per-cell-type models) formats for backward compatibility."""
-    from ._pickle_compat import install_hybrid_pickle_aliases  # noqa: PLC0415
-    install_hybrid_pickle_aliases()
-    with open(model_path, "rb") as f:
-        data = pickle.load(f)
-    return data
+    new (per-cell-type models) formats for backward compatibility.
+
+    The pickle can be large, so cache it by resolved path, mtime, and
+    size. Replacing a model file automatically invalidates the entry.
+    """
+    resolved = model_path.resolve()
+    stat = resolved.stat()
+    key = (str(resolved), int(stat.st_mtime_ns), int(stat.st_size))
+    with _STAGE2_BUNDLE_CACHE_LOCK:
+        cached = _STAGE2_BUNDLE_CACHE.get(key)
+        if cached is not None:
+            return cached
+        from ._pickle_compat import install_hybrid_pickle_aliases  # noqa: PLC0415
+        install_hybrid_pickle_aliases()
+        with open(resolved, "rb") as f:
+            data = pickle.load(f)
+        for old_key in list(_STAGE2_BUNDLE_CACHE):
+            if old_key[0] == key[0] and old_key != key:
+                _STAGE2_BUNDLE_CACHE.pop(old_key, None)
+        _STAGE2_BUNDLE_CACHE[key] = data
+        return data
 
 
 def _select_stage2_model(

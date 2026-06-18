@@ -161,7 +161,7 @@ class RadiiCleaningPanel(QWidget):
             else (
                 "Radii cleaning is JSON-config driven.\n"
                 "1. Select a folder to inspect combined per-type radius distributions across all SWC files.\n"
-                "2. Apply radii cleaning to write cleaned copies for that folder."
+                "2. Apply radii cleaning; each source SWC is updated and recorded in its own history."
             )
         )
         desc = QLabel(desc_text)
@@ -433,12 +433,11 @@ class RadiiCleaningPanel(QWidget):
         lines = [
             "Radii cleaning completed (folder).",
             f"Folder: {out.get('folder', '')}",
-            f"Output folder: {out.get('out_dir', '')}",
+            "Each processed source file was updated and recorded in its own history.",
             f"SWC files detected: {out.get('files_total', 0)}",
             f"Processed: {out.get('files_processed', 0)}",
             f"Failed: {out.get('files_failed', 0)}",
             f"Total radius changes: {out.get('total_radius_changes', 0)}",
-            f"Log: {out.get('log_path', '')}",
         ]
         per_file = list(out.get("per_file", []))
         if per_file:

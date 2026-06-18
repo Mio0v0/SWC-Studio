@@ -44,11 +44,11 @@ from .constants import SWC_COLS, label_for_type
 from .context_inspector import ContextInspectorWidget
 from .custom_type_dialog import DefineCustomTypesDialog
 from .editor_tab import EditorTab
+from .edit_history import DataFrameUndoHistory
 from .geometry_editing_panel import GeometryEditingPanel
 from .issue_panel import IssuePanelWidget
 from .manual_radii_panel import ManualRadiiPanel
 from .neuron_3d_widget import Neuron3DWidget
-from .report_popup import ReportPopupDialog
 from .radii_cleaning_panel import RadiiCleaningPanel
 from .simplification_panel import SimplificationPanel
 from .swc_table_widget import SWCTableWidget
@@ -80,15 +80,12 @@ from swcstudio.core.reporting import (
     correction_summary_log_path_for_file,
     format_correction_summary_report_text,
     format_auto_typing_report_text,
-    format_morphology_session_log_text,
     format_simplification_report_text,
-    morphology_session_log_path,
-    output_dir_for_file,
     simplification_log_path_for_file,
     validation_index_clean_detail_lines,
     write_text_report,
 )
-from swcstudio.core.swc_io import parse_swc_text_preserve_tokens, write_swc_to_bytes_preserve_tokens
+from swcstudio.core.swc_io import SWC_HEADER_ATTR, parse_swc_text_preserve_tokens, write_swc_to_bytes_preserve_tokens
 from swcstudio.core.validation_engine import consolidate_complex_somas_array
 from swcstudio.tools.morphology_editing.features.simplification import simplify_dataframe
 from swcstudio.tools.validation.features.auto_typing import BatchOptions, run_file as run_validation_auto_typing_file
@@ -144,10 +141,34 @@ def _enrich_df_with_original_tokens(new_df: pd.DataFrame,
         return new_df
     lookup = prev.set_index(prev["id"].astype(int))[have]
     out = new_df.copy()
+    out.attrs.update(getattr(prev, "attrs", {}) or {})
     ids = out["id"].astype(int)
     for col in have:
         out[col] = ids.map(lookup[col])
     return out
+
+
+def _copy_swc_metadata(dst: pd.DataFrame, src: pd.DataFrame | None) -> pd.DataFrame:
+    """Carry SWC comment/header metadata across dataframe-only operations."""
+    if not isinstance(dst, pd.DataFrame):
+        return dst
+    if isinstance(src, pd.DataFrame):
+        for key, value in getattr(src, "attrs", {}).items():
+            if key not in dst.attrs or not dst.attrs.get(key):
+                dst.attrs[key] = value
+    return dst
+
+
+def _suggest_closed_output_path(base: str | Path, *, timestamp: str | None = None) -> Path:
+    """Return a non-existing Save As path without creating directories."""
+    source = Path(base)
+    ts = str(timestamp or datetime.now().strftime("%Y%m%d_%H%M%S"))
+    candidate = source.parent / f"{source.stem}_closed_{ts}.swc"
+    i = 1
+    while candidate.exists():
+        candidate = source.parent / f"{source.stem}_closed_{ts}_{i}.swc"
+        i += 1
+    return candidate
 
 
 @dataclass
@@ -173,10 +194,10 @@ class _DocumentState:
     pending_resolved_issue_ids: set[str] = field(default_factory=set)
     selected_issue_id: str = ""
     recovery_path: str = ""
-    history_snapshots: list[pd.DataFrame] = field(default_factory=list)
-    history_index: int = -1
+    edit_history: DataFrameUndoHistory = field(default_factory=DataFrameUndoHistory)
     last_auto_label_result: dict | None = None
     last_auto_label_options: dict | None = None
+    pending_type_suspicion_issues: list[dict] | None = None
     auto_label_preview_df: pd.DataFrame | None = None
     auto_label_preview_base_df: pd.DataFrame | None = None
     last_simplification_result: dict | None = None
@@ -1293,10 +1314,10 @@ class SWCMainWindow(QMainWindow):
         doc.pending_resolved_issue_ids = set()
         doc.selected_issue_id = ""
         doc.recovery_path = ""
-        doc.history_snapshots = [doc.df.copy()] if isinstance(doc.df, pd.DataFrame) else []
-        doc.history_index = len(doc.history_snapshots) - 1
+        doc.edit_history.reset()
         doc.last_auto_label_result = None
         doc.last_auto_label_options = None
+        doc.pending_type_suspicion_issues = None
         doc.auto_label_preview_df = None
         doc.auto_label_preview_base_df = None
         doc.editor.set_edit_history_state(False, False)
@@ -1307,41 +1328,42 @@ class SWCMainWindow(QMainWindow):
         editor.df_changed.connect(lambda new_df, ed=editor: self._on_editor_df_changed(ed, new_df))
         editor.node_selected.connect(lambda swc_id, ed=editor: self._on_editor_node_selected(ed, swc_id))
 
-    def _push_document_history(self, doc: _DocumentState, df: pd.DataFrame):
-        if doc is None or doc.is_preview or not isinstance(df, pd.DataFrame):
+    def _push_document_history(
+        self,
+        doc: _DocumentState,
+        before: pd.DataFrame | None,
+        after: pd.DataFrame | None,
+    ):
+        if (
+            doc is None
+            or doc.is_preview
+            or not isinstance(before, pd.DataFrame)
+            or not isinstance(after, pd.DataFrame)
+        ):
             return
-        snapshot = df.copy()
-        if doc.history_index >= 0 and doc.history_index < len(doc.history_snapshots):
-            try:
-                if doc.history_snapshots[doc.history_index].equals(snapshot):
-                    self._refresh_edit_history_state(doc)
-                    return
-            except Exception:
-                pass
-        if doc.history_index < len(doc.history_snapshots) - 1:
-            doc.history_snapshots = doc.history_snapshots[: doc.history_index + 1]
-        doc.history_snapshots.append(snapshot)
-        doc.history_index = len(doc.history_snapshots) - 1
+        doc.edit_history.push(before, after)
         self._refresh_edit_history_state(doc)
 
     def _refresh_edit_history_state(self, doc: _DocumentState | None = None):
         row = doc or self._active_document()
         if row is None:
             return
-        can_undo = (not row.is_preview) and row.history_index > 0
-        can_redo = (not row.is_preview) and row.history_index >= 0 and row.history_index < (len(row.history_snapshots) - 1)
+        can_undo = (not row.is_preview) and row.edit_history.can_undo
+        can_redo = (not row.is_preview) and row.edit_history.can_redo
         row.editor.set_edit_history_state(can_undo, can_redo)
 
-    def _restore_document_history(self, doc: _DocumentState, target_index: int, *, direction: str):
+    def _restore_document_history(self, doc: _DocumentState, *, direction: str):
         if doc is None or doc.is_preview:
             return False
-        if target_index < 0 or target_index >= len(doc.history_snapshots):
+        if direction == "Undo":
+            restored = doc.edit_history.undo(doc.df)
+        else:
+            restored = doc.edit_history.redo(doc.df)
+        if restored is None:
             return False
-        doc.history_index = int(target_index)
-        snapshot = doc.history_snapshots[doc.history_index].copy()
         self._apply_document_dataframe(
             doc,
-            snapshot,
+            restored,
             event_title=direction,
             event_summary=f"{direction} one session edit step.",
             event_details=[],
@@ -1355,12 +1377,12 @@ class SWCMainWindow(QMainWindow):
     def _undo_document(self, doc: _DocumentState | None) -> bool:
         if doc is None:
             return False
-        return self._restore_document_history(doc, doc.history_index - 1, direction="Undo")
+        return self._restore_document_history(doc, direction="Undo")
 
     def _redo_document(self, doc: _DocumentState | None) -> bool:
         if doc is None:
             return False
-        return self._restore_document_history(doc, doc.history_index + 1, direction="Redo")
+        return self._restore_document_history(doc, direction="Redo")
 
     def _snapshot_log_value(self, key: str, value):
         if value is None:
@@ -1557,6 +1579,9 @@ class SWCMainWindow(QMainWindow):
                     new_df, op.input_bytes
                 )
                 op.set_output(write_swc_to_bytes_preserve_tokens(enriched))
+            saved_df = new_df.copy()
+            _copy_swc_metadata(saved_df, doc.df)
+            doc.original_df = saved_df
             return op.result
         except Exception as e:  # noqa: BLE001
             # Never block a GUI edit because the history layer failed.
@@ -1668,33 +1693,16 @@ class SWCMainWindow(QMainWindow):
         if not doc.session_operations:
             return None
 
-        source = str(source_override or doc.file_path or "")
-        if source:
-            log_path = morphology_session_log_path(source, direct_parent=bool(source_override))
-            source_name = os.path.basename(source)
-        else:
-            source_name = doc.filename or "swc"
-            log_path = Path.cwd() / f"{Path(source_name).stem}_morphology_session_log.txt"
-
-        txt = format_morphology_session_log_text(
-            source_file=source_name,
-            session_started=doc.session_started_at or "",
-            session_ended=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            operations=list(doc.session_operations),
+        self._append_log(
+            "Operation details are stored in the encrypted history archive. "
+            "Open History Browser to review them.",
+            "INFO",
         )
-        out_path = write_text_report(log_path, txt)
-        self._append_log(f"Session report written: {out_path}", "INFO")
-        if show_popup:
-            try:
-                ReportPopupDialog.open_report(self, title="SWC Session Report", report_path=out_path)
-            except Exception as e:  # noqa: BLE001
-                self._append_log(f"Could not open session report popup: {e}", "WARN")
-
         doc.session_operations = []
         doc.session_seq = 0
         if doc is self._active_document():
             self._refresh_morph_edit_tab(doc)
-        return str(out_path)
+        return None
 
     def _document_has_unsaved_edits(self, doc: _DocumentState) -> bool:
         if doc is None:
@@ -1747,14 +1755,7 @@ class SWCMainWindow(QMainWindow):
 
     def _next_closed_output_path(self, doc: _DocumentState) -> Path:
         base = Path(doc.file_path) if str(doc.file_path or "").strip() else Path.cwd() / (doc.filename or "swc")
-        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-        out_dir = output_dir_for_file(base)
-        cand = out_dir / f"{base.stem}_closed_{ts}.swc"
-        i = 1
-        while cand.exists():
-            cand = out_dir / f"{base.stem}_closed_{ts}_{i}.swc"
-            i += 1
-        return cand
+        return _suggest_closed_output_path(base)
 
     def _plan_document_close(self, doc: _DocumentState, *, app_closing: bool) -> dict | None:
         if doc is None or doc.is_preview:
@@ -1762,34 +1763,36 @@ class SWCMainWindow(QMainWindow):
 
         filename = doc.filename or "SWC"
         has_unsaved_edits = self._document_has_unsaved_edits(doc)
-        has_session_log = bool(doc.session_operations)
+        has_history_operations = bool(doc.session_operations)
         title = "Exit SWC-Studio" if app_closing else "Close SWC File"
 
         if has_unsaved_edits:
-            default_output_path = self._next_closed_output_path(doc)
+            original_path = Path(doc.file_path) if str(doc.file_path or "").strip() else None
+            default_save_as = self._next_closed_output_path(doc)
             box = QMessageBox(self)
             box.setIcon(QMessageBox.Warning)
             box.setWindowTitle(title)
             box.setText(f"Close {filename}?")
             box.setInformativeText(
-                "Unsaved changes will be saved to:\n"
-                f"{default_output_path}\n\n"
-                "Or choose a different location."
+                "Save unsaved changes back to the original SWC file, "
+                "or save a separate copy."
             )
-            save_default_btn = box.addButton("Save To Default Location", QMessageBox.AcceptRole)
-            change_location_btn = box.addButton("Change Save Location...", QMessageBox.ActionRole)
+            save_original_btn = box.addButton("Save Original", QMessageBox.AcceptRole)
+            save_as_btn = box.addButton("Save As...", QMessageBox.ActionRole)
             box.addButton(QMessageBox.Cancel)
-            box.setDefaultButton(save_default_btn)
+            box.setDefaultButton(save_original_btn)
             box.exec()
 
             clicked = box.clickedButton()
-            if clicked is save_default_btn:
-                return {"kind": "write_close_copy", "output_path": str(default_output_path)}
-            if clicked is change_location_btn:
+            if clicked is save_original_btn:
+                if original_path is None:
+                    return {"kind": "write_close_copy", "output_path": str(default_save_as)}
+                return {"kind": "write_original", "output_path": str(original_path)}
+            if clicked is save_as_btn:
                 path, _ = QFileDialog.getSaveFileName(
                     self,
-                    "Save Changed SWC Copy",
-                    str(default_output_path),
+                    "Save Changed SWC As",
+                    str(default_save_as),
                     "SWC Files (*.swc);;All Files (*)",
                 )
                 if not path:
@@ -1803,10 +1806,10 @@ class SWCMainWindow(QMainWindow):
         box.setIcon(QMessageBox.Question)
         box.setWindowTitle(title)
         box.setText(f"Close {filename}?")
-        if has_session_log:
+        if has_history_operations:
             box.setInformativeText(
                 "No new SWC copy will be saved.\n"
-                "The session log will be written."
+                "Operation details are already stored in history."
             )
         else:
             box.setInformativeText("No unsaved changes.")
@@ -1817,8 +1820,6 @@ class SWCMainWindow(QMainWindow):
         if box.clickedButton() is not close_btn:
             self._append_log(f"Close cancelled for {filename}.", "INFO")
             return None
-        if has_session_log:
-            return {"kind": "close_and_log"}
         return {"kind": "close"}
 
     def _apply_document_close_plan(self, doc: _DocumentState, plan: dict) -> bool:
@@ -1829,13 +1830,21 @@ class SWCMainWindow(QMainWindow):
         output_path = str((plan or {}).get("output_path", "") or "").strip()
 
         try:
-            if kind == "write_close_copy":
+            if kind == "write_original":
+                target = output_path or str(doc.file_path or "")
+                if not target:
+                    raise ValueError("Missing original SWC path.")
+                self._write_swc_file(target, doc.df)
+                self._append_log(f"Saved original SWC: {target}", "INFO")
+                self._after_document_write(doc, target, action_name="Save")
+                self._finalize_morphology_session(doc, show_popup=False)
+            elif kind == "write_close_copy":
                 if not output_path:
                     raise ValueError("Missing output path for closing copy.")
                 self._write_swc_file(output_path, doc.df)
                 self._append_log(f"Changed SWC copy saved to: {output_path}", "INFO")
                 self._finalize_morphology_session(doc, show_popup=False, source_override=output_path)
-            elif kind == "close_and_log":
+            elif kind == "close":
                 self._finalize_morphology_session(doc, show_popup=False)
         except Exception as e:  # noqa: BLE001
             QMessageBox.critical(
@@ -2334,6 +2343,10 @@ class SWCMainWindow(QMainWindow):
             ),
             event_details=event_details,
         )
+        # The applied dataframe now contains this run's suggested types,
+        # so the immediately following validation can reuse the result:
+        # there are no "likely wrong label" differences left to infer.
+        source_doc.pending_type_suspicion_issues = []
         source_doc.auto_label_preview_base_df = None
         source_doc.auto_label_preview_df = None
         self._validation_auto_label_panel.set_preview_state(False, result_payload)
@@ -2998,8 +3011,7 @@ class SWCMainWindow(QMainWindow):
     # --------------------------------------------------------- File loading
     def reload_swc_from_disk(self, path: str) -> None:
         """Reload an open document's in-memory dataframe from its
-        on-disk current.swc (or fall back to ``path`` if no
-        current.swc exists yet).
+        on-disk source SWC.
 
         Called by the history panel after a Revert action so the GUI
         immediately reflects the reverted state without requiring the
@@ -3027,8 +3039,8 @@ class SWCMainWindow(QMainWindow):
         if match_doc is None:
             return
 
-        # Prefer current.swc (latest state) if it exists; otherwise
-        # fall back to the source file.
+        # current_swc_path_for is kept as a compatibility helper; in
+        # current builds it resolves to the source SWC itself.
         src_path = Path(path)
         if current_swc_path_for is not None:
             cur = current_swc_path_for(src_path)
@@ -3054,8 +3066,8 @@ class SWCMainWindow(QMainWindow):
         match_doc.df = new_df
         match_doc.validation_report = None
         match_doc.issues = []
-        match_doc.history_snapshots = [new_df.copy()]
-        match_doc.history_index = 0
+        match_doc.pending_type_suspicion_issues = None
+        match_doc.edit_history.reset()
         match_doc.editor.load_swc(match_doc.df, match_doc.filename)
         self._clear_recovery_copy(match_doc)
         if match_doc is self._active_document():
@@ -3179,7 +3191,14 @@ class SWCMainWindow(QMainWindow):
     def _write_swc_file(self, path: str, df: pd.DataFrame):
         out_path = Path(path)
         out_path.parent.mkdir(parents=True, exist_ok=True)
-        payload = write_swc_to_bytes_preserve_tokens(df)
+        out_df = df.copy()
+        if not getattr(out_df, "attrs", {}).get(SWC_HEADER_ATTR) and out_path.exists():
+            try:
+                previous = parse_swc_text_preserve_tokens(out_path.read_text(encoding="utf-8", errors="ignore"))
+                _copy_swc_metadata(out_df, previous)
+            except Exception:
+                pass
+        payload = write_swc_to_bytes_preserve_tokens(out_df)
         fd, tmp_path = tempfile.mkstemp(prefix=f".{out_path.stem}_", suffix=".tmp", dir=str(out_path.parent))
         try:
             with os.fdopen(fd, "wb") as f:
@@ -3280,8 +3299,11 @@ class SWCMainWindow(QMainWindow):
         if doc is None:
             return
 
-        old_df = doc.df.copy() if doc.df is not None else None
-        doc.df = df.copy()
+        old_df = doc.df if isinstance(doc.df, pd.DataFrame) else None
+        next_df = df.copy()
+        _copy_swc_metadata(next_df, old_df)
+        doc.pending_type_suspicion_issues = None
+        doc.df = next_df
         doc.validation_report = None
         doc.issues = []
         if not doc.is_preview:
@@ -3290,19 +3312,19 @@ class SWCMainWindow(QMainWindow):
             # made directly in the table" vs panel-driven mutations.
             from swcstudio.core.provenance import OpKind  # noqa: PLC0415
             self._record_tracked_commit(
-                doc, doc.df, kind=OpKind.PLUGIN_OP,
-                params={"source": "editor_table", "title": "Manual Label Edit"},
-                message="GUI editor: direct in-table edit",
+                doc, doc.df, kind=OpKind.SET_TYPE,
+                params={"source": "editor_table", "title": "Manual Labeling"},
+                message="GUI manual labeling",
             )
             self._record_session_operation(
                 doc,
-                title="Manual Label Edit",
+                title="Manual Labeling",
                 summary="Applied labeling edits in Morphology Editing.",
                 old_df=old_df,
                 new_df=doc.df,
                 details=[],
             )
-        self._push_document_history(doc, doc.df)
+        self._push_document_history(doc, old_df, doc.df)
         self._write_recovery_copy(doc)
         self._refresh_edit_history_state(doc)
 
@@ -3559,13 +3581,24 @@ class SWCMainWindow(QMainWindow):
         previous_issue_id = str(doc.selected_issue_id or "").strip()
         previous_issue = self._find_issue_by_id(doc, previous_issue_id)
         doc.validation_report = dict(report)
+        reused_type_suspicion = doc.pending_type_suspicion_issues
+        doc.pending_type_suspicion_issues = None
         # Fast path: build the issue list WITHOUT type suspicion so the
         # panel paints within ~100 ms instead of blocking on ~1-2 s of
         # auto-typing inference. The ``Likely wrong labels`` rows are
         # filled in by ``_start_type_suspicion_worker`` below.
-        issues = self._build_all_issues_for_document(
-            doc, report, skip_type_suspicion=True,
-        )
+        if reused_type_suspicion is None:
+            issues = self._build_all_issues_for_document(
+                doc,
+                report,
+                skip_type_suspicion=True,
+            )
+        else:
+            issues = self._build_all_issues_for_document(
+                doc,
+                report,
+                type_suspicious=list(reused_type_suspicion),
+            )
         issue_ids = {str(item.get("issue_id", "")) for item in issues}
         for item in issues:
             issue_id = str(item.get("issue_id", "")).strip()
@@ -3589,10 +3622,16 @@ class SWCMainWindow(QMainWindow):
         self._data_tabs.setCurrentIndex(0)
         self._data_dock.show()
         self._append_log(f"Issue navigator updated: {len(doc.issues)} actionable findings.", "INFO")
-        # Phase 2: kick off auto-typing in the background to populate the
-        # ``Likely wrong labels`` rows. The result is merged into the
-        # issue panel by ``_on_type_suspicion_finished`` when ready.
-        self._start_type_suspicion_worker(doc, report)
+        # Phase 2: only run inference when there is no result from the
+        # auto-label operation that produced this exact dataframe.
+        if reused_type_suspicion is None:
+            self._start_type_suspicion_worker(doc, report)
+        else:
+            self._append_log(
+                "Issue navigator reused the applied auto-label result; "
+                "skipped duplicate type-suspicion inference.",
+                "INFO",
+            )
         if previous_issue_id and self._issue_panel.select_issue(previous_issue_id):
             doc.selected_issue_id = previous_issue_id
             return
@@ -4326,10 +4365,13 @@ class SWCMainWindow(QMainWindow):
         id_map: dict[int, int] | None = None,
         change_rows: list[dict] | None = None,
     ):
-        old_df = doc.df.copy() if doc.df is not None else None
-        doc.df = df.copy()
+        old_df = doc.df if isinstance(doc.df, pd.DataFrame) else None
+        next_df = df.copy()
+        _copy_swc_metadata(next_df, old_df)
+        doc.pending_type_suspicion_issues = None
+        doc.df = next_df
         if push_history:
-            self._push_document_history(doc, doc.df)
+            self._push_document_history(doc, old_df, doc.df)
         self._write_recovery_copy(doc)
         doc.editor.load_swc(doc.df, doc.filename)
         doc.editor.set_mode(self._editor_mode_for_feature())

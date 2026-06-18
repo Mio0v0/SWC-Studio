@@ -66,7 +66,7 @@ The shared report builders include a label legend section. That legend always co
 - saved color
 - saved notes, when present
 
-This means custom labels are preserved not only in the GUI, but also in the generated operation logs and session logs.
+This means custom labels are preserved not only in the GUI, but also in generated reports and history records.
 
 ## Interaction with manual and dendrogram editing
 

@@ -34,8 +34,10 @@ Update flow
 3. If an update is available, presents a dialog. User clicks "Update".
 4. The relevant zip is downloaded into a temp file, verified by SHA-256,
    extracted into the user override location atomically.
-5. The user is told to relaunch (for code) or that the update is live
-   (for models, which are loaded fresh on each auto-label call).
+5. The user is told to relaunch for code updates. Model updates are
+   available to subsequent auto-label runs; the large Stage 1/Stage 2
+   caches include resolved-path metadata, while a relaunch guarantees
+   that all already-initialized neural-model state is refreshed.
 
 Public API
 ----------

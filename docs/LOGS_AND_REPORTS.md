@@ -1,6 +1,11 @@
 # Logs and Reports
 
-`SWC-Studio` uses a shared reporting layer so GUI and CLI logs follow the same conventions.
+`SWC-Studio` uses two related audit paths:
+
+- GUI morphology edits are stored in the encrypted per-file history
+  archive (`<stem>_history.swcstudio`).
+- Batch tools, validation exports, and CLI report commands can still
+  write normal text reports.
 
 Core module:
 
@@ -14,7 +19,7 @@ Core module:
 
 ## Main report helpers
 
-Examples of the shared builders:
+Examples of the shared text-report builders:
 
 - `format_validation_report_text`
 - `format_batch_validation_report_text`
@@ -22,34 +27,32 @@ Examples of the shared builders:
 - `format_auto_typing_report_text`
 - `format_radii_cleaning_report_text`
 - `format_simplification_report_text`
-- `format_morphology_session_log_text`
 - `format_operation_report_text`
 - `write_text_report`
 
 ## Default naming
 
-Single-file outputs use:
+Single-file report/export workflows normally use:
 
 - output folder
   - `<input_folder>/<stem>_swc_studio_output/`
 - output or report file
   - `<stem>_<operation_name>_<timestamp>.<ext>`
 
-Batch outputs use:
+Batch report/export workflows, such as validation and split, use:
 
 - output folder
   - `<input_folder>/<input_folder>_<operation_name>_<timestamp>/`
 - batch report
   - `<input_folder>_<operation_name>_<timestamp>.txt`
 
-## Current single-file CLI behavior
+## Current CLI edit behavior
 
-Single-file edit commands automatically write both:
+Mutating CLI edit commands update the source SWC directly and record the
+operation in the per-file history archive:
 
-- an updated SWC file
-- a matching text report
-
-into the source file's default `*_swc_studio_output` directory.
+- source file: `<stem>.swc`
+- history archive: `<stem>_history.swcstudio`
 
 This applies to commands such as:
 
@@ -62,16 +65,28 @@ This applies to commands such as:
 - `set-radius`
 - geometry edit commands
 
-## GUI session outputs
+Mutating batch commands such as auto-typing, radii-clean, simplification,
+and index-clean record each processed source SWC in place and do not
+create a shared batch output folder. Text reports
+are still used for validation/report-only commands and explicit exports.
+`split`, `history checkout`, and `history checkpoint` intentionally
+materialize separate SWC files.
 
-The GUI writes:
+## GUI history outputs
 
-- session log
-  - `<stem>_session_log_<timestamp>.txt`
-- saved copy
-  - `<stem>_closed_<timestamp>.swc`
+For tracked GUI morphology edits, the GUI writes:
 
-into the same default single-file output directory.
+- the source SWC itself, with compact `# @PROV` pointer lines
+- the encrypted history archive
+  - `<stem>_history.swcstudio`
+
+The History Browser opens on the Operation History tab, where each operation
+can be expanded to show node-level old/new values. Exact version IDs and
+SHA details stay in the Commit History tab for technical review.
+Operation parameters show readable run settings such as thresholds,
+seeds, strictness, and algorithm options; internal hashes, paths, and
+result-summary fields are hidden from this normal view.
+SWC/SWC+ comment headers from the original file are preserved.
 
 ## Typical report contents
 
@@ -81,7 +96,7 @@ Validation reports can include:
 - thresholds and metrics
 - failing node IDs and section IDs
 
-Operation reports and GUI session logs can include:
+Operation reports and GUI history records can include:
 
 - operation summary
 - node-level change tables
@@ -95,7 +110,7 @@ When custom type definitions exist, the label legend can include:
 - saved color
 - saved notes
 
-That is why custom labels defined in the GUI can show up later in generated logs.
+That is why custom labels defined in the GUI can show up later in generated reports or history records.
 
 ## Programmatic use
 

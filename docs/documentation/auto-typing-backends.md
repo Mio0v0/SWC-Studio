@@ -98,6 +98,28 @@ selection, optional model directory, cell type (`unknown`, `pyramidal`,
 `interneuron`), flag enable/disable, and a loose-to-strict flag
 strictness control.
 
+## Runtime Performance
+
+The first auto-label run in a process is normally slower because Python,
+the ML libraries, and each model must be initialized. Later runs reuse
+the loaded model objects:
+
+- Stage 1 and Stage 2 caches are keyed by resolved model path, modified
+  time, and file size, so replacing a model invalidates the cached copy.
+- Stage 2b, Branch3, QC-gate, and flag-model state is also reused where
+  applicable.
+- structural QC cycle detection uses a linear traversal rather than
+  repeatedly walking every node's parent chain.
+
+In the GUI, applying an auto-label result also supplies the
+type-suspicion state for the immediately following validation refresh.
+That refresh does not launch the same inference a second time.
+
+The application remains CPU-oriented by default. Inference time still
+grows with morphology size and branch complexity, and the portable
+Windows executable can be slower on its first run than an already-warm
+developer environment.
+
 ## Python API
 
 ```python

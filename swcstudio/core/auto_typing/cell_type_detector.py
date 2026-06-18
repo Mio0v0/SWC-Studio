@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import pickle
+import threading
 from dataclasses import dataclass, field, asdict
 from pathlib import Path
 from typing import Any
@@ -164,6 +165,14 @@ def _heuristic_classify(features: dict[str, float]) -> tuple[str, dict[str, floa
 MODEL_DIR = Path(__file__).parent / "models"
 DEFAULT_MODEL_PATH = MODEL_DIR / "cell_type_classifier.pkl"
 DEFAULT_META_PATH = MODEL_DIR / "cell_type_meta.json"
+_CLASSIFIER_CACHE: dict[tuple[str, int, int], "CellTypeClassifier"] = {}
+_CLASSIFIER_CACHE_LOCK = threading.RLock()
+
+
+def _model_cache_key(model_path: Path) -> tuple[str, int, int]:
+    resolved = model_path.resolve()
+    stat = resolved.stat()
+    return str(resolved), int(stat.st_mtime_ns), int(stat.st_size)
 
 
 class CellTypeClassifier:
@@ -176,7 +185,7 @@ class CellTypeClassifier:
 
     @classmethod
     def load(cls, model_path: str | Path = DEFAULT_MODEL_PATH) -> "CellTypeClassifier":
-        """Load a trained model from disk."""
+        """Load a trained model, reusing it until the file changes."""
         model_path = Path(model_path)
         if not model_path.exists():
             raise FileNotFoundError(
@@ -184,23 +193,34 @@ class CellTypeClassifier:
                 "Run hybrid/train_stage1.py first to train a model, "
                 "or the heuristic fallback will be used."
             )
-        from ._pickle_compat import install_hybrid_pickle_aliases  # noqa: PLC0415
-        install_hybrid_pickle_aliases()
-        with open(model_path, "rb") as f:
-            data = pickle.load(f)
-        obj = cls()
-        obj.model = data["model"]
-        obj._classes = data.get("classes", list(CELL_TYPES))
-        obj.feature_names = data.get("feature_names", list(FEATURE_NAMES))
-        if any(name in LEAKY_STAGE1_FEATURES for name in obj.feature_names):
-            raise ValueError(
-                f"Leaky Stage 1 model at {model_path}: feature_names contain SWC type-derived fields. Retrain hybrid/train_stage1.py."
-            )
-        if obj.feature_names != list(FEATURE_NAMES):
-            raise ValueError(
-                f"Stage 1 model at {model_path} has stale feature schema. Retrain hybrid/train_stage1.py."
-            )
-        return obj
+        key = _model_cache_key(model_path)
+        with _CLASSIFIER_CACHE_LOCK:
+            cached = _CLASSIFIER_CACHE.get(key)
+            if cached is not None:
+                return cached
+
+            from ._pickle_compat import install_hybrid_pickle_aliases  # noqa: PLC0415
+            install_hybrid_pickle_aliases()
+            with open(model_path, "rb") as f:
+                data = pickle.load(f)
+            obj = cls()
+            obj.model = data["model"]
+            obj._classes = data.get("classes", list(CELL_TYPES))
+            obj.feature_names = data.get("feature_names", list(FEATURE_NAMES))
+            if any(name in LEAKY_STAGE1_FEATURES for name in obj.feature_names):
+                raise ValueError(
+                    f"Leaky Stage 1 model at {model_path}: feature_names contain SWC type-derived fields. Retrain hybrid/train_stage1.py."
+                )
+            if obj.feature_names != list(FEATURE_NAMES):
+                raise ValueError(
+                    f"Stage 1 model at {model_path} has stale feature schema. Retrain hybrid/train_stage1.py."
+                )
+            resolved = key[0]
+            for old_key in list(_CLASSIFIER_CACHE):
+                if old_key[0] == resolved and old_key != key:
+                    _CLASSIFIER_CACHE.pop(old_key, None)
+            _CLASSIFIER_CACHE[key] = obj
+            return obj
 
     def save(self, model_path: str | Path = DEFAULT_MODEL_PATH) -> None:
         """Save the trained model to disk."""

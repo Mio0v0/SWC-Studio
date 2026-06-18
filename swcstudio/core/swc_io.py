@@ -2,18 +2,37 @@ import io
 import numpy as np
 import pandas as pd
 
-from typing import Dict
-
 # Keep a compact SWC I/O helper set similar to the project's previous swc_io.py
 
 SWC_COLS = ["id", "type", "x", "y", "z", "radius", "parent"]
+SWC_HEADER_ATTR = "swc_header_lines"
+
+
+def _default_swc_plus_header() -> list[str]:
+    return [
+        "# SWC plus (SWC+) format specification",
+        '# <SWCplus version="0.12">',
+        "#   <MetaData>",
+        '#     <FileHistory originalFormat="SWC">',
+        '#       <Modification software="SWC-Studio" command="save" summary="Saved by SWC-Studio"/>',
+        "#     </FileHistory>",
+        "#   </MetaData>",
+        '#   <CustomTypes version="0.12">',
+        "#     <!-- Place customized Types here if you use TypeIDs >= 16 -->",
+        "#   </CustomTypes>",
+        "# </SWCplus>",
+    ]
 
 
 def parse_swc_text_preserve_tokens(text: str) -> pd.DataFrame:
     rows = []
+    header_lines: list[str] = []
     for raw in text.splitlines():
         s = raw.strip()
-        if not s or s.startswith("#"):
+        if s.startswith("#"):
+            header_lines.append(raw.rstrip("\r\n"))
+            continue
+        if not s:
             continue
         parts = s.split()
         if len(parts) < 7:
@@ -56,11 +75,20 @@ def parse_swc_text_preserve_tokens(text: str) -> pd.DataFrame:
     df["id"] = pd.to_numeric(df["id"], errors="coerce").fillna(-1).astype(int)
     df["type"] = pd.to_numeric(df["type"], errors="coerce").fillna(0).astype(int)
     df["parent"] = pd.to_numeric(df["parent"], errors="coerce").fillna(-1).astype(int)
+    df.attrs[SWC_HEADER_ATTR] = header_lines
     return df
 
 
 def write_swc_to_bytes_preserve_tokens(df: pd.DataFrame) -> bytes:
     buf = io.StringIO()
+    header_lines = list(getattr(df, "attrs", {}).get(SWC_HEADER_ATTR) or [])
+    if not header_lines:
+        header_lines = _default_swc_plus_header()
+    for line in header_lines:
+        text = str(line).rstrip("\r\n")
+        if text:
+            buf.write(text + "\n")
+
     has_tok = all(c in df.columns for c in ["x_str","y_str","z_str","radius_str","id_str","parent_str"])
 
     def _same_int_value(token, value) -> bool:

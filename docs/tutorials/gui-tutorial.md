@@ -105,14 +105,20 @@ Continue until the important issues are resolved or reduced to acceptable warnin
 
 Save the document or close the tab.
 
-The GUI writes:
+The GUI keeps:
 
-- a saved SWC copy
-- a session log
+- the source SWC updated with the current state
+- an encrypted history archive next to the SWC
 
-Both are written into the source file's `*_swc_studio_output` directory.
+Open the History Browser to review operation summaries and expandable
+node-level old/new values. Use Commit History only when you need the
+exact internal version ID for technical review.
 
-The shared report layer can include custom label legends in those logs when custom type definitions exist.
+Selecting an operation and choosing **Undo selected and later
+operations** restores the document to immediately before that operation.
+The selected operation and all later operations are removed from the
+current state, but remain recoverable in history. Commit History
+instead restores the exact selected saved state.
 
 ## Related pages
 

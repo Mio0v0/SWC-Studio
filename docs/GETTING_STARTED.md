@@ -185,8 +185,8 @@ swcstudio simplify cell.swc
 swcstudio connect cell.swc --start-id 10 --end-id 22
 ```
 
-Single-file edit commands write both the updated SWC and the matching
-log into the source file's default output directory. No separate
+Single-file edit commands update the source SWC directly and record the
+operation in `<stem>_history.swcstudio` next to the file. No separate
 `--write` flag is required.
 
 `auto-label` always applies soma / axon / basal labeling, detects apical
@@ -207,7 +207,8 @@ Then:
 1. open an SWC file
 2. review the automatically generated issue list
 3. select an issue and let the app route you to the matching repair tool
-4. save or close the file to write the session log and saved copy
+4. save or close the file to keep the original SWC updated and record
+   the operation in history
 
 ## Default outputs
 
@@ -219,13 +220,19 @@ the default single-file output directory is:
 
 - `<folder>/<stem>_swc_studio_output/`
 
-Typical files written there include:
+That legacy-compatible directory is used mainly for explicitly requested
+single-file validation reports and report-only exports.
 
-- validation reports
-- edited SWC copies
-- per-operation logs
-- GUI session logs
-- GUI saved copies
+Other materialized outputs use their operation-specific location:
+
+- batch split creates a timestamped batch output directory
+- history checkout writes the requested output path (or its documented default)
+- history checkpoint writes a labeled SWC next to the source
+
+GUI and mutating CLI edits are recorded in the per-file history archive
+next to the SWC:
+
+- `<stem>_history.swcstudio`
 
 ## Recommended next pages
 

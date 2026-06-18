@@ -32,7 +32,7 @@ The guide is organized around the main user-facing behavior of the application:
 - how the issue-driven workflow works
 - how validation findings become repair suggestions
 - how custom labels persist across sessions
-- where outputs, saved copies, and logs are written
+- where outputs, history archives, and reports are written
 
 ## Current Workflow Model
 
@@ -43,4 +43,4 @@ Use this section when you want to understand:
 - what happens when a file is opened in the GUI
 - how the issue list is built
 - which repair tools correspond to which issue categories
-- how CLI edit commands write outputs and logs
+- how CLI edit commands update source files and history archives

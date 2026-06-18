@@ -95,9 +95,10 @@ Common entry points:
 - `swcstudio <command> <folder>`
   - batch processing for validation, split, auto typing, radii cleaning, simplification, and index cleaning
 
-### Current single-file edit behavior
+### Current edit behavior
 
-Single-file edit commands write outputs automatically. You do not need a separate `--write` flag.
+Mutating edit commands write automatically. You do not need a separate
+`--write` flag.
 
 For commands such as:
 
@@ -112,10 +113,12 @@ For commands such as:
 
 the CLI writes:
 
-- an updated SWC file
-- a matching text report
+- the updated source SWC
+- a per-file history archive: `<stem>_history.swcstudio`
 
-Both are written into the default `*_swc_studio_output` directory for the source file.
+Mutating batch commands record each processed source SWC in place. Text
+reports remain for validation/report-only commands, and split/checkpoint
+commands intentionally materialize separate SWC files.
 
 ## Recommended reading
 

@@ -20,7 +20,7 @@ list:
 7. Build Event, compute event id, append to JSONL.
 8. Update active branch ref to new commit sha (atomic).
 9. Insert into SQLite index in same critical section.
-10. Materialize ``current.swc`` with refreshed @PROV header.
+10. Materialize the source SWC with refreshed @PROV header.
 11. Release lock (always, including failure paths).
 
 If any step fails, partial writes are cleaned up and the lock is
@@ -38,6 +38,8 @@ editing stack.
 from __future__ import annotations
 
 import os
+import hashlib
+import tempfile
 import time
 from contextlib import contextmanager
 from dataclasses import dataclass, field
@@ -112,33 +114,35 @@ FORMAT_VERSION = 1
 # ----------------------------------------------------------------------
 
 
-def _output_dir_for(swc_path: str | os.PathLike[str]) -> Path:
-    """Return the ``<stem>_swc_studio_output/`` dir next to ``swc_path``.
-
-    Mirrors swcstudio.core.reporting.output_dir_for_file but does not
-    import that module (which is being deleted in a later slice).
-    """
-    p = Path(swc_path)
-    if p.parent.name.endswith("_swc_studio_output"):
-        return p.parent
-    return p.parent / f"{p.stem}_swc_studio_output"
-
-
 def history_dir_for(swc_path: str | os.PathLike[str]) -> Path:
-    """Return the transient working ``.history/`` directory for ``swc_path``.
+    """Return the transient working history directory for ``swc_path``.
 
     The durable user-visible store is ``<stem>_history.swcstudio``.
-    Writers materialize this directory while committing, then archive it
-    and remove the working tree.
+    Writers materialize this directory while committing or browsing
+    history, then archive it and remove the working tree. The transient
+    work tree intentionally lives under the OS temp directory so history
+    operations do not create an empty ``*_swc_studio_output`` folder next
+    to the user's SWC.
     """
-    return _output_dir_for(swc_path) / ".history"
+    p = Path(swc_path)
+    try:
+        key_source = str(p.resolve(strict=False))
+    except Exception:
+        key_source = str(p.absolute())
+    digest = hashlib.sha1(key_source.encode("utf-8", errors="ignore")).hexdigest()[:16]
+    safe_stem = "".join(c if c.isalnum() or c in "-_" else "_" for c in p.stem) or "swc"
+    return Path(tempfile.gettempdir()) / "swcstudio_history_work" / f"{safe_stem}_{digest}" / "history"
 
 
 def current_swc_path_for(swc_path: str | os.PathLike[str]) -> Path:
-    """Return the ``<stem>_current.swc`` path for ``swc_path``."""
-    p = Path(swc_path)
-    out = _output_dir_for(p)
-    return out / f"{p.stem}_current.swc"
+    """Return the user-visible current SWC path for ``swc_path``.
+
+    Earlier builds materialized every commit to
+    ``<stem>_swc_studio_output/<stem>_current.swc``. Current GUI and
+    CLI edit paths write the tracked state directly back to the source
+    SWC, so this compatibility helper returns ``swc_path`` itself.
+    """
+    return Path(swc_path)
 
 
 def init_history(
@@ -195,6 +199,7 @@ class OpResult:
     """Returned to the caller after a successful tracked_op block.
 
     Attributes:
+      operation_ids: per-file operation numbers assigned in commit order
       commit_sha: the new commit's event id ("sha256:...")
       input_sha:  canonical sha of the SWC bytes before the op (None if first)
       output_sha: canonical sha of the SWC bytes after the op
@@ -211,6 +216,17 @@ class OpResult:
     ai_run_ref: str | None
     branch: str
     message: str
+    operation_ids: list[int] = field(default_factory=list)
+
+    @property
+    def operation_id(self) -> int | None:
+        """Return the first operation ID for a normal single-op commit."""
+        return self.operation_ids[0] if self.operation_ids else None
+
+    @property
+    def operation_label(self) -> str | None:
+        """Return the user-facing ``op-N`` label for a single-op commit."""
+        return f"op-{self.operation_id}" if self.operation_id is not None else None
 
 
 class _TrackedContext:
@@ -255,9 +271,8 @@ class _TrackedContext:
         self._lock.acquire()
         try:
             self._store = ObjectStore(self.hist / "objects")
-            # Snapshot input bytes. If the dataset has never been
-            # tracked (no current.swc yet), fall back to the source
-            # path. If neither exists, treat as a fresh dataset
+            # Snapshot input bytes from the user-visible source SWC.
+            # If it does not exist, treat as a fresh dataset
             # (input_sha=None for the first commit).
             input_path = current_swc_path_for(self.swc_path)
             if input_path.exists():
@@ -334,9 +349,42 @@ class _TrackedContext:
             # Inline summaries get attached to each op below.
             for i in range(len(self._ops)):
                 self._ops[i].setdefault("summary", summarize_diff(payload))
-            # node_changes routed to SQLite for query_node_changes
+            # node/topology changes routed to SQLite for detailed GUI
+            # operation tables. Parent changes are stored as a normal
+            # node field here even though the diff blob classifies them
+            # as topology changes.
+            indexed_changes = list(payload.node_changes)
+            for topo in payload.topology_changes:
+                kind = str(topo.get("kind", ""))
+                if kind == "reparent":
+                    indexed_changes.append(
+                        {
+                            "id": int(topo.get("id", 0)),
+                            "field": "parent",
+                            "before": topo.get("before"),
+                            "after": topo.get("after"),
+                        }
+                    )
+                elif kind == "add":
+                    indexed_changes.append(
+                        {
+                            "id": int(topo.get("id", 0)),
+                            "field": "node",
+                            "before": None,
+                            "after": topo.get("row", ""),
+                        }
+                    )
+                elif kind == "remove":
+                    indexed_changes.append(
+                        {
+                            "id": int(topo.get("id", 0)),
+                            "field": "node",
+                            "before": topo.get("row", "removed"),
+                            "after": None,
+                        }
+                    )
             for i in range(len(self._ops)):
-                node_changes_for_op[i] = list(payload.node_changes)
+                node_changes_for_op[i] = list(indexed_changes)
 
         # AI-run blobs: write each, attach refs to the matching ops.
         for i, run in self._enumerate_ai_runs():
@@ -384,7 +432,11 @@ class _TrackedContext:
         conn = open_index(self.hist)
         try:
             ensure_schema(conn)
-            insert_event(conn, event, node_changes_for_op=node_changes_for_op)
+            operation_ids = insert_event(
+                conn,
+                event,
+                node_changes_for_op=node_changes_for_op,
+            )
             for i, run in self._enumerate_ai_runs():
                 ai_ref_str = self._ops[i].get("ai_run_ref")
                 if ai_ref_str:
@@ -408,11 +460,12 @@ class _TrackedContext:
         # never a half-written ref file.
         write_branch(self.hist, head, event.id)
 
-        # Step 4: materialize current.swc with the refreshed @PROV
+        # Step 4: materialize the source SWC with the refreshed @PROV
         # header. This is the file the user actually opens.
         self._materialize_current_swc(event.id, parent, head, output_sha, out_canonical)
 
         self.result = OpResult(
+            operation_ids=operation_ids,
             commit_sha=event.id,
             input_sha=self._input_sha,
             output_sha=output_sha,

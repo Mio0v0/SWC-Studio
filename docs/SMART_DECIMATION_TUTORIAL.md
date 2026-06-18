@@ -49,9 +49,9 @@ swcstudio simplify cell.swc --config-json '{"thresholds":{"epsilon":1.2,"radius_
 
 Current single-file behavior:
 
-- the simplified SWC is written automatically
-- the matching simplification log is written automatically
-- both go into the source file's `*_swc_studio_output` directory
+- the source SWC is updated automatically
+- the operation is recorded in `<stem>_history.swcstudio`
+- SWC/SWC+ comment headers are preserved while `# @PROV` pointers are updated
 
 ## GUI usage
 
@@ -61,4 +61,5 @@ In `Geometry Editing -> Simplification`:
 2. adjust the JSON config if needed
 3. run simplification
 4. review the updated morphology
-5. save or close the document to keep the session log and saved copy
+5. save or close the document to keep the source SWC updated and record
+   the operation in history

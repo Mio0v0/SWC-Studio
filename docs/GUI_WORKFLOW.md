@@ -75,7 +75,7 @@ The intended desktop loop is:
 5. let the app route you to the matching repair tool
 6. apply the repair
 7. rerun validation
-8. save or close the document to write logs and outputs
+8. review the new per-file history operation and any requested reports
 
 ### What the issue list includes
 
@@ -117,14 +117,24 @@ These definitions are written to the persistent custom type registry, so they re
 
 See [Custom Types and Labels](documentation/custom-types-and-labels.md) for the exact storage behavior and log integration.
 
-## Saving, logs, and outputs
+## Saving, history, and outputs
 
-The GUI writes outputs through the shared reporting layer.
+The GUI writes tracked morphology edits directly back to the source SWC
+and records the operation history in the encrypted sidecar archive.
 
 Important current behavior:
 
-- saved copies and session logs go into the source file's `*_swc_studio_output` directory
-- logs use the same shared formatting conventions as CLI operation reports
-- custom type legends can appear in generated logs when custom definitions exist
+- the source SWC receives compact `# @PROV` pointer lines
+- the history archive is stored as `<stem>_history.swcstudio` next to the SWC
+- the History Browser opens on Operation History; each file numbers its operations independently as `op-1`, `op-2`, `op-3`, and so on
+- operation rows have expandable node-level changes
+- undoing an operation restores the state before it, removing that operation and all later operations from the current state
+- the new restore operation records which operation/version it restored from
+- interactive Undo/Redo keeps at most 20 in-memory steps and stores row-level deltas instead of retaining a full SWC dataframe for every edit
+- advanced users can change the in-memory step limit with the `SWCSTUDIO_UNDO_LIMIT` environment variable before launching the GUI
+- after applying Auto Label Editing, the next validation reuses that result instead of launching duplicate type-suspicion inference
+- the Commit History tab keeps exact version IDs and SHA details for technical review
+- mutating GUI batch tools process and record each source SWC independently
+- validation and report-only exports can still create text reports when requested
 
 See [Logs And Reports](LOGS_AND_REPORTS.md) for the naming conventions.

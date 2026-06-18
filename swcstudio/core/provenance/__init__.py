@@ -11,6 +11,7 @@ the previous one.
 from __future__ import annotations
 
 from swcstudio.core.provenance.crate import export_crate
+from swcstudio.core.provenance.batch import config_params, run_tracked_batch
 from swcstudio.core.provenance.derived import (
     derived_from_for_swc_path,
     derived_from_payload,
@@ -80,6 +81,8 @@ from swcstudio.core.provenance.header import (
 from swcstudio.core.provenance.ops import (
     OpKind,
     is_ai_op,
+    operation_display_name,
+    operation_display_parameters,
     validate_op_record,
 )
 from swcstudio.core.provenance.canonical import (
@@ -162,6 +165,7 @@ __all__ = [
     "ai_run_to_blob_bytes",
     "build_ai_run",
     "capture_env",
+    "config_params",
     "current_swc_path_for",
     "env_hash",
     "history_dir_for",
@@ -175,6 +179,8 @@ __all__ = [
     "MAX_SUPPORTED_SCHEMA_VERSION",
     "ObjectStore",
     "OpKind",
+    "operation_display_name",
+    "operation_display_parameters",
     "PROV_PREFIX",
     "ProvHeader",
     "RefError",
@@ -217,6 +223,7 @@ __all__ = [
     "read_tag",
     "rebuild_index",
     "root_sha",
+    "run_tracked_batch",
     "sha256_hex",
     "strip_prov_lines",
     "summarize_diff",
