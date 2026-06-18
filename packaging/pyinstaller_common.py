@@ -47,6 +47,7 @@ def bundle_inputs() -> tuple[list, list, list[str]]:
     binaries = collect_dynamic_libs("xgboost")
     hiddenimports = (
         collect_submodules("vispy.app.backends")
+        + collect_submodules("neurom", filter=_exclude_test_modules)
         + collect_submodules("sklearn", filter=_exclude_test_modules)
         + collect_submodules("scipy", filter=_exclude_test_modules)
         + collect_submodules("xgboost", filter=_exclude_xgboost_tests)

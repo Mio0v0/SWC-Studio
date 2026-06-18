@@ -5,7 +5,6 @@ import sys
 from PySide6.QtGui import QColor, QPalette
 
 from .font_utils import pick_app_font
-from .main_window import SWCMainWindow
 
 
 def _apply_light_palette(app) -> None:
@@ -74,6 +73,7 @@ def main():
         return
 
     from PySide6.QtWidgets import QApplication
+    from .main_window import SWCMainWindow
 
     app = QApplication(sys.argv)
     app.setApplicationName("SWC Studio")
