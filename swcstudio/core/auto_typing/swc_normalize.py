@@ -1,10 +1,10 @@
 """SWC normalization — two transforms applied before features/training.
 
-  1. ``normalize_custom_types``  — rewrite non-standard SWC types
-     (anything outside {1, 2, 3, 4}) to the dominant standard type of
-     the branch the node sits on. Absorbs custom sub-cellular
-     annotations (type 10 = AIS, type 11 = spines, etc.) into the
-     parent neurite class they belong to.
+  1. ``normalize_custom_types``  — rewrite positive custom SWC types
+     (anything above 4) to the dominant standard type of the branch the
+     node sits on. Type 0 means "unlabeled" and is deliberately preserved.
+     This absorbs custom sub-cellular annotations (type 10 = AIS, type 11
+     = spines, etc.) into the parent neurite class they belong to.
 
   2. ``consolidate_multi_point_soma`` — collapse connected groups of
      type-1 soma nodes into a SINGLE anchor node. Multi-point somas
@@ -32,14 +32,15 @@ from collections import Counter, defaultdict
 from .features import SWCNode
 
 STANDARD_NEURITE_TYPES = {1, 2, 3, 4}
-# Anything outside this set is considered "custom" and gets rewritten.
+# Type 0 is the standard unlabeled sentinel. Only positive non-standard
+# values are custom annotations that should be rewritten.
 
 
 def normalize_custom_types(nodes: list[SWCNode]) -> tuple[list[SWCNode], int]:
     """Return (normalized_nodes, n_rewritten).
 
     Rule:
-      For each node whose type is not in {1, 2, 3, 4}:
+      For each node whose type is greater than 4:
         1. Find the branch the node belongs to (contiguous run between
            bifurcations).
         2. Replace its type with the most common standard type in that
@@ -48,8 +49,8 @@ def normalize_custom_types(nodes: list[SWCNode]) -> tuple[list[SWCNode], int]:
            parent links until a standard-type ancestor is found; use that.
         4. If neither succeeds, set type to 0.
 
-    Standard types (1=soma, 2=axon, 3=basal/dendrite, 4=apical) are NEVER
-    touched.
+    Type 0 (unlabeled) and standard types (1=soma, 2=axon,
+    3=basal/dendrite, 4=apical) are NEVER touched.
     """
     n = len(nodes)
     if n == 0:
@@ -115,7 +116,7 @@ def normalize_custom_types(nodes: list[SWCNode]) -> tuple[list[SWCNode], int]:
     new_types = [nd.type for nd in nodes]
     n_rewritten = 0
     for i, nd in enumerate(nodes):
-        if nd.type in STANDARD_NEURITE_TYPES:
+        if nd.type == 0 or nd.type in STANDARD_NEURITE_TYPES:
             continue
         # First try branch dominant
         dom = branch_dominant[branch_id[i]]
@@ -148,7 +149,7 @@ def count_custom_types(nodes: list[SWCNode]) -> dict[int, int]:
     """Return a {type_value: count} dict of non-standard type occurrences."""
     out: dict[int, int] = {}
     for nd in nodes:
-        if nd.type not in STANDARD_NEURITE_TYPES:
+        if nd.type != 0 and nd.type not in STANDARD_NEURITE_TYPES:
             out[nd.type] = out.get(nd.type, 0) + 1
     return out
 

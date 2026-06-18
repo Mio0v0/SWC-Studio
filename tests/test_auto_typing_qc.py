@@ -5,7 +5,9 @@ import time
 import unittest
 from pathlib import Path
 
-from swcstudio.core.auto_typing.qc_input import QCGate
+from swcstudio.core.auto_typing.qc_input import OODDetector, QCGate
+from swcstudio.core.auto_typing.features import FEATURE_NAMES
+import numpy as np
 
 
 def _write_swc(path: Path, rows: list[str]) -> None:
@@ -41,6 +43,25 @@ class AutoTypingQCTests(unittest.TestCase):
         self.assertEqual(result.n_roots, 1)
         self.assertNotIn("no_soma", result.reasons)
         self.assertNotIn("no_neurites", result.reasons)
+
+    def test_type_zero_neurites_are_not_collapsed_into_the_soma_for_ood(self) -> None:
+        rows = _unlabeled_chain(12)
+        rows[0] = "1 1 0.0 0.0 0.0 2.0 -1"
+        path = self.tmp / "soma-plus-unlabeled.swc"
+        _write_swc(path, rows)
+        detector = OODDetector(
+            mean=np.zeros(len(FEATURE_NAMES), dtype=float),
+            std=np.ones(len(FEATURE_NAMES), dtype=float),
+            threshold=1e9,
+            feature_names=list(FEATURE_NAMES),
+        )
+
+        result = QCGate(ood_detector=detector).evaluate(path)
+
+        self.assertTrue(result.passed, result.reasons)
+        self.assertIsNotNone(result.feature_vector)
+        self.assertEqual(result.feature_vector[FEATURE_NAMES.index("n_nodes")], 12.0)
+        self.assertEqual(result.feature_vector[FEATURE_NAMES.index("soma_radius")], 2.0)
 
     def test_custom_positive_types_do_not_fail_structural_qc(self) -> None:
         result = self._evaluate_rows(_unlabeled_chain(node_type=10))

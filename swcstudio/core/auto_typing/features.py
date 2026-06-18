@@ -34,8 +34,9 @@ def parse_swc(path: str | Path, *, normalize_types: bool = True) -> list[SWCNode
     """Parse an SWC file into a list of SWCNode.
 
     If ``normalize_types`` is True (the default), nodes carrying a
-    non-standard SWC type value (anything outside {1, 2, 3, 4}) are
-    rewritten to the dominant standard type of the branch they belong to.
+    positive custom SWC type value (anything above 4) are rewritten to
+    the dominant standard type of the branch they belong to. Type 0 is
+    preserved as the standard "unlabeled" sentinel.
     This absorbs custom sub-cellular annotations (axon hillock, spines,
     boutons, etc.) into their host neurite so downstream training and
     evaluation see only the four canonical neurite classes. Topology is
