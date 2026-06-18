@@ -61,6 +61,18 @@ def _apply_light_palette(app) -> None:
 
 
 def main():
+    if len(sys.argv) == 4 and sys.argv[1] == "--swcstudio-auto-label-worker":
+        from .auto_label_process import run_files
+
+        run_files(sys.argv[2], sys.argv[3])
+        return
+
+    if len(sys.argv) == 4 and sys.argv[1] == "--swcstudio-type-suspicion-worker":
+        from .type_suspicion_process import run_files
+
+        run_files(sys.argv[2], sys.argv[3])
+        return
+
     from PySide6.QtWidgets import QApplication
 
     app = QApplication(sys.argv)

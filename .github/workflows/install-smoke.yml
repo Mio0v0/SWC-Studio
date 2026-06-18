@@ -51,22 +51,14 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - os: ubuntu-latest
-            python: '3.10'
-            venv_python: .smoke/bin/python
-          - os: ubuntu-latest
-            python: '3.11'
-            venv_python: .smoke/bin/python
-          - os: ubuntu-latest
-            python: '3.12'
-            venv_python: .smoke/bin/python
-          - os: windows-latest
-            python: '3.12'
-            venv_python: .smoke/Scripts/python.exe
-          - os: macos-latest
-            python: '3.12'
-            venv_python: .smoke/bin/python
+        os:
+          - ubuntu-latest
+          - windows-latest
+          - macos-latest
+        python:
+          - '3.10'
+          - '3.11'
+          - '3.12'
 
     steps:
       - name: Checkout
@@ -88,15 +80,24 @@ jobs:
         shell: bash
         run: |
           python -m venv .smoke
-          PY="${{ matrix.venv_python }}"
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            PY="$GITHUB_WORKSPACE/.smoke/Scripts/python.exe"
+          else
+            PY="$GITHUB_WORKSPACE/.smoke/bin/python"
+          fi
           WHEEL="$(find "$GITHUB_WORKSPACE/wheelhouse" -name '*.whl' -print -quit)"
           "$PY" -m pip install --upgrade pip
           "$PY" -m pip install "$WHEEL"
+          "$PY" -m pip check
 
       - name: Verify installed runtime and deserialize all models
         shell: bash
         run: |
-          PY="$GITHUB_WORKSPACE/${{ matrix.venv_python }}"
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            PY="$GITHUB_WORKSPACE/.smoke/Scripts/python.exe"
+          else
+            PY="$GITHUB_WORKSPACE/.smoke/bin/python"
+          fi
           cd "$RUNNER_TEMP"
           "$PY" -m swcstudio.cli.cli doctor --json
 
@@ -105,9 +106,18 @@ jobs:
         env:
           QT_QPA_PLATFORM: offscreen
         run: |
-          PY="$GITHUB_WORKSPACE/${{ matrix.venv_python }}"
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            PY="$GITHUB_WORKSPACE/.smoke/Scripts/python.exe"
+            GUI="$GITHUB_WORKSPACE/.smoke/Scripts/swcstudio-gui.exe"
+          else
+            PY="$GITHUB_WORKSPACE/.smoke/bin/python"
+            GUI="$GITHUB_WORKSPACE/.smoke/bin/swcstudio-gui"
+          fi
           cp tests/fixtures/single-soma.swc "$RUNNER_TEMP/install-smoke.swc"
           cd "$RUNNER_TEMP"
+          test -f "$GUI"
           "$PY" -c "from PySide6.QtWidgets import QApplication; import swcstudio.gui.main; app = QApplication([]); print('gui-ok')"
           "$PY" -m swcstudio.cli.cli auto-label "$RUNNER_TEMP/install-smoke.swc" > auto-label.json
           "$PY" -c "import json; data=json.load(open('auto-label.json', encoding='utf-8')); print('auto-label-ok', data['nodes_total'], data['cell_type'])"
+          "$PY" -c "from swcstudio.core.auto_typing.types import BatchOptions; from swcstudio.gui.auto_typing_workers import _AutoLabelFileWorker; result=_AutoLabelFileWorker(1, '$RUNNER_TEMP/install-smoke.swc', BatchOptions(), None)._run_isolated(); print('isolated-auto-label-ok', result.nodes_total)"
+          "$PY" -c "from pathlib import Path; from swcstudio.core.swc_io import parse_swc_text_preserve_tokens; from swcstudio.gui.auto_typing_workers import _TypeSuspicionWorker; df=parse_swc_text_preserve_tokens(Path('$RUNNER_TEMP/install-smoke.swc').read_text()); print('isolated-gui-inference-ok', len(_TypeSuspicionWorker(1, df)._run_isolated()))"

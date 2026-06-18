@@ -306,13 +306,77 @@ jobs:
 
 
   # =========================================================================
-  # 4. Publish the wheel to PyPI (gated behind the `pypi` environment so
+  # 4. Install the exact release wheel on every supported platform/Python.
+  # =========================================================================
+  verify-wheel-install:
+    name: Verify wheel / ${{ matrix.os }} / Python ${{ matrix.python }}
+    runs-on: ${{ matrix.os }}
+    needs: package-layers
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - windows-latest
+          - macos-latest
+        python:
+          - '3.10'
+          - '3.11'
+          - '3.12'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+
+      - name: Download release wheel
+        uses: actions/download-artifact@v4
+        with:
+          name: layer-artifacts
+          path: artifacts
+
+      - name: Install and verify release wheel in an empty environment
+        shell: bash
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: |
+          python -m venv .release-smoke
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            PY="$GITHUB_WORKSPACE/.release-smoke/Scripts/python.exe"
+            GUI="$GITHUB_WORKSPACE/.release-smoke/Scripts/swcstudio-gui.exe"
+          else
+            PY="$GITHUB_WORKSPACE/.release-smoke/bin/python"
+            GUI="$GITHUB_WORKSPACE/.release-smoke/bin/swcstudio-gui"
+          fi
+          WHEEL="$(find "$GITHUB_WORKSPACE/artifacts" -name '*.whl' -print -quit)"
+          "$PY" -m pip install --upgrade pip
+          "$PY" -m pip install "$WHEEL"
+          "$PY" -m pip check
+          test -f "$GUI"
+          cp tests/fixtures/single-soma.swc "$RUNNER_TEMP/release-smoke.swc"
+          cd "$RUNNER_TEMP"
+          "$PY" -m swcstudio.cli.cli doctor --json
+          "$PY" -c "from PySide6.QtWidgets import QApplication; import swcstudio.gui.main; app=QApplication([]); print('gui-ok')"
+          "$PY" -m swcstudio.cli.cli auto-label "$RUNNER_TEMP/release-smoke.swc"
+          "$PY" -c "from swcstudio.core.auto_typing.types import BatchOptions; from swcstudio.gui.auto_typing_workers import _AutoLabelFileWorker; result=_AutoLabelFileWorker(1, '$RUNNER_TEMP/release-smoke.swc', BatchOptions(), None)._run_isolated(); print('isolated-auto-label-ok', result.nodes_total)"
+          "$PY" -c "from pathlib import Path; from swcstudio.core.swc_io import parse_swc_text_preserve_tokens; from swcstudio.gui.auto_typing_workers import _TypeSuspicionWorker; df=parse_swc_text_preserve_tokens(Path('$RUNNER_TEMP/release-smoke.swc').read_text()); print('isolated-inference-ok', len(_TypeSuspicionWorker(1, df)._run_isolated()))"
+
+
+  # =========================================================================
+  # 5. Publish the wheel to PyPI (gated behind the `pypi` environment so
   # you can require a manual approval before publishing).
   # =========================================================================
   publish-pypi:
     name: Publish wheel to PyPI
     runs-on: ubuntu-latest
-    needs: package-layers
+    needs:
+      - package-layers
+      - verify-wheel-install
     if: github.event.inputs.dry_run != 'true'
     # Optional manual gate — configure 'pypi' in repo Settings -> Environments
     # to require a reviewer click before this job runs. Comment out if you

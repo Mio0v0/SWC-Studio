@@ -11,16 +11,18 @@ import zipfile
 from pathlib import Path
 
 
-MODEL_FILES = (
-    "branch_classifier.pkl",
-    "cell_type_classifier.pkl",
-    "flag_model_all.joblib",
-    "flag_model_interneuron.joblib",
-    "flag_model_pyramidal.joblib",
-    "gnn_apical_basal.pt",
-    "gnn_branch3_rescue.pt",
-    "qc_gate.pkl",
-)
+# Minimum sizes catch accidentally packaged Git LFS pointer files and empty
+# placeholders while allowing production models to change between releases.
+MODEL_FILES = {
+    "branch_classifier.pkl": 10_000_000,
+    "cell_type_classifier.pkl": 100_000,
+    "flag_model_all.joblib": 10_000,
+    "flag_model_interneuron.joblib": 10_000,
+    "flag_model_pyramidal.joblib": 10_000,
+    "gnn_apical_basal.pt": 10_000,
+    "gnn_branch3_rescue.pt": 10_000,
+    "qc_gate.pkl": 1_000,
+}
 
 CONFIG_FILES = (
     "batch_processing/configs/auto_typing.json",
@@ -61,6 +63,10 @@ def _normalise_distribution(raw: str) -> str:
     return re.sub(r"[-_.]+", "-", name).lower()
 
 
+def _normalise_specifier(raw: str) -> set[str]:
+    return {part.strip() for part in raw.split(",") if part.strip()}
+
+
 def _read_artifact(path: Path) -> tuple[set[str], bytes]:
     if path.suffix == ".whl":
         with zipfile.ZipFile(path) as archive:
@@ -84,6 +90,25 @@ def _read_artifact(path: Path) -> tuple[set[str], bytes]:
     raise ValueError(f"Unsupported artifact type: {path}")
 
 
+def _read_member(path: Path, suffix: str) -> bytes | None:
+    if path.suffix == ".whl":
+        with zipfile.ZipFile(path) as archive:
+            name = next(
+                (member for member in archive.namelist() if member.endswith(suffix)),
+                None,
+            )
+            return archive.read(name) if name else None
+    with tarfile.open(path, "r:gz") as archive:
+        member = next(
+            (item for item in archive.getmembers() if item.name.endswith(suffix)),
+            None,
+        )
+        if member is None:
+            return None
+        stream = archive.extractfile(member)
+        return stream.read() if stream is not None else None
+
+
 def verify_distribution(path: Path) -> dict:
     members, metadata_bytes = _read_artifact(path)
     required_suffixes = {
@@ -102,9 +127,40 @@ def verify_distribution(path: Path) -> dict:
         for value in metadata.get_all("Requires-Dist", [])
     }
     missing_dependencies = sorted(RUNTIME_DISTRIBUTIONS - dependencies)
+    invalid_models = []
+    for name, minimum_size in MODEL_FILES.items():
+        payload = _read_member(path, f"swcstudio/data/models/{name}")
+        if payload is None:
+            continue
+        if len(payload) < minimum_size or payload.startswith(
+            b"version https://git-lfs.github.com/spec/"
+        ):
+            invalid_models.append(
+                {
+                    "name": name,
+                    "size": len(payload),
+                    "minimum_size": minimum_size,
+                }
+            )
+
+    requires_python = str(metadata.get("Requires-Python", "")).strip()
+    entry_points_ok = True
+    if path.suffix == ".whl":
+        entry_points = _read_member(path, ".dist-info/entry_points.txt") or b""
+        entry_points_ok = (
+            b"swcstudio = swcstudio.cli.cli:main" in entry_points
+            and b"swcstudio-gui = swcstudio.gui.main:main" in entry_points
+        )
+
     result = {
         "artifact": str(path),
-        "ok": not missing_files and not missing_dependencies,
+        "ok": (
+            not missing_files
+            and not missing_dependencies
+            and not invalid_models
+            and _normalise_specifier(requires_python) == {">=3.10", "<3.13"}
+            and entry_points_ok
+        ),
         "model_count": sum(
             any(member.endswith(f"swcstudio/data/models/{name}") for member in members)
             for name in MODEL_FILES
@@ -115,6 +171,9 @@ def verify_distribution(path: Path) -> dict:
         ),
         "missing_files": missing_files,
         "missing_dependencies": missing_dependencies,
+        "invalid_models": invalid_models,
+        "requires_python": requires_python,
+        "entry_points_ok": entry_points_ok,
     }
     return result
 

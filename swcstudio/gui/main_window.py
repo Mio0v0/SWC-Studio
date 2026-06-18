@@ -56,7 +56,6 @@ from .validation_auto_label_panel import ValidationAutoLabelPanel
 from .validation_tab import ValidationIndexCleanWidget, ValidationPrecheckWidget, ValidationTabWidget
 from swcstudio.core.issues import (
     build_issue_list,
-    compute_type_suspicion_issues,
     issues_from_validation_report,
 )
 from swcstudio.core.custom_types import save_custom_type_definitions
@@ -2144,15 +2143,6 @@ class SWCMainWindow(QMainWindow):
             if key in backend_cfg:
                 config_overrides[key] = backend_cfg[key]
 
-        from swcstudio.core.auto_typing import is_available as _engine_available  # noqa: PLC0415
-        ok, reason = _engine_available(model_dir=config_overrides.get("model_dir"))
-        if not ok:
-            self._append_log(f"Validation Auto Label Editing: engine unavailable: {reason}", "WARN")
-            self._validation_auto_label_panel.set_status_text(
-                "Auto-typing engine unavailable.\n\n" + str(reason)
-            )
-            return
-
         source_doc = self._active_source_document()
         if source_doc is None or source_doc.df is None or source_doc.df.empty:
             self._append_log("Validation Auto Label Editing: no active SWC document.", "WARN")
@@ -3650,11 +3640,10 @@ class SWCMainWindow(QMainWindow):
         )
 
     # ------------------------------------------------------------------
-    # Background type-suspicion worker. Runs the auto-typing engine on
-    # the active dataframe and streams the ``Likely wrong labels``
-    # issues into the panel when ready, so the user sees fast-path
-    # issues immediately instead of waiting on ML inference at file
-    # open.
+    # Background type-suspicion worker. The QThread waits on a separate
+    # inference process rather than loading XGBoost/PyTorch into Qt's
+    # process. This avoids macOS crashes caused by incompatible OpenMP
+    # runtimes shipped by native scientific wheels.
     # ------------------------------------------------------------------
 
     def _start_type_suspicion_worker(self, doc: _DocumentState, report: dict) -> None:

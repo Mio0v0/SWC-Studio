@@ -10,33 +10,47 @@ readme = "README.md"
 requires-python = ">=3.10,<3.13"
 license = "MIT"
 authors = [{name = "SWC-Studio Contributors"}]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Environment :: MacOS X",
+  "Environment :: Win32 (MS Windows)",
+  "Environment :: X11 Applications :: Qt",
+  "Framework :: PySide",
+  "Operating System :: MacOS",
+  "Operating System :: Microsoft :: Windows",
+  "Operating System :: POSIX :: Linux",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+]
 dependencies = [
   # Core scientific stack
-  "numpy>=1.24",
-  "pandas>=2.0",
-  "scipy>=1.11",
-  "morphio>=3.3",
-  "neurom>=4.0",
+  "numpy>=1.24,<3",
+  "pandas>=2.0,<3",
+  "scipy>=1.11,<2",
+  "morphio>=3.3,<4",
+  "neurom>=4.0,<5",
   # Auto-typing engine — Stage 1 + Stage 2 sklearn ensembles plus the
   # Stage 2b / Branch3 torch checkpoints. Pinned to the 1.5.x series
   # the bundled pickles were trained on; sklearn does not guarantee
   # cross-minor pickle compatibility.
   "scikit-learn>=1.5,<1.6",
-  "joblib>=1.2",
+  "joblib>=1.2,<2",
   "xgboost>=3.2,<3.3",
-  "torch>=2.1",
-  "torch-geometric>=2.6",
+  "torch>=2.1,<3",
+  "torch-geometric>=2.6,<3",
   # GUI — the desktop app is the primary user surface, so PySide6 and
   # the visualization stack are required dependencies.
-  "PySide6>=6.6",
-  "pyqtgraph>=0.14",
-  "vispy>=0.14",
+  "PySide6>=6.6,<6.12",
+  "pyqtgraph>=0.14,<0.15",
+  "vispy>=0.14,<0.17",
   # Provenance layer (PROVENANCE_SPEC.md) — content-addressed blob
   # store uses zstd compression. Pure-Python is unacceptably slow
   # for the >100 MB envs we capture for AI runs.
-  "zstandard>=0.22",
+  "zstandard>=0.22,<1",
   # AES-encrypted history archive support for app-managed sidecar logs.
-  "pyzipper>=0.3.6"
+  "pyzipper>=0.3.6,<1"
 ]
 
 [project.optional-dependencies]

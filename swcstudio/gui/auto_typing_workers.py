@@ -17,6 +17,12 @@ Two workers are provided:
 
 from __future__ import annotations
 
+import os
+import pickle
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
 from typing import Any
 
 from PySide6.QtCore import QObject, Signal, Slot
@@ -45,19 +51,66 @@ class _AutoLabelFileWorker(QObject):
         self._options = options
         self._config_overrides = dict(config_overrides) if config_overrides else None
 
+    @staticmethod
+    def _subprocess_command(request_path: str, output_path: str) -> list[str]:
+        if getattr(sys, "frozen", False):
+            return [
+                sys.executable,
+                "--swcstudio-auto-label-worker",
+                request_path,
+                output_path,
+            ]
+        return [
+            sys.executable,
+            "-m",
+            "swcstudio.gui.auto_label_process",
+            request_path,
+            output_path,
+        ]
+
+    def _run_isolated(self) -> object:
+        with tempfile.TemporaryDirectory(prefix="swcstudio-auto-label-") as tmp:
+            request_path = Path(tmp) / "request.pkl"
+            output_path = Path(tmp) / "output.pkl"
+            request = {
+                "kind": "single",
+                "file_path": self._file_path,
+                "options": self._options,
+                "config_overrides": self._config_overrides,
+            }
+            with request_path.open("wb") as stream:
+                pickle.dump(request, stream, protocol=pickle.HIGHEST_PROTOCOL)
+            request_path.chmod(0o600)
+
+            env = os.environ.copy()
+            env.setdefault("OMP_NUM_THREADS", "1")
+            env.setdefault("OPENBLAS_NUM_THREADS", "1")
+            env.setdefault("MKL_NUM_THREADS", "1")
+            completed = subprocess.run(
+                self._subprocess_command(str(request_path), str(output_path)),
+                env=env,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            if completed.returncode != 0:
+                detail = (completed.stderr or completed.stdout or "").strip()
+                if completed.returncode < 0:
+                    detail = (
+                        f"auto-label subprocess terminated by signal "
+                        f"{-completed.returncode}"
+                        + (f": {detail}" if detail else "")
+                    )
+                raise RuntimeError(detail or f"auto-label subprocess exited {completed.returncode}")
+            if not output_path.is_file():
+                raise RuntimeError("auto-label subprocess produced no result")
+            with output_path.open("rb") as stream:
+                return pickle.load(stream)  # noqa: S301 - private child output
+
     @Slot()
     def run(self) -> None:  # noqa: D401 - Qt slot
-        from swcstudio.tools.validation.features.auto_typing import (  # noqa: PLC0415
-            run_file as run_validation_auto_typing_file,
-        )
         try:
-            result = run_validation_auto_typing_file(
-                self._file_path,
-                options=self._options,
-                config_overrides=self._config_overrides,
-                write_output=False,
-                write_log=False,
-            )
+            result = self._run_isolated()
             self.finished.emit(self._run_id, result)
         except Exception as exc:  # noqa: BLE001
             self.failed.emit(self._run_id, str(exc))
@@ -88,22 +141,53 @@ class _AutoLabelBatchWorker(QObject):
         self._options = options
         self._config_overrides = dict(config_overrides) if config_overrides else None
 
+    def _run_isolated(self) -> object:
+        with tempfile.TemporaryDirectory(prefix="swcstudio-auto-label-batch-") as tmp:
+            request_path = Path(tmp) / "request.pkl"
+            output_path = Path(tmp) / "output.pkl"
+            request = {
+                "kind": "batch",
+                "folder": self._folder,
+                "options": self._options,
+                "config_overrides": self._config_overrides,
+            }
+            with request_path.open("wb") as stream:
+                pickle.dump(request, stream, protocol=pickle.HIGHEST_PROTOCOL)
+            request_path.chmod(0o600)
+
+            env = os.environ.copy()
+            env.setdefault("OMP_NUM_THREADS", "1")
+            env.setdefault("OPENBLAS_NUM_THREADS", "1")
+            env.setdefault("MKL_NUM_THREADS", "1")
+            completed = subprocess.run(
+                _AutoLabelFileWorker._subprocess_command(
+                    str(request_path), str(output_path)
+                ),
+                env=env,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            if completed.returncode != 0:
+                detail = (completed.stderr or completed.stdout or "").strip()
+                if completed.returncode < 0:
+                    detail = (
+                        f"batch auto-label subprocess terminated by signal "
+                        f"{-completed.returncode}"
+                        + (f": {detail}" if detail else "")
+                    )
+                raise RuntimeError(
+                    detail or f"batch auto-label subprocess exited {completed.returncode}"
+                )
+            if not output_path.is_file():
+                raise RuntimeError("batch auto-label subprocess produced no result")
+            with output_path.open("rb") as stream:
+                return pickle.load(stream)  # noqa: S301 - private child output
+
     @Slot()
     def run(self) -> None:  # noqa: D401 - Qt slot
-        from swcstudio.tools.batch_processing.features.auto_typing import (  # noqa: PLC0415
-            run_folder as run_auto_typing,
-        )
-
-        def _emit_progress(idx: int, total: int, name: str) -> None:
-            self.progress.emit(int(idx), int(total), str(name))
-
         try:
-            result = run_auto_typing(
-                self._folder,
-                options=self._options,
-                config_overrides=self._config_overrides,
-                progress_callback=_emit_progress,
-            )
+            result = self._run_isolated()
             self.finished.emit(self._run_id, result)
         except Exception as exc:  # noqa: BLE001
             self.failed.emit(self._run_id, str(exc))
@@ -126,11 +210,64 @@ class _TypeSuspicionWorker(QObject):
         self._run_id = int(run_id)
         self._df = df
 
+    @staticmethod
+    def _subprocess_command(input_path: str, output_path: str) -> list[str]:
+        if getattr(sys, "frozen", False):
+            return [
+                sys.executable,
+                "--swcstudio-type-suspicion-worker",
+                input_path,
+                output_path,
+            ]
+        return [
+            sys.executable,
+            "-m",
+            "swcstudio.gui.type_suspicion_process",
+            input_path,
+            output_path,
+        ]
+
+    def _run_isolated(self) -> list[dict]:
+        """Run inference outside Qt's native-library-loaded process."""
+        with tempfile.TemporaryDirectory(prefix="swcstudio-type-suspicion-") as tmp:
+            input_path = Path(tmp) / "input.pkl"
+            output_path = Path(tmp) / "output.pkl"
+            with input_path.open("wb") as stream:
+                pickle.dump(self._df, stream, protocol=pickle.HIGHEST_PROTOCOL)
+            input_path.chmod(0o600)
+
+            env = os.environ.copy()
+            # One OpenMP worker is sufficient for background issue detection
+            # and avoids oversubscribing the GUI host.
+            env.setdefault("OMP_NUM_THREADS", "1")
+            env.setdefault("OPENBLAS_NUM_THREADS", "1")
+            env.setdefault("MKL_NUM_THREADS", "1")
+            completed = subprocess.run(
+                self._subprocess_command(str(input_path), str(output_path)),
+                env=env,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            if completed.returncode != 0:
+                detail = (completed.stderr or completed.stdout or "").strip()
+                if completed.returncode < 0:
+                    detail = (
+                        f"inference subprocess terminated by signal "
+                        f"{-completed.returncode}"
+                        + (f": {detail}" if detail else "")
+                    )
+                raise RuntimeError(detail or f"inference subprocess exited {completed.returncode}")
+            if not output_path.is_file():
+                raise RuntimeError("inference subprocess produced no result")
+            with output_path.open("rb") as stream:
+                result = pickle.load(stream)  # noqa: S301 - private child output
+            return list(result)
+
     @Slot()
     def run(self) -> None:
-        from swcstudio.core.issues import compute_type_suspicion_issues  # noqa: PLC0415
         try:
-            issues = compute_type_suspicion_issues(self._df)
+            issues = self._run_isolated()
             self.finished.emit(self._run_id, list(issues))
         except Exception as exc:  # noqa: BLE001
             self.failed.emit(self._run_id, str(exc))

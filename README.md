@@ -71,10 +71,13 @@ refresh instead of repeating type-suspicion inference.
 The Python package is published on PyPI:
 
 ```bash
+python3.12 -m venv ~/swcstudio-env
+source ~/swcstudio-env/bin/activate
+python -m pip install --upgrade pip
 python -m pip install swcstudio
+swcstudio doctor
 swcstudio-gui          # launch the desktop GUI
 swcstudio --help       # CLI
-swcstudio doctor
 swcstudio models status
 swcstudio gpu-status
 ```
@@ -83,7 +86,7 @@ Requires Python 3.10, 3.11, or 3.12. Pip installs the scientific,
 ML, GUI, and history dependencies into the active environment. The
 wheel also contains all runtime JSON configuration and the eight
 production auto-labeling models, so first inference does not require a
-separate model download. The resulting wheel is approximately 38 MB.
+separate model download, requirements file, or GUI extra.
 
 For a clean isolated install:
 
@@ -127,6 +130,8 @@ swcstudio-gui
 
 `python -m pip install -e .` installs the application runtime. The `-e`
 ("editable") flag means local `.py` edits take effect on the next run.
+It installs the complete scientific, ML, GUI, visualization, and history
+runtime; no separate requirements file or optional GUI extra is needed.
 Maintainers can install packaging, documentation, test, and artifact
 build tools with `python -m pip install -e ".[dev]"`.
 

@@ -38,33 +38,51 @@ portable CPU builds. Use a pip or source install for GPU acceleration.
 
 ## Option 2 — `pip install` from PyPI
 
-Use this path for scripts, Jupyter notebooks, batch processing, or any Python
-workflow. The Python package is published on PyPI:
+Use this path for the desktop GUI, scripts, Jupyter notebooks, batch
+processing, or any Python workflow. Create a new virtual environment so
+the `python`, `pip`, `swcstudio`, and `swcstudio-gui` commands all refer
+to the same installation.
+
+### macOS / Linux
 
 ```bash
+python3.12 -m venv ~/swcstudio-env
+source ~/swcstudio-env/bin/activate
+python -m pip install --upgrade pip
 python -m pip install swcstudio
+swcstudio doctor
+swcstudio-gui
 ```
 
-Pip installs the heavy dependencies (PyTorch, PySide6, vispy, sklearn,
-XGBoost, etc.) into the active environment. The wheel contains the
-runtime JSON configuration and all eight production models, so
-auto-labeling works offline immediately after installation. The
-self-contained wheel is approximately 38 MB.
+### Windows PowerShell
 
-A clean isolated install (recommended over polluting system Python):
-
-```bash
-python3 -m venv ~/swcstudio-env
-source ~/swcstudio-env/bin/activate           # Windows: ~\swcstudio-env\Scripts\Activate.ps1
+```powershell
+py -3.12 -m venv $HOME\swcstudio-env
+& $HOME\swcstudio-env\Scripts\Activate.ps1
+python -m pip install --upgrade pip
 python -m pip install swcstudio
-
-swcstudio-gui                                 # launch the GUI
-swcstudio --help                              # CLI
-swcstudio doctor                              # full installation check
+swcstudio doctor
+swcstudio-gui
 ```
+
+That single `python -m pip install swcstudio` command installs every
+Python runtime requirement: the scientific stack, PyTorch and
+torch-geometric, XGBoost and scikit-learn, PySide6, VisPy, pyqtgraph,
+and the history/provenance libraries. The wheel also contains all
+runtime JSON configuration and all eight production models. There is
+no separate requirements file, model download, or `[gui]` extra.
+
+The CI release gate installs the built wheel into an empty virtual
+environment and runs model deserialization, GUI imports, and inference
+on Windows, macOS, and Linux with Python 3.10, 3.11, and 3.12.
 
 To upgrade later: `python -m pip install --upgrade swcstudio`. The new
 wheel installs the matching code, configuration, and production models.
+
+If `swcstudio doctor` reports an executable outside the environment you
+created, run the commands by absolute environment path, for example
+`~/swcstudio-env/bin/swcstudio-gui` on macOS/Linux or
+`$HOME\swcstudio-env\Scripts\swcstudio-gui.exe` on Windows.
 
 ## Option 3 — Source install (development)
 
@@ -91,6 +109,10 @@ source .venv/bin/activate
 python -m pip install --upgrade pip
 python -m pip install -e .
 ```
+
+The editable install includes the complete scientific, ML, desktop GUI,
+visualization, and history runtime. New users do not need to install a
+separate requirements file or GUI extra.
 
 ### Windows PowerShell
 

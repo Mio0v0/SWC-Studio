@@ -25,10 +25,13 @@ git push origin v0.2.0
 
 GitHub Actions will then:
 
-1. Build the layer zips, the pip wheel, and `update_manifest.json`
-2. Build the modular macOS `.app` and modular Windows `.zip`
-3. Create a **draft** GitHub Release `v0.2.0` and attach all assets
-4. (Gated) Publish the wheel to PyPI
+1. Build and inspect the layer zips, pip wheel, and `update_manifest.json`
+2. Install the wheel into empty environments on Windows, macOS, and
+   Linux for Python 3.10, 3.11, and 3.12
+3. Deserialize every production model and run GUI/inference smoke tests
+4. Build the modular macOS `.app` and modular Windows `.zip`
+5. Create a **draft** GitHub Release `v0.2.0` and attach all assets
+6. (Gated) Publish the wheel to PyPI
 
 ### Final manual step: publish the draft
 

@@ -226,7 +226,10 @@ def format_installation_report(report: dict[str, Any]) -> str:
             [
                 "",
                 "Repair this environment with:",
-                "  python -m pip install --upgrade --force-reinstall swcstudio",
+                (
+                    f'  "{report["executable"]}" -m pip install '
+                    "--upgrade --force-reinstall swcstudio"
+                ),
             ]
         )
     return "\n".join(lines)
