@@ -47,7 +47,7 @@ Use a pip or source environment for GPU mode:
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1      # Windows PowerShell
 python -m pip install --upgrade pip
-pip install -e .
+python -m pip install -e .
 ```
 
 Then install the CUDA-enabled PyTorch build recommended by the official

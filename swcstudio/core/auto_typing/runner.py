@@ -85,13 +85,18 @@ def is_available(*, model_dir: str | None = None) -> tuple[bool, str]:
             + diagnostic_search_report(override=model_dir)
         )
     try:
+        import joblib  # noqa: F401
+        import sklearn  # noqa: F401
         import torch  # noqa: F401
         import torch_geometric  # noqa: F401
+        import xgboost  # noqa: F401
     except Exception as exc:  # noqa: BLE001
         return False, (
-            "Auto-typing requires torch and torch_geometric "
+            "Auto-typing could not import one of its required ML packages "
             f"(import failed: {exc.__class__.__name__}: {exc}). "
-            "Reinstall the package: `pip install -e .`."
+            "Repair the active environment with "
+            "`python -m pip install --upgrade --force-reinstall swcstudio`, "
+            "then run `swcstudio doctor`."
         )
     return True, "available"
 

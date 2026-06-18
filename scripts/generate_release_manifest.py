@@ -12,8 +12,8 @@ Usage::
         --version            0.2.0 \\
         --code-zip           swcstudio-code-v0.2.0.zip \\
         --models-zip         swcstudio-models-v0.2.0.zip \\
-        --runtime-zip-macos  SWC-Studio-v0.2.0-macOS.zip \\
-        --runtime-zip-windows SWC-Studio-v0.2.0-Windows.zip \\
+        --runtime-asset-macos SWC-Studio-v0.2.0-macOS.zip \\
+        --runtime-asset-windows SWC-Studio-v0.2.0-Windows.zip \\
         --output             update_manifest.json
 
 The script computes the SHA-256 hash and byte-size of every zip and
@@ -67,6 +67,12 @@ def main() -> int:
                     help="Path to SWC-Studio-vN-macOS.zip (optional)")
     ap.add_argument("--runtime-zip-windows", type=Path, default=None,
                     help="Path to SWC-Studio-vN-Windows.zip (optional)")
+    ap.add_argument("--runtime-asset-macos",
+                    help="macOS runtime asset filename when the zip is built "
+                         "on another runner")
+    ap.add_argument("--runtime-asset-windows",
+                    help="Windows runtime asset filename when the zip is built "
+                         "on another runner")
     ap.add_argument("--min-runtime-version", default=None,
                     help="Minimum runtime version compatible with this code "
                          "(defaults to the bundled runtime version of this release)")
@@ -83,10 +89,20 @@ def main() -> int:
     runtime_block: dict = {
         "min_version": args.min_runtime_version or args.version,
     }
-    if args.runtime_zip_macos and args.runtime_zip_macos.is_file():
-        runtime_block["url_macos"] = _release_asset_url(tag, args.runtime_zip_macos.name)
-    if args.runtime_zip_windows and args.runtime_zip_windows.is_file():
-        runtime_block["url_windows"] = _release_asset_url(tag, args.runtime_zip_windows.name)
+    macos_asset = args.runtime_asset_macos
+    if args.runtime_zip_macos:
+        if not args.runtime_zip_macos.is_file():
+            ap.error(f"macOS runtime zip not found: {args.runtime_zip_macos}")
+        macos_asset = args.runtime_zip_macos.name
+    windows_asset = args.runtime_asset_windows
+    if args.runtime_zip_windows:
+        if not args.runtime_zip_windows.is_file():
+            ap.error(f"Windows runtime zip not found: {args.runtime_zip_windows}")
+        windows_asset = args.runtime_zip_windows.name
+    if macos_asset:
+        runtime_block["url_macos"] = _release_asset_url(tag, macos_asset)
+    if windows_asset:
+        runtime_block["url_windows"] = _release_asset_url(tag, windows_asset)
 
     manifest = {
         "release_version": args.version,

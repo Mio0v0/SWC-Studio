@@ -7,8 +7,8 @@ name = "swcstudio"
 version = "0.2.0"
 description = "Modular SWC processing toolkit with shared core for CLI and GUI"
 readme = "README.md"
-requires-python = ">=3.10"
-license = {text = "MIT"}
+requires-python = ">=3.10,<3.13"
+license = "MIT"
 authors = [{name = "SWC-Studio Contributors"}]
 dependencies = [
   # Core scientific stack
@@ -22,6 +22,7 @@ dependencies = [
   # the bundled pickles were trained on; sklearn does not guarantee
   # cross-minor pickle compatibility.
   "scikit-learn>=1.5,<1.6",
+  "joblib>=1.2",
   "xgboost>=3.2,<3.3",
   "torch>=2.1",
   "torch-geometric>=2.6",
@@ -47,13 +48,18 @@ docs = [
   "pydata-sphinx-theme>=0.16",
   "myst-parser>=3.0"
 ]
-# Developer/maintainer extras — packaging tools + Sphinx for the docs.
-# Regular end users do not need this.
-all = [
+test = [
+  "pytest>=8.3,<10"
+]
+# Maintainer environment: packaging, documentation, tests, and release
+# artifact inspection. Regular end users do not need this.
+dev = [
   "PyInstaller>=6.11",
   "sphinx>=8.1,<8.2",
   "pydata-sphinx-theme>=0.16",
-  "myst-parser>=3.0"
+  "myst-parser>=3.0",
+  "pytest>=8.3,<10",
+  "build>=1.2"
 ]
 
 [project.scripts]
@@ -63,22 +69,16 @@ swcstudio-gui = "swcstudio.gui.main:main"
 [tool.setuptools.packages.find]
 include = ["swcstudio*"]
 
-# Pattern B: lean wheel, models downloaded on first use.
-# Setuptools defaults to auto-including any non-Python file inside a
-# package directory as package-data ("include-package-data = true").
-# We opt out so the model pickles don't end up in the wheel.
+# The wheel is intentionally self-contained: runtime configuration and
+# production model files ship with the package so a fresh installation
+# can auto-label without a network download.
 [tool.setuptools]
 include-package-data = false
 
 [tool.setuptools.package-data]
-# With include-package-data = false above, this empty mapping is the
-# only source of truth: no extra data files ship in the wheel.
-# Models are downloaded from GitHub Releases on first use by
-# swcstudio.core.updater. The bundled .app distribution still ships
-# models inside the bundle (see packaging/MODULAR_BUILD.md).
-"swcstudio" = []
-
-[tool.setuptools.exclude-package-data]
-# Belt-and-suspenders: even if some path drags model files in via
-# auto-discovery, this explicitly excludes them from the wheel.
-"swcstudio" = ["data/models/*"]
+"swcstudio" = [
+  "tools/*/configs/*.json",
+  "data/models/*.pkl",
+  "data/models/*.pt",
+  "data/models/*.joblib"
+]

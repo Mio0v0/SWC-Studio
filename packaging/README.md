@@ -1,80 +1,64 @@
 # Packaging
 
-This folder contains the tracked files needed to build reproducible GUI executables for `SWC-Studio`.
+SWC-Studio uses one modular desktop architecture on macOS and Windows.
+PyInstaller packages the Python runtime and heavy third-party libraries;
+the application code and models are staged as replaceable layers.
 
-## Files
+## Layout
 
-- `swcstudio_gui.spec`: PyInstaller spec file for the macOS app bundle
-- `swcstudio_gui_windows.spec`: PyInstaller spec file for the Windows executable folder
-- `build_macos.sh`: reproducible macOS build script
-- `build_windows.ps1`: reproducible Windows build script
-- `make_windows_icon.py`: converts `packaging/icon.png` into a Windows `.ico` file
+Both platforms expose the same runtime-relative structure:
 
-## Recommended Environment
+```text
+runtime-root/
+  app/
+    VERSION
+    swcstudio/
+  models/
+    VERSION
+    *.pkl
+    *.pt
+    *.joblib
+```
 
-- macOS host
-- Python `3.11`
+`runtime-root` is:
 
-For Windows packaging:
+- macOS: `SWC-Studio.app/Contents/Resources`
+- Windows: `SWC-Studio/_internal`
 
-- Windows host
-- Python environment with GUI + build dependencies installed
-- CPU-only PyTorch for the release executable build
+The entrypoint is `packaging/swcstudio_bootstrap.py`. Shared PyInstaller
+dependency collection lives in `packaging/pyinstaller_common.py`.
+
+## Tracked files
+
+- `swcstudio_gui_macos.spec`
+- `swcstudio_gui_windows.spec`
+- `pyinstaller_common.py`
+- `swcstudio_bootstrap.py`
+- `stage_modular_payload.py`
+- `build_macos.sh`
+- `build_windows.ps1`
+- platform icons and icon helpers
 
 ## Build
 
-From the repository root:
+macOS:
 
 ```bash
-./packaging/build_macos.sh
+PYTHON_BIN=python3.12 ./packaging/build_macos.sh
 ```
 
-Expected output:
-
-- `dist/SWC-Studio.app`
-
-On Windows, from the repository root:
+Windows PowerShell:
 
 ```powershell
+py -3.12 -m venv .venv-packaging-windows
+.\.venv-packaging-windows\Scripts\python.exe -m pip install -e ".[build]" pillow
 .\packaging\build_windows.ps1
 ```
 
-Expected output:
+The public Windows build must use CPU-only PyTorch. The build script
+fails if it detects CUDA unless `-AllowCudaTorchBundle` is passed
+explicitly. It prefers `.venv-packaging-windows` and falls back to the
+project `.venv` for local development builds.
 
-- `dist/SWC-Studio\`
-- `dist/SWC-Studio-windows.zip`
-
-The Windows build script fails fast if the active environment contains a
-CUDA PyTorch build. That prevents accidentally bundling a very large
-CUDA/PyTorch stack into the default one-click executable. If a maintainer
-intentionally wants an experimental GPU bundle, run:
-
-```powershell
-.\packaging\build_windows.ps1 -AllowCudaTorchBundle
-```
-
-The recommended public release remains the CPU executable. GPU users
-should use pip/source installation and follow `docs/GPU_INSTALL.md`.
-
-## Git Policy
-
-Keep in git:
-
-- files in `packaging/`
-- `pyproject.toml`
-
-Do not keep in git:
-
-- `build/`
-- `dist/`
-- generated `.app`
-- generated `.dmg`
-- generated release `.zip`
-
-## Future Extensions
-
-If you later add signing/notarization or new platform assets:
-
-- add the icon file under `packaging/`
-- update the relevant `*.spec`
-- keep release steps scripted so the build stays reproducible
+Generated `build/`, `dist/`, app bundles, and release zips are ignored
+and must not be committed.

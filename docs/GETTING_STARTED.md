@@ -9,16 +9,16 @@ There are three supported ways to install:
 | Method | Best for | Models bundled? |
 |---|---|---|
 | **Option 1 — bundled desktop app** | end users who want a double-clickable application | yes, inside the app |
-| **Option 2 — `pip install swcstudio`** | researchers using SWC-Studio in scripts / Python | no, downloaded on first auto-label call |
+| **Option 2 — `pip install swcstudio`** | researchers using SWC-Studio in scripts / Python | yes, inside the wheel |
 | **Option 3 — install from source** | developers who want to modify the code itself | yes, in the local checkout |
 
 ## Supported Python versions
 
-Options 2 and 3 require **Python 3.10, 3.11, 3.12, or 3.13** already installed on your system.
+Options 2 and 3 require **Python 3.10, 3.11, or 3.12** already installed on your system.
 
-Python 3.11 or 3.12 is the safest default. PyTorch occasionally lags
-on the newest Python release, so if you hit a wheel resolution problem
-on 3.13 fall back to 3.12.
+Python 3.12 is the recommended default. Newer Python releases are added
+only after the compiled scientific dependencies and the pinned model
+runtime have been validated together.
 
 Option 1 (the bundled app) ships its own Python runtime — no separate Python install needed.
 
@@ -42,32 +42,29 @@ Use this path for scripts, Jupyter notebooks, batch processing, or any Python
 workflow. The Python package is published on PyPI:
 
 ```bash
-pip install swcstudio
+python -m pip install swcstudio
 ```
 
-The wheel itself is tiny (~300 KB code only); the heavy dependencies
-(PyTorch, PySide6, vispy, sklearn, etc.) are pulled in by pip. The
-auto-typing models are **downloaded on first use** (~80 MB, one-time)
-and cached at:
-
-- macOS: `~/Library/Application Support/swcstudio/models/`
-- Windows: `%APPDATA%\swcstudio\models\`
-- Linux: `~/.local/share/swcstudio/models/`
+Pip installs the heavy dependencies (PyTorch, PySide6, vispy, sklearn,
+XGBoost, etc.) into the active environment. The wheel contains the
+runtime JSON configuration and all eight production models, so
+auto-labeling works offline immediately after installation. The
+self-contained wheel is approximately 38 MB.
 
 A clean isolated install (recommended over polluting system Python):
 
 ```bash
 python3 -m venv ~/swcstudio-env
 source ~/swcstudio-env/bin/activate           # Windows: ~\swcstudio-env\Scripts\Activate.ps1
-pip install swcstudio
+python -m pip install swcstudio
 
 swcstudio-gui                                 # launch the GUI
 swcstudio --help                              # CLI
+swcstudio doctor                              # full installation check
 ```
 
-To upgrade later: `pip install --upgrade swcstudio`. Pip downloads only
-what changed; models refresh automatically on the next auto-label call
-if their version bumped.
+To upgrade later: `python -m pip install --upgrade swcstudio`. The new
+wheel installs the matching code, configuration, and production models.
 
 ## Option 3 — Source install (development)
 
@@ -92,7 +89,7 @@ bundled model files:
 python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install --upgrade pip
-pip install -e .
+python -m pip install -e .
 ```
 
 ### Windows PowerShell
@@ -101,7 +98,7 @@ pip install -e .
 py -3.12 -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install --upgrade pip
-pip install -e .
+python -m pip install -e .
 ```
 
 ### Conda
@@ -110,7 +107,7 @@ pip install -e .
 conda create -n swc-studio python=3.12 -y
 conda activate swc-studio
 python -m pip install --upgrade pip
-pip install -e .
+python -m pip install -e .
 ```
 
 ### Optional developer extras
@@ -119,7 +116,7 @@ For maintainers who need PyInstaller (release packaging) and Sphinx
 (docs build):
 
 ```bash
-pip install -e ".[all]"
+python -m pip install -e ".[dev]"
 ```
 
 End users do not need this.
@@ -131,8 +128,8 @@ How you update depends on how you installed:
 | Install method | How to update |
 |---|---|
 | Option 1 (bundled app) | Help → **Check for Updates** in the GUI. The in-app updater downloads only the changed layer (~5 MB code or ~80 MB models), no full re-download. |
-| Option 2 (pip) | `pip install --upgrade swcstudio`. Pip downloads only what changed; models refresh on next auto-label call if a new version is available. |
-| Option 3 (source) | `git pull` followed by `pip install -e .` to pick up any new dependencies. |
+| Option 2 (pip) | `python -m pip install --upgrade swcstudio` installs the matching code, dependencies, configuration, and bundled models. |
+| Option 3 (source) | `git pull` followed by `python -m pip install -e .` to pick up any new dependencies or metadata. |
 
 Internally, each release is split into three independent layers — runtime,
 code, and models — so most updates only re-fetch the small ones. See
@@ -143,6 +140,7 @@ for the architecture details.
 
 ```bash
 swcstudio --help
+swcstudio doctor
 swcstudio models status
 swcstudio gpu-status
 swcstudio-gui --help

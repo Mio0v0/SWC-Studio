@@ -26,7 +26,7 @@ git push origin v0.2.0
 GitHub Actions will then:
 
 1. Build the layer zips, the pip wheel, and `update_manifest.json`
-2. Build the macOS `.app` (modular) and Windows `.zip`
+2. Build the modular macOS `.app` and modular Windows `.zip`
 3. Create a **draft** GitHub Release `v0.2.0` and attach all assets
 4. (Gated) Publish the wheel to PyPI
 
@@ -63,19 +63,21 @@ For a tag `v0.2.0`, the workflow attaches these assets to the release:
 
 | Asset                                  | Audience                          | Size  |
 |----------------------------------------|-----------------------------------|-------|
-| `swcstudio-code-v0.2.0.zip`            | Modular .app users (code update)  | ~5 MB |
-| `swcstudio-models-v0.2.0.zip`          | Modular .app users + pip users    | ~75-80 MB raw model files |
-| `SWC-Studio-v0.2.0-macOS.zip`          | New / runtime-bumping Mac users   | ~700 MB |
-| `SWC-Studio-v0.2.0-Windows.zip`        | New / runtime-bumping Win users   | ~700 MB |
-| `swcstudio-0.2.0-py3-none-any.whl`     | pip users (auto-pulled by pip)    | ~5 MB |
-| `swcstudio-0.2.0.tar.gz`               | pip users (sdist fallback)        | ~5 MB |
+| `swcstudio-code-v0.2.0.zip`            | Modular desktop users (code update) | ~5 MB |
+| `swcstudio-models-v0.2.0.zip`          | Modular desktop model updates     | ~75-80 MB raw model files |
+| `SWC-Studio-v0.2.0-macOS.zip`          | New / runtime-bumping Mac users   | varies by runtime |
+| `SWC-Studio-v0.2.0-Windows.zip`        | New / runtime-bumping Win users   | varies by runtime |
+| `swcstudio-0.2.0-py3-none-any.whl`     | pip users; includes production models | ~38 MB |
+| `swcstudio-0.2.0.tar.gz`               | pip users (sdist fallback); includes models | ~38 MB |
 | `update_manifest.json`                 | the in-app updater                | ~1 KB |
 
 The `update_manifest.json` is the key file that ties everything
 together. The bundled updater fetches it from the
 `releases/latest/download/update_manifest.json` URL (always points at
 the most recent release), then offers to install whichever layer
-changed.
+changed. The workflow generates it through
+`scripts/generate_release_manifest.py`; do not duplicate the schema in
+workflow YAML.
 
 ## First-time setup
 

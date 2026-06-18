@@ -14,8 +14,9 @@ an SWC into soma / axon / basal dendrite / apical dendrite:
 * QC/flag: runtime QC metadata and learned per-cell bad-label flag.
 
 The core stages are required. The package's required dependencies
-include sklearn, torch, and torch_geometric, and ``pip install -e .``
-ships the trained model files for the pipeline and flag scorer.
+include sklearn, XGBoost, torch, and torch_geometric. Published wheels
+and source installs ship the trained model files for the pipeline and
+flag scorer.
 
 End users typically reach this code through the CLI (``swcstudio
 validation auto-label``, ``swcstudio batch auto-typing``) or through

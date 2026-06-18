@@ -123,7 +123,7 @@ labeled/
     interneuron/ *.swc
 ```
 
-The standard `pip install -e .` already includes torch and
+The standard `python -m pip install -e .` already includes torch and
 torch_geometric, so GNN training works out of the box. Use `--no-gnn`
 only when you want to refresh Stages 1+2 against an existing
 `gnn_apical_basal.pt` checkpoint that's already in `--output-dir`.

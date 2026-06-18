@@ -23,7 +23,8 @@ with pip/source installs, see <a href="../GPU_INSTALL.html">GPU Setup</a>.
 ## First Run
 
 - if using the bundled app, extract the release zip and open `SWC-Studio.app` / the `.exe`
-- if using a pip install, run `swcstudio-gui` to launch the GUI or `swcstudio --help` for the CLI
+- if using a pip install, run `swcstudio doctor`, then `swcstudio-gui`
+  to launch the GUI or `swcstudio --help` for the CLI
 - if using a source install, run the same commands inside your activated venv to verify
 - run `swcstudio gpu-status` or use Help -> GPU Readiness when you want
   to check CUDA/PyTorch availability
@@ -31,7 +32,7 @@ with pip/source installs, see <a href="../GPU_INSTALL.html">GPU Setup</a>.
 ## Updating
 
 - bundled app: Help → Check for Updates (in-app updater handles modular updates)
-- pip install: `pip install --upgrade swcstudio`
-- source install: `git pull` and re-run `pip install -e .`
+- pip install: `python -m pip install --upgrade swcstudio`
+- source install: `git pull` and re-run `python -m pip install -e .`
 
 See <a href="../GETTING_STARTED.html#updating">Getting Started → Updating</a> for full details.

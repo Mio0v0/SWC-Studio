@@ -9,13 +9,14 @@ The CLI is available from any of the three install paths — see
 
 ```bash
 # pip install (researchers / Python users)
-pip install swcstudio
+python -m pip install swcstudio
 
 # OR source install (developers)
-pip install -e .
+python -m pip install -e .
 
 # Verify
 swcstudio --help
+swcstudio doctor
 ```
 
 If the script entrypoint is not on your path, use module mode:
@@ -33,6 +34,7 @@ swcstudio <command> [args] [options]
 Public direct commands:
 
 - `check`
+- `doctor`
 - `validate`
 - `rule-guide`
 - `split`
@@ -54,6 +56,11 @@ Public direct commands:
 - `delete-subtree`
 - `insert`
 - `plugins`
+
+`swcstudio doctor` imports every runtime dependency, checks all packaged
+configuration files, deserializes every production model, and verifies
+that the GUI module imports. Use `swcstudio doctor --json` in automated
+setup checks or `swcstudio doctor --quick` to skip model deserialization.
 
 The direct command form is the intended public interface. Internal grouped routes such as `validation`, `morphology`, or `geometry` still exist, but the direct form is the one to document and use.
 
@@ -443,7 +450,7 @@ Training writes three core files into `--output-dir`:
 - `branch_classifier.pkl`     Stage 2
 - `gnn_apical_basal.pt`       Stage 2b GNN (only if not `--no-gnn`)
 
-The standard `pip install -e .` already includes torch and
+The standard `python -m pip install -e .` already includes torch and
 torch_geometric so GNN training works out of the box.
 
 For the full retraining workflow (recommended ways to make custom

@@ -1,3 +1,0 @@
-# Single top-level requirements entry for full project setup.
-# Installs package + GUI + docs dependencies from pyproject.toml.
--e .[all]

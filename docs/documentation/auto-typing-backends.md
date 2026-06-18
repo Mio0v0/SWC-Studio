@@ -62,15 +62,16 @@ uses the first match:
    - Linux: `~/.local/share/swcstudio/models`
 4. the bundled package directory: `swcstudio/data/models/`
 
-For pip installs, the resolver can download the models package from
-GitHub Releases on first use and cache it in the user model directory.
-Source installs and bundled desktop apps already include the model files.
+Pip wheels, source installs, and bundled desktop apps all include the
+production model files. If those files are removed, the resolver can
+still use the GitHub Releases model layer as a repair/update fallback.
 
 Check the current resolution status with:
 
 ```bash
 swcstudio models status
 swcstudio models status --model-dir /path/to/models
+swcstudio doctor
 swcstudio gpu-status
 ```
 

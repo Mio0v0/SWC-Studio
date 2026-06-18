@@ -69,7 +69,7 @@ jobs:
       - name: Install build deps
         run: |
           python -m pip install --upgrade pip
-          pip install build wheel
+          python -m pip install build wheel
 
       # ---- Layer 1: swcstudio-code-vN.zip ------------------------------------
       # Plain Python source tree. Excludes models, caches, compiled files.
@@ -116,11 +116,12 @@ jobs:
           ls -lah "artifacts/swcstudio-models-${TAG}.zip"
 
       # ---- Pip wheel ---------------------------------------------------------
-      # Leaning on pyproject.toml's package-data being empty (Pattern B).
-      # Wheel ships ~5 MB of code only; models download on first use.
+      # Wheel ships code, runtime JSON configuration, and production models.
+      # The separate models zip remains available for modular desktop updates.
       - name: Build pip wheel + sdist
         run: |
           python -m build
+          python scripts/verify_distribution.py dist/*.whl dist/*.tar.gz
           ls -lah dist/
 
       - name: Copy wheel + sdist into artifacts/
@@ -139,43 +140,14 @@ jobs:
           set -e
           VERSION="${{ steps.version.outputs.version_no_v }}"
           TAG="${{ steps.version.outputs.tag }}"
-          # The runtime zips don't exist yet on this runner, but the
-          # manifest's runtime block only needs URL strings that point to
-          # the eventual GitHub-Releases assets. We assemble those URLs
-          # directly without inspecting files.
-          python - <<PY
-          import json, hashlib, datetime
-          from pathlib import Path
-
-          REPO = "Mio0v0/SWC-Studio"
-          TAG  = "${TAG}"
-          VER  = "${VERSION}"
-
-          def info(p):
-              data = Path(p).read_bytes()
-              return {
-                  "version": VER,
-                  "url": f"https://github.com/{REPO}/releases/download/{TAG}/{Path(p).name}",
-                  "size": len(data),
-                  "sha256": hashlib.sha256(data).hexdigest(),
-              }
-
-          manifest = {
-              "release_version": VER,
-              "released_utc": datetime.datetime.now(datetime.timezone.utc).replace(microsecond=0).isoformat(),
-              "app":     info(f"artifacts/swcstudio-code-{TAG}.zip"),
-              "models":  info(f"artifacts/swcstudio-models-{TAG}.zip"),
-              "runtime": {
-                  "min_version": VER,
-                  "url_macos":   f"https://github.com/{REPO}/releases/download/{TAG}/SWC-Studio-{TAG}-macOS.zip",
-                  "url_windows": f"https://github.com/{REPO}/releases/download/{TAG}/SWC-Studio-{TAG}-Windows.zip",
-              },
-          }
-          Path("artifacts/update_manifest.json").write_text(
-              json.dumps(manifest, indent=2) + "\n", encoding="utf-8"
-          )
-          print(json.dumps(manifest, indent=2))
-          PY
+          python scripts/generate_release_manifest.py \
+            --version "${VERSION}" \
+            --tag "${TAG}" \
+            --code-zip "artifacts/swcstudio-code-${TAG}.zip" \
+            --models-zip "artifacts/swcstudio-models-${TAG}.zip" \
+            --runtime-asset-macos "SWC-Studio-${TAG}-macOS.zip" \
+            --runtime-asset-windows "SWC-Studio-${TAG}-Windows.zip" \
+            --output artifacts/update_manifest.json
 
       - name: Upload layer artifacts to the GitHub Release
         # Idempotent — softprops creates the release if missing, otherwise
@@ -208,7 +180,7 @@ jobs:
 
 
   # =========================================================================
-  # 2. macOS .app — runs the modular build (or monolithic; see comment).
+  # 2. macOS modular .app.
   # =========================================================================
   package-macos:
     name: Build macOS .app
@@ -237,16 +209,12 @@ jobs:
         run: |
           python scripts/stamp_version.py --version "${{ steps.version.outputs.version_no_v }}"
 
-      # Two build options live in packaging/. Switch between them by changing
-      # the script invoked below:
-      #   build_macos.sh         -> monolithic .app (legacy; bigger update size)
-      #   build_macos_modular.sh -> modular .app    (recommended; supports per-layer updates)
       - name: Run modular macOS build
         env:
           PYTHON_BIN: python3.12
         run: |
-          chmod +x packaging/build_macos_modular.sh
-          ./packaging/build_macos_modular.sh
+          chmod +x packaging/build_macos.sh
+          ./packaging/build_macos.sh
 
       - name: Zip the app bundle
         run: |
@@ -265,7 +233,7 @@ jobs:
 
 
   # =========================================================================
-  # 3. Windows .zip — runs the existing PowerShell build script.
+  # 3. Windows modular .zip.
   # =========================================================================
   package-windows:
     name: Build Windows zip
@@ -296,19 +264,15 @@ jobs:
         run: |
           python scripts/stamp_version.py --version "${{ steps.version.outputs.version_no_v }}"
 
-      # The Windows build script (`build_windows.ps1`) auto-detects a
-      # ``.venv\Scripts\python.exe`` and uses it; if missing it falls back
-      # to the system ``py`` launcher (Python 3.14 on the runner) which
-      # has no PyInstaller / Pillow installed and therefore fails fast.
-      # Create the venv with the runner's Python 3.12 and install deps,
-      # so the script picks it up automatically.
+      # Use a dedicated runtime-only packaging environment so docs/test
+      # dependencies cannot leak into the PyInstaller analysis.
       - name: Install Windows build dependencies
         shell: pwsh
         run: |
-          python -m venv .venv
-          .\.venv\Scripts\python.exe -m pip install --upgrade pip setuptools wheel
+          python -m venv .venv-packaging-windows
+          .\.venv-packaging-windows\Scripts\python.exe -m pip install --upgrade pip setuptools wheel
           # Project + PyInstaller, plus Pillow for make_windows_icon.py
-          .\.venv\Scripts\python.exe -m pip install -e ".[build]" pillow
+          .\.venv-packaging-windows\Scripts\python.exe -m pip install -e ".[build]" pillow
 
       - name: Run Windows build
         shell: pwsh

@@ -201,6 +201,12 @@ class CLISmokeTests(unittest.TestCase):
         self._run_cli("plugins", "list-loaded", env=env)
         self._run_cli("plugins", "load", "swcstudio_tmp_plugin", env=env)
 
+    def test_installation_doctor_command(self) -> None:
+        result = self._run_cli("doctor", "--quick", "--json")
+        payload = _extract_json(result.stdout)
+        self.assertTrue(payload["ok"], payload)
+        self.assertFalse(payload["model_loading_checked"])
+
 
 if __name__ == "__main__":
     unittest.main()

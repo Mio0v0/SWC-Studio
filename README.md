@@ -71,29 +71,34 @@ refresh instead of repeating type-suspicion inference.
 The Python package is published on PyPI:
 
 ```bash
-pip install swcstudio
+python -m pip install swcstudio
 swcstudio-gui          # launch the desktop GUI
 swcstudio --help       # CLI
+swcstudio doctor
 swcstudio models status
 swcstudio gpu-status
 ```
 
-Requires Python 3.10+ already installed on your system. The wheel itself is small (~300 KB); the heavy dependencies (PyTorch, PySide6, vispy, etc.) come along automatically. Models are downloaded on the first auto-label call (~80 MB, one-time, cached locally).
+Requires Python 3.10, 3.11, or 3.12. Pip installs the scientific,
+ML, GUI, and history dependencies into the active environment. The
+wheel also contains all runtime JSON configuration and the eight
+production auto-labeling models, so first inference does not require a
+separate model download. The resulting wheel is approximately 38 MB.
 
 For a clean isolated install:
 
 ```bash
 python3 -m venv ~/swcstudio-env
 source ~/swcstudio-env/bin/activate     # Windows: ~\swcstudio-env\Scripts\Activate.ps1
-pip install swcstudio
+python -m pip install swcstudio
 swcstudio-gui
 ```
 
-To upgrade later: `pip install --upgrade swcstudio`.
+To upgrade later: `python -m pip install --upgrade swcstudio`.
 
 ### Option 3 — Developer, install from source
 
-Use this path if you want to modify the swcstudio code itself. Supported Python versions: 3.10, 3.11, 3.12, 3.13.
+Use this path if you want to modify the swcstudio code itself. Supported Python versions: 3.10, 3.11, and 3.12.
 
 ```bash
 git clone https://github.com/Mio0v0/SWC-Studio.git
@@ -106,7 +111,7 @@ cd SWC-Studio
 python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install --upgrade pip
-pip install -e .
+python -m pip install -e .
 swcstudio-gui
 ```
 
@@ -116,16 +121,20 @@ swcstudio-gui
 py -3.12 -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install --upgrade pip
-pip install -e .
+python -m pip install -e .
 swcstudio-gui
 ```
 
-`pip install -e .` pulls in everything (CLI + GUI + auto-labeling). The `-e` ("editable") flag means edits to your local `.py` files take effect on the next `python` run — useful for development. Maintainers who also need PyInstaller (release packaging) and Sphinx (docs build) can use `pip install -e ".[all]"`.
+`python -m pip install -e .` installs the application runtime. The `-e`
+("editable") flag means local `.py` edits take effect on the next run.
+Maintainers can install packaging, documentation, test, and artifact
+build tools with `python -m pip install -e ".[dev]"`.
 
 ### Verifying the install
 
 ```bash
 swcstudio --help
+swcstudio doctor            # import packages and deserialize every model
 swcstudio models status     # confirm the auto-typing models are reachable
 swcstudio gpu-status        # optional CUDA/PyTorch readiness check
 ```
@@ -144,8 +153,8 @@ How you update depends on how you installed:
 | Install method | How to update |
 |---|---|
 | **Option 1** (bundled app) | Help → **Check for Updates** in the GUI. The in-app updater downloads only the changed layer (~5 MB code or ~80 MB models), no full re-download required. |
-| **Option 2** (pip) | `pip install --upgrade swcstudio` — pip downloads only what changed. Models auto-refresh on next auto-label call if a new version is available. |
-| **Option 3** (source) | `git pull` followed by `pip install -e .` to pick up any new dependencies. |
+| **Option 2** (pip) | `python -m pip install --upgrade swcstudio` installs the matching code, dependencies, configuration, and bundled models. |
+| **Option 3** (source) | `git pull` followed by `python -m pip install -e .` to pick up any new dependencies or metadata. |
 
 Under the hood, releases are split into three independently-updatable layers — runtime (heavy libraries), code (`swcstudio/` package), and models — so most updates touch only the small layers. See [`packaging/MODULAR_BUILD.md`](packaging/MODULAR_BUILD.md) for the architecture and [`RELEASE.md`](RELEASE.md) for the release pipeline.
 

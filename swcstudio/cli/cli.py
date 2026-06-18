@@ -452,6 +452,20 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Print the structured readiness report as JSON.",
     )
+    doctor = check.add_parser(
+        "doctor",
+        help="Verify runtime packages, bundled configuration, models, and GUI imports.",
+    )
+    doctor.add_argument(
+        "--json",
+        action="store_true",
+        help="Print the structured installation report as JSON.",
+    )
+    doctor.add_argument(
+        "--quick",
+        action="store_true",
+        help="Check that model files exist without deserializing them.",
+    )
     sub = check
 
     # ------------------------------ batch
@@ -753,6 +767,10 @@ def _normalize_cli_argv(argv: list[str]) -> list[str]:
         "geometry",
         "plugins",
         "gpu-status",
+        "doctor",
+        "models",
+        "train",
+        "history",
     }:
         return argv
 
@@ -862,6 +880,19 @@ def main(argv: list[str] | None = None) -> int:
             else:
                 print(format_gpu_readiness(st))
             return 0
+
+        if args.tool == "doctor":
+            from swcstudio.core.install_check import (  # noqa: PLC0415
+                check_installation,
+                format_installation_report,
+            )
+
+            report = check_installation(load_models=not bool(args.quick))
+            if bool(args.json):
+                _print_json(report)
+            else:
+                print(format_installation_report(report))
+            return 0 if report["ok"] else 2
 
         # -------- batch
         if args.tool == "batch" and args.feature == "validate":

@@ -1,8 +1,9 @@
 # -*- mode: python ; coding: utf-8 -*-
-"""Modular Windows PyInstaller runtime."""
+"""Modular macOS PyInstaller runtime."""
 
-import sys
+from importlib.metadata import PackageNotFoundError, version as pkg_version
 from pathlib import Path
+import sys
 
 ROOT_DIR = Path.cwd()
 sys.path.insert(0, str(ROOT_DIR / "packaging"))
@@ -14,7 +15,11 @@ from pyinstaller_common import (  # noqa: E402
 )
 
 ENTRYPOINT = ROOT_DIR / "packaging" / "swcstudio_bootstrap.py"
-ICON_PATH = ROOT_DIR / "packaging" / "icon.ico"
+try:
+    APP_VERSION = pkg_version("swcstudio")
+except PackageNotFoundError:
+    APP_VERSION = "0.0.0"
+
 datas, binaries, hiddenimports = bundle_inputs()
 
 a = Analysis(
@@ -44,7 +49,6 @@ exe = EXE(
     strip=False,
     upx=True,
     console=False,
-    icon=str(ICON_PATH) if ICON_PATH.exists() else None,
 )
 
 coll = COLLECT(
@@ -56,4 +60,19 @@ coll = COLLECT(
     upx=True,
     upx_exclude=[],
     name="SWC-Studio",
+)
+
+ICON_PATH = ROOT_DIR / "packaging" / "icon.icns"
+
+app = BUNDLE(
+    coll,
+    name="SWC-Studio.app",
+    icon=str(ICON_PATH) if ICON_PATH.exists() else None,
+    bundle_identifier="io.github.mio0v0.swcstudio",
+    info_plist={
+        "CFBundleShortVersionString": APP_VERSION,
+        "CFBundleVersion": APP_VERSION,
+        "CFBundleDisplayName": "SWC-Studio",
+        "CFBundleName": "SWC-Studio",
+    },
 )

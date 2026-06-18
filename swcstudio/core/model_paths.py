@@ -26,9 +26,11 @@ Search order (first existing wins):
    * macOS: ``~/Library/Application Support/swcstudio/models``
    * Linux: ``~/.local/share/swcstudio/models``
 
-3. The bundled directory inside the installed package
+3. The modular desktop runtime model directory supplied by the
+   bootstrap.
+4. The bundled directory inside the installed package
    (``swcstudio/data/models``). Source installs keep the current model
-   files here; pip installs can fetch the model layer on first use.
+   files here; published wheels include the same production models.
 
 Public API:
 
@@ -62,6 +64,7 @@ MODEL_FILES = {
 }
 
 ENV_VAR = "SWCSTUDIO_MODEL_DIR"
+BUNDLED_ENV_VAR = "SWCSTUDIO_BUNDLED_MODEL_DIR"
 
 
 def _user_data_root() -> Path:
@@ -101,6 +104,9 @@ def search_dirs(override: str | os.PathLike | None = None) -> list[Path]:
     if env_override:
         out.append(Path(env_override))
     out.append(user_model_dir())
+    bundled_override = os.environ.get(BUNDLED_ENV_VAR)
+    if bundled_override:
+        out.append(Path(bundled_override))
     out.append(bundled_model_dir())
     # De-duplicate while preserving order.
     seen: set[str] = set()
@@ -128,10 +134,9 @@ def resolve_model_path(
 
     If no local copy is found and ``auto_download=True`` (default),
     falls back to fetching the models package from GitHub Releases via
-    :mod:`swcstudio.core.updater`. This is what makes pip-installed
-    users work out of the box without bundling the model layer inside
-    the wheel — the first auto-label call triggers a one-time download
-    into the user data dir, and subsequent calls find it cached.
+    :mod:`swcstudio.core.updater`. Published wheels bundle the production
+    models, so this network path is a repair/update fallback rather than
+    a normal first-run requirement.
 
     Set ``auto_download=False`` to skip the network fallback (used by
     diagnostic / testing paths that want to know "is the model
@@ -165,8 +170,7 @@ def resolve_model_path(
         # silently and let the caller report "model not found".
         return None
 
-    # Re-scan after the download. The user override dir
-    # (~/Library/Application Support/SWC-Studio/models/) is part of
+    # Re-scan after the download. The user model directory is part of
     # search_dirs(), so the fresh files will be found.
     for d in search_dirs(override):
         candidate = d / fname

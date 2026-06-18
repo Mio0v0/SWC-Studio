@@ -42,6 +42,8 @@ pip-wheel-metadata/
 *.pkg
 SWC-Studio-*.zip
 .venv-packaging-macos/
+.venv-packaging-windows/
+.venv-install-smoke/
 
 # ----------------------------
 # Sphinx docs build

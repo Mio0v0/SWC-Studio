@@ -5,7 +5,7 @@ The app ships in two flavors:
 * **Pip wheel** — installed via ``pip install swcstudio``. Pip handles
   upgrades natively; this module is mostly a no-op for those users.
 
-* **Bundled .app / .zip** — downloaded from GitHub Releases. The bundle
+* **Bundled desktop app** — downloaded from GitHub Releases. The bundle
   is split into three independent pieces, each updatable separately:
 
   ============== ================================================== ============
@@ -19,11 +19,11 @@ The app ships in two flavors:
                  gate, and compact flag models.
   ============== ================================================== ============
 
-The bundled .app contains its own internal copy of each piece. When the
+The bundled desktop app contains its own internal copy of each piece. When the
 user opts to update, the new version is downloaded into a per-user
 override location (``~/Library/Application Support/SWC-Studio/...``)
 that takes precedence over the bundled copy. The next launch picks up
-the fresh module without touching the .app itself.
+the fresh module without touching the installed bundle itself.
 
 Update flow
 -----------
@@ -74,6 +74,7 @@ from typing import Optional
 # directory; in that case the override wins.
 BUNDLED_APP_VERSION    = "0.2.0"
 BUNDLED_MODELS_VERSION = "0.2.0"
+BUNDLE_FLAVOR_ENV = "SWCSTUDIO_BUNDLE_FLAVOR"
 
 # URL of the always-pointing-to-latest manifest. GitHub's "latest"
 # redirect makes this stable across releases. If a release has no
@@ -110,7 +111,7 @@ def user_app_override_dir() -> Path:
     """Where downloaded ``swcstudio/`` code packages land.
 
     Uses ``SWC-Studio/app/`` (matching the bootstrap loader's search
-    path in ``swcstudio_bootstrap.py``).
+    path in ``packaging/swcstudio_bootstrap.py``).
     """
     return _user_data_root() / "SWC-Studio" / "app"
 
@@ -124,6 +125,11 @@ def user_models_override_dir() -> Path:
     further plumbing.
     """
     return _user_data_root() / "swcstudio" / "models"
+
+
+def app_updates_supported() -> bool:
+    """Whether this process was launched by the modular desktop bootstrap."""
+    return os.environ.get(BUNDLE_FLAVOR_ENV, "").strip().lower() == "modular"
 
 
 # -----------------------------------------------------------------------------
@@ -181,7 +187,7 @@ def current_app_version() -> str:
     Priority: VERSION file inside override dir > BUNDLED_APP_VERSION.
     """
     override_version = user_app_override_dir() / "VERSION"
-    if override_version.is_file():
+    if app_updates_supported() and override_version.is_file():
         try:
             return override_version.read_text(encoding="utf-8").strip()
         except OSError:
@@ -243,7 +249,11 @@ def available_updates(
     out: dict[str, str] = {}
     cur = current_versions()
 
-    if manifest.app and _is_newer(manifest.app.version, cur["app"]):
+    if (
+        app_updates_supported()
+        and manifest.app
+        and _is_newer(manifest.app.version, cur["app"])
+    ):
         out["app"] = manifest.app.version
     if manifest.models and _is_newer(manifest.models.version, cur["models"]):
         out["models"] = manifest.models.version
@@ -292,6 +302,11 @@ def apply_update(
     """
     if module not in ("app", "models"):
         raise ValueError(f"unknown module: {module!r}")
+    if module == "app" and not app_updates_supported():
+        raise RuntimeError(
+            "application code updates require the modular desktop bundle; "
+            "pip/source installs should upgrade with pip"
+        )
 
     target_root = (
         user_app_override_dir() if module == "app" else user_models_override_dir()
@@ -371,6 +386,7 @@ def diagnostic_report() -> str:
         "",
         f"  App code version:   {cur['app']}",
         f"     bundled:        {BUNDLED_APP_VERSION}",
+        f"     layer updates:  {app_updates_supported()}",
         f"     override dir:   {user_app_override_dir()}",
         f"     override exists: {user_app_override_dir().exists()}",
         "",

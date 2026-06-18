@@ -5,8 +5,13 @@ param(
 $ErrorActionPreference = "Stop"
 
 $RootDir = Split-Path -Parent $PSScriptRoot
-$PythonExe = Join-Path $RootDir ".venv\Scripts\python.exe"
-if (-not (Test-Path $PythonExe)) {
+$PackagingPython = Join-Path $RootDir ".venv-packaging-windows\Scripts\python.exe"
+$ProjectPython = Join-Path $RootDir ".venv\Scripts\python.exe"
+if (Test-Path $PackagingPython) {
+    $PythonExe = $PackagingPython
+} elseif (Test-Path $ProjectPython) {
+    $PythonExe = $ProjectPython
+} else {
     $PythonExe = "py"
 }
 
@@ -55,6 +60,24 @@ if (Test-Path $ZipPath) {
 
 if (-not (Test-Path $AppDir)) {
     throw "Expected build output folder was not created: $AppDir"
+}
+
+Write-Host "Staging replaceable application and model layers..."
+$RuntimeRoot = Join-Path $AppDir "_internal"
+if (-not (Test-Path $RuntimeRoot)) {
+    throw "Expected PyInstaller runtime directory was not created: $RuntimeRoot"
+}
+if ($PythonExe -eq "py") {
+    & py -3 "$RootDir\packaging\stage_modular_payload.py" `
+        --source-root $RootDir `
+        --runtime-root $RuntimeRoot
+} else {
+    & $PythonExe "$RootDir\packaging\stage_modular_payload.py" `
+        --source-root $RootDir `
+        --runtime-root $RuntimeRoot
+}
+if ($LASTEXITCODE -ne 0) {
+    throw "Failed to stage modular application/model payloads."
 }
 
 # Brief settle delay so AV / Windows Search / PyInstaller have all

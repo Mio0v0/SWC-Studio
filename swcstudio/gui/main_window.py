@@ -5119,7 +5119,7 @@ class SWCMainWindow(QMainWindow):
             lines.append(f"  • Models:   {cur['models']} → {updates['models']}  (~{size_mb:.0f} MB)")
         lines.append("")
         lines.append("Updates are downloaded into your user data directory and applied on")
-        lines.append("next launch. Your bundled .app is left untouched, so you can revert")
+        lines.append("next launch. Your desktop bundle is left untouched, so you can revert")
         lines.append("by deleting the override directory.")
 
         box = QMessageBox(self)

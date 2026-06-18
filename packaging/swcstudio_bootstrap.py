@@ -1,4 +1,4 @@
-"""Bootstrap entrypoint for the *modular* SWC-Studio bundle.
+"""Bootstrap entrypoint for modular SWC-Studio desktop bundles.
 
 This file is the entrypoint compiled into the modular ``.app`` /
 ``.exe``. It is intentionally tiny and dependency-light. Its only job
@@ -14,15 +14,9 @@ is to:
 
 Why this matters
 ----------------
-In the *monolithic* build (``packaging/swcstudio_gui.spec``), the
-swcstudio package is frozen into the bundle. Updating any line of code
-requires re-downloading the entire 700 MB ``.app``.
-
-In the *modular* build (``packaging/swcstudio_gui_modular.spec``), the
-swcstudio code lives as plain ``.py`` files at
-``Contents/Resources/app/swcstudio/``. The auto-updater can drop a
-fresh ``swcstudio/`` folder into the user override dir and the next
-launch picks it up — no .app re-install.
+The PyInstaller runtime contains third-party libraries but not the
+``swcstudio`` package. Application code and models are staged beside the
+runtime so both macOS and Windows can accept small layer updates.
 
 Search order for the swcstudio package
 --------------------------------------
@@ -30,11 +24,12 @@ Search order for the swcstudio package
    * macOS:   ``~/Library/Application Support/SWC-Studio/app/swcstudio/``
    * Windows: ``%APPDATA%\\SWC-Studio\\app\\swcstudio\\``
    * Linux:   ``~/.local/share/swcstudio/app/swcstudio/``
-2. **Bundled in the .app** — what ships at install time:
-   ``<bundle>/Contents/Resources/app/swcstudio/``
-   (or ``sys._MEIPASS/app/swcstudio/`` for one-folder PyInstaller)
-3. **Source repo** — when running directly via ``python swcstudio_bootstrap.py``
-   from a checkout, the repo's ``swcstudio/`` is used.
+2. **Bundled with the desktop runtime** — what ships at install time:
+   ``sys._MEIPASS/app/swcstudio/``. This maps to
+   ``Contents/Resources/app/swcstudio/`` on macOS and
+   ``_internal/app/swcstudio/`` on Windows.
+3. **Source repo** — when running this bootstrap directly from a
+   checkout, the repo's ``swcstudio/`` is used.
 
 PyInstaller note
 ----------------
@@ -52,6 +47,10 @@ import os
 import sys
 from pathlib import Path
 from typing import Optional
+
+
+BUNDLE_FLAVOR_ENV = "SWCSTUDIO_BUNDLE_FLAVOR"
+BUNDLED_MODELS_ENV = "SWCSTUDIO_BUNDLED_MODEL_DIR"
 
 
 # -----------------------------------------------------------------------------
@@ -77,11 +76,11 @@ def _user_app_override_dir() -> Path:
     if sys.platform == "darwin":
         return Path.home() / "Library" / "Application Support" / "SWC-Studio" / "app"
     base = os.environ.get("XDG_DATA_HOME") or str(Path.home() / ".local" / "share")
-    return Path(base) / "swcstudio" / "app"
+    return Path(base) / "SWC-Studio" / "app"
 
 
 def _bundled_app_dir() -> Optional[Path]:
-    """The bundled app/ dir inside the PyInstaller .app, if any."""
+    """Return the replaceable bundled code root, if running frozen."""
     # PyInstaller exposes _MEIPASS only when running frozen.
     meipass = getattr(sys, "_MEIPASS", None)
     if meipass:
@@ -91,11 +90,22 @@ def _bundled_app_dir() -> Optional[Path]:
     return None
 
 
+def _bundled_models_dir() -> Optional[Path]:
+    """Return the replaceable bundled model directory."""
+    meipass = getattr(sys, "_MEIPASS", None)
+    if meipass:
+        candidate = Path(meipass) / "models"
+        if candidate.is_dir():
+            return candidate
+    return None
+
+
 def _source_repo_dir() -> Optional[Path]:
-    """Source repo when running ``python swcstudio_bootstrap.py`` directly."""
+    """Source repo when running this file directly from a checkout."""
     here = Path(__file__).resolve().parent
-    if (here / "swcstudio" / "__init__.py").exists():
-        return here
+    for candidate in (here, here.parent):
+        if (candidate / "swcstudio" / "__init__.py").exists():
+            return candidate
     return None
 
 
@@ -137,6 +147,13 @@ def main() -> int:
             f"  - source repo:   {(_source_repo_dir() / 'swcstudio') if _source_repo_dir() else '(not running from source)'}\n"
         )
         return 1
+
+    # Signal that this process can load replaceable code layers. The updater
+    # uses this to avoid offering ineffective code updates to pip installs.
+    os.environ[BUNDLE_FLAVOR_ENV] = "modular"
+    bundled_models = _bundled_models_dir()
+    if bundled_models is not None:
+        os.environ[BUNDLED_MODELS_ENV] = str(bundled_models)
 
     # Insert at the front so the override beats any system-installed swcstudio.
     sys.path.insert(0, str(app_dir))
