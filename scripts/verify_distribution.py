@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import email
+import glob
 import json
 import re
 import tarfile
@@ -123,7 +124,17 @@ def main() -> int:
     parser.add_argument("artifacts", nargs="+", type=Path)
     args = parser.parse_args()
 
-    reports = [verify_distribution(path.resolve()) for path in args.artifacts]
+    artifacts: list[Path] = []
+    for raw_path in args.artifacts:
+        raw = str(raw_path)
+        if any(char in raw for char in "*?["):
+            artifacts.extend(Path(match) for match in glob.glob(raw))
+        else:
+            artifacts.append(raw_path)
+    if not artifacts:
+        parser.error("no distribution artifacts matched")
+
+    reports = [verify_distribution(path.resolve()) for path in artifacts]
     print(json.dumps(reports, indent=2, sort_keys=True))
     return 0 if all(report["ok"] for report in reports) else 1
 
