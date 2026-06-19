@@ -340,6 +340,21 @@ jobs:
           name: layer-artifacts
           path: artifacts
 
+      - name: Install Linux Qt/OpenGL system libraries
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libegl1 libgl1 libxkbcommon-x11-0 libxcb-cursor0 \
+            libxcb-icccm4 libxcb-image0 libxcb-keysyms1 \
+            libxcb-randr0 libxcb-render-util0 libxcb-shape0 \
+            libxcb-xinerama0 libxcb-xkb1 libxkbcommon0 \
+            libdbus-1-3 libfontconfig1
+
+      - name: Install macOS OpenMP runtime for xgboost
+        if: runner.os == 'macOS'
+        run: brew install libomp
+
       - name: Install and verify release wheel in an empty environment
         shell: bash
         env:
@@ -358,13 +373,17 @@ jobs:
           "$PY" -m pip install "$WHEEL"
           "$PY" -m pip check
           test -f "$GUI"
-          cp tests/fixtures/single-soma.swc "$RUNNER_TEMP/release-smoke.swc"
+          # Windows RUNNER_TEMP uses backslashes (D:\a\_temp); inlining that
+          # into a Python string literal turns \a, \t etc. into control chars.
+          TMP="${RUNNER_TEMP//\\//}"
+          SWC="$TMP/release-smoke.swc"
+          cp tests/fixtures/single-soma.swc "$SWC"
           cd "$RUNNER_TEMP"
           "$PY" -m swcstudio.cli.cli doctor --json
           "$PY" -c "from PySide6.QtWidgets import QApplication; import swcstudio.gui.main; app=QApplication([]); print('gui-ok')"
-          "$PY" -m swcstudio.cli.cli auto-label "$RUNNER_TEMP/release-smoke.swc"
-          "$PY" -c "from swcstudio.core.auto_typing.types import BatchOptions; from swcstudio.gui.auto_typing_workers import _AutoLabelFileWorker; result=_AutoLabelFileWorker(1, '$RUNNER_TEMP/release-smoke.swc', BatchOptions(), None)._run_isolated(); print('isolated-auto-label-ok', result.nodes_total)"
-          "$PY" -c "from pathlib import Path; from swcstudio.core.swc_io import parse_swc_text_preserve_tokens; from swcstudio.gui.auto_typing_workers import _TypeSuspicionWorker; df=parse_swc_text_preserve_tokens(Path('$RUNNER_TEMP/release-smoke.swc').read_text()); print('isolated-inference-ok', len(_TypeSuspicionWorker(1, df)._run_isolated()))"
+          "$PY" -m swcstudio.cli.cli auto-label "$SWC"
+          "$PY" -c "from swcstudio.core.auto_typing.types import BatchOptions; from swcstudio.gui.auto_typing_workers import _AutoLabelFileWorker; result=_AutoLabelFileWorker(1, '$SWC', BatchOptions(), None)._run_isolated(); print('isolated-auto-label-ok', result.nodes_total)"
+          "$PY" -c "from pathlib import Path; from swcstudio.core.swc_io import parse_swc_text_preserve_tokens; from swcstudio.gui.auto_typing_workers import _TypeSuspicionWorker; df=parse_swc_text_preserve_tokens(Path('$SWC').read_text()); print('isolated-inference-ok', len(_TypeSuspicionWorker(1, df)._run_isolated()))"
 
 
   # =========================================================================
