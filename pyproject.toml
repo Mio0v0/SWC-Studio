@@ -15,7 +15,6 @@ classifiers = [
   "Environment :: MacOS X",
   "Environment :: Win32 (MS Windows)",
   "Environment :: X11 Applications :: Qt",
-  "Framework :: PySide",
   "Operating System :: MacOS",
   "Operating System :: Microsoft :: Windows",
   "Operating System :: POSIX :: Linux",
