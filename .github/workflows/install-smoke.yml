@@ -87,6 +87,10 @@ jobs:
             libxcb-xinerama0 libxcb-xkb1 libxkbcommon0 \
             libdbus-1-3 libfontconfig1
 
+      - name: Install macOS OpenMP runtime for xgboost
+        if: runner.os == 'macOS'
+        run: brew install libomp
+
       - name: Install wheel into an empty virtual environment
         shell: bash
         run: |
@@ -124,14 +128,19 @@ jobs:
             PY="$GITHUB_WORKSPACE/.smoke/bin/python"
             GUI="$GITHUB_WORKSPACE/.smoke/bin/swcstudio-gui"
           fi
-          cp tests/fixtures/single-soma.swc "$RUNNER_TEMP/install-smoke.swc"
+          # Windows RUNNER_TEMP uses backslashes (e.g. D:\a\_temp); inlining
+          # that into a Python string literal turns \a, \n, \t etc. into
+          # control characters. Forward slashes work on Windows too.
+          TMP="${RUNNER_TEMP//\\//}"
+          SWC="$TMP/install-smoke.swc"
+          cp tests/fixtures/single-soma.swc "$SWC"
           cd "$RUNNER_TEMP"
           test -f "$GUI"
           "$PY" -c "from PySide6.QtWidgets import QApplication; import swcstudio.gui.main; app = QApplication([]); print('gui-ok')"
-          "$PY" -m swcstudio.cli.cli auto-label "$RUNNER_TEMP/install-smoke.swc" > auto-label.json
+          "$PY" -m swcstudio.cli.cli auto-label "$SWC" > auto-label.json
           "$PY" -c "import json; data=json.load(open('auto-label.json', encoding='utf-8')); print('auto-label-ok', data['nodes_total'], data['cell_type'])"
-          "$PY" -c "from swcstudio.core.auto_typing.types import BatchOptions; from swcstudio.gui.auto_typing_workers import _AutoLabelFileWorker; result=_AutoLabelFileWorker(1, '$RUNNER_TEMP/install-smoke.swc', BatchOptions(), None)._run_isolated(); print('isolated-auto-label-ok', result.nodes_total)"
-          "$PY" -c "from pathlib import Path; from swcstudio.core.swc_io import parse_swc_text_preserve_tokens; from swcstudio.gui.auto_typing_workers import _TypeSuspicionWorker; df=parse_swc_text_preserve_tokens(Path('$RUNNER_TEMP/install-smoke.swc').read_text()); print('isolated-gui-inference-ok', len(_TypeSuspicionWorker(1, df)._run_isolated()))"
+          "$PY" -c "from swcstudio.core.auto_typing.types import BatchOptions; from swcstudio.gui.auto_typing_workers import _AutoLabelFileWorker; result=_AutoLabelFileWorker(1, '$SWC', BatchOptions(), None)._run_isolated(); print('isolated-auto-label-ok', result.nodes_total)"
+          "$PY" -c "from pathlib import Path; from swcstudio.core.swc_io import parse_swc_text_preserve_tokens; from swcstudio.gui.auto_typing_workers import _TypeSuspicionWorker; df=parse_swc_text_preserve_tokens(Path('$SWC').read_text()); print('isolated-gui-inference-ok', len(_TypeSuspicionWorker(1, df)._run_isolated()))"
 
   source-install:
     name: source-install ${{ matrix.os }} / Python ${{ matrix.python }}
@@ -168,6 +177,10 @@ jobs:
             libxcb-randr0 libxcb-render-util0 libxcb-shape0 \
             libxcb-xinerama0 libxcb-xkb1 libxkbcommon0 \
             libdbus-1-3 libfontconfig1
+
+      - name: Install macOS OpenMP runtime for xgboost
+        if: runner.os == 'macOS'
+        run: brew install libomp
 
       - name: Editable install from source
         shell: bash

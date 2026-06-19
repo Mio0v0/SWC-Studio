@@ -66,6 +66,21 @@ the ML runtime and models; later in-process runs reuse cached model
 objects, and an applied GUI result is reused by the next validation
 refresh instead of repeating type-suspicion inference.
 
+### macOS system packages (Options 2 and 3)
+
+`xgboost` ships precompiled binaries that dynamically link the **OpenMP
+runtime** (`libomp.dylib`). macOS does not include it by default, so
+without it `import xgboost` fails with a `Library not loaded:
+@rpath/libomp.dylib` error and the auto-labeling pipeline cannot start.
+Install it once before `pip install swcstudio`:
+
+```bash
+brew install libomp
+```
+
+(If you do not already have Homebrew, see <https://brew.sh>.) No other
+macOS system packages are required.
+
 ### Linux system packages (Options 2 and 3)
 
 `PySide6` and `vispy` are pip-installed, but the Qt platform plugin and
