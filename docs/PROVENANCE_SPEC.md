@@ -199,7 +199,7 @@ For AI ops the sub-op also carries an `ai_run_ref` blob hash:
 ```json
 {
   "kind": "auto_label",
-  "params": {"model_bundle": "v12", "cell_type": "unknown", "flag_strictness": 0.5},
+  "params": {"cell_type": "unknown", "flag_strictness": 0.5},
   "summary": {"nodes_modified": 1283},
   "ai_run_ref": "sha256:..."
 }
@@ -237,7 +237,7 @@ MLflow-compatible field names. Stored in `objects/<sha>.zst`.
   "started_at": "2024-01-01T11:45:00Z",
   "finished_at": "2024-01-01T11:45:22Z",
   "status": "FINISHED",
-  "params":  {"model_bundle": "v12", "cell_type": "unknown", "flag_strictness": 0.5},
+  "params":  {"cell_type": "unknown", "flag_strictness": 0.5},
   "metrics": {"nodes_labeled": 1283, "low_conf_count": 17},
   "artifacts": [
     {"name": "swcstudio-models-v0.2.0.zip", "sha256": "..."},
@@ -344,7 +344,7 @@ from swcstudio.core.provenance import tracked_op, OpKind
 with tracked_op(
     dataset_path="/path/to/neuron_001.swc",
     kind=OpKind.AUTO_LABEL,
-    params={"model_bundle": "v12", "cell_type": "unknown", "flag_strictness": 0.5},
+    params={"cell_type": "unknown", "flag_strictness": 0.5},
     message="Auto-label apical/basal",
     is_ai=True,
 ) as op:
@@ -499,7 +499,7 @@ schema_version: 1
 op:        auto_label
 input:     {sha256: ..., path: "neuron_001.swc"}
 output:    {sha256: ...}
-params:    {model_bundle: v12, cell_type: unknown, flag_strictness: 0.5}
+params:    {cell_type: unknown, flag_strictness: 0.5}
 model:     {sha256: ..., url: "https://github.com/Mio0v0/SWC-Studio/releases/download/v0.2.0/swcstudio-models-v0.2.0.zip"}
 env_hash:  sha256:...
 command:   "swcstudio auto-label input.swc --cell-type unknown --flag-strictness 0.5"

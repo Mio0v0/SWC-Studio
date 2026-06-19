@@ -153,20 +153,21 @@ swcstudio split ./swc-folder
 ### `swcstudio auto-typing <folder>`
 
 - Purpose: auto-labeling for every SWC in one folder.
-- Engine: v12 QC-label-flag pipeline.
+- Pipeline: QC gate → labeling model → flag scoring.
 - Each passing source SWC is updated in place and gets its own history archive.
 - QC-rejected or failed files are skipped and listed in the JSON summary.
 - Prints a short engine summary before processing.
-- Soma, axon, and basal labeling are always enabled
+- Soma, axon, and basal-dendrite labeling are always enabled.
 - The engine detects cell type automatically unless `--cell-type` is
   provided. Use `--cell-type pyramidal` or `--cell-type interneuron`
   when the user already knows the cell type.
 - Flag scoring is enabled by default. `--flag-strictness` controls how
   strict the bad-label flagger is; higher values are stricter and may
   flag more cells. Use `--no-flag` to skip flag scoring.
-- Optional `--model-dir` points at a v12-compatible model bundle. The
-  core required files are Stage 1, Stage 2, Stage 2b GNN, Branch3 rescue,
-  and QC gate; flag model files enable learned flag scoring.
+- Optional `--model-dir` points at an alternative model bundle directory.
+  Required files: `cell_type_classifier.pkl`, `branch_classifier.pkl`,
+  `gnn_apical_basal.pt`, `gnn_branch3_rescue.pt`, and `qc_gate.pkl`.
+  Flag scoring additionally needs the three `flag_model_*.joblib` files.
 
 Examples:
 
@@ -238,18 +239,19 @@ swcstudio auto-fix cell.swc
 ### `swcstudio auto-label <file>`
 
 - Purpose: apply the same single-file auto-label workflow used by the
-  GUI Auto Label Editing panel
-- Engine: same v12 QC-label-flag pipeline used by `swcstudio auto-typing`
-- Changes only node types; geometry, parent IDs, and radii are preserved
-- Updates the source SWC in place and records operation history
-- Soma, axon, and basal labeling are always enabled
+  GUI Auto Label Editing panel.
+- Pipeline: QC gate → labeling model → flag scoring (same engine as
+  `swcstudio auto-typing`).
+- Changes only node types; geometry, parent IDs, and radii are preserved.
+- Updates the source SWC in place and records operation history.
+- Soma, axon, and basal-dendrite labeling are always enabled.
 - The engine detects cell type automatically unless `--cell-type` is
   provided. Use `--cell-type pyramidal` or `--cell-type interneuron`
   when the user already knows the cell type.
 - Flag scoring is enabled by default. `--flag-strictness` controls how
   strict the bad-label flagger is; higher values are stricter and may
   flag more cells. Use `--no-flag` to skip flag scoring.
-- Optional `--model-dir` points at a v12-compatible model bundle.
+- Optional `--model-dir` points at an alternative model bundle directory.
 
 Examples:
 
@@ -394,17 +396,18 @@ swcstudio history checkpoint cell.swc op-1 --label review
 
 ### `swcstudio train auto-typing`
 
-Train the three core custom-training files of the auto-typing pipeline:
-Stage 1 (cell-type classifier), Stage 2 (per-branch classifier), and
-Stage 2b (GraphSAGE GNN apical-vs-basal head) on your own labeled SWC
-corpus.
-Pass `--no-gnn` only when you want to refresh Stages 1+2 against an
-existing GNN checkpoint.
+Train the three retrainable parts of the labeling model on your own
+labeled SWC corpus: a cell-type classifier
+(`cell_type_classifier.pkl`), a per-branch classifier
+(`branch_classifier.pkl`), and an apical-vs-basal GNN head
+(`gnn_apical_basal.pt`). Pass `--no-gnn` to refresh the two classifiers
+without retraining the GNN.
 
-Note: the bundled production engine is now the v12 QC-label-flag
-pipeline. Full v12 deployment also uses a Branch3 rescue checkpoint, QC
-gate, and optional learned flag models. This training command currently
-trains only the core Stage 1 + Stage 2 + Stage 2b stack.
+The QC gate, Branch3 rescue checkpoint, and flag-scoring models in the
+production bundle are not retrained by this command — they keep the
+bundled defaults. After training, point auto-labeling at the new
+directory with `--model-dir` and the engine combines your retrained
+files with the bundled QC + rescue + flag models.
 
 Required dataset layout:
 
@@ -486,24 +489,20 @@ swcstudio models status --model-dir ~/my-models
 ```
 
 Output is a search-path diagnostic plus a JSON summary of which model
-files were found and whether torch is available for the Stage 2b GNN.
+files were found and whether torch is available for the GNN heads.
 
-### Current Auto-Label Model Bundle
+### Auto-Label Model Bundle
 
-The current production auto-label path is the v12 QC-label-flag pipeline:
+Auto-labeling pulls in three categories of model files at runtime:
 
-- Stage 1 cell type: `cell_type_classifier.pkl`
-- Stage 2 subtree labeler: `branch_classifier.pkl`
-- Stage 2b apical/basal GNN: `gnn_apical_basal.pt`
-- Branch3 rescue: `gnn_branch3_rescue.pt`
-- QC gate: `qc_gate.pkl`
-- Compact learned flags: `flag_model_pyramidal.joblib`,
-  `flag_model_interneuron.joblib`, `flag_model_all.joblib`
+| Category | Files | Role |
+|---|---|---|
+| **QC gate** | `qc_gate.pkl` | Decides whether a file is structurally valid and within the trained distribution; rejects out-of-distribution inputs with a specific reason. |
+| **Labeling** | `cell_type_classifier.pkl`, `branch_classifier.pkl`, `gnn_apical_basal.pt`, `gnn_branch3_rescue.pt` | Identifies cell type, labels subtrees as soma / axon / basal / apical, and runs a GNN rescue pass on hard apical/basal cases. |
+| **Flag scoring** | `flag_model_pyramidal.joblib`, `flag_model_interneuron.joblib`, `flag_model_all.joblib` | Score each predicted label by how likely it is to be wrong, so a reviewer can focus attention on the least confident nodes. |
 
-`--flag-feature-mode compact` and `--flag-feature-mode simple` both use
-the bundled compact flagger. Older `baseline`, `auto`, and `complex`
-config values are treated as compact for backward compatibility; the
-slower research-only disagreement flag mode is not deployed in SWC-Studio.
+`--flag-feature-mode compact` and `--flag-feature-mode simple` both
+refer to the bundled flagger and are interchangeable on the CLI.
 
 ## Plugins
 

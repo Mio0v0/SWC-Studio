@@ -46,13 +46,13 @@ Dataclass for auto-typing input options:
   flagging is; higher values are stricter and may flag more cells
 - `flag_feature_mode: str` (default `"compact"`) - compatibility field;
   SWC-Studio deploys the compact flagger only. `"simple"` is accepted
-  as an alias. Older `"baseline"`, `"auto"`, and `"complex"` values are
-  treated as `"compact"`.
+  as an alias.
 
 Current flag feature mode:
 
-- `compact` - uses the bundled compact learned flagger and features
-  available from the deployed v12 inference path.
+- `compact` — bundled learned flagger that scores how likely each
+  predicted label is wrong, using features the labeling stage already
+  computed.
 
 #### `BatchResult`
 
@@ -178,14 +178,18 @@ indicator and by the CLI to fail fast before doing any work.
 
 #### `swcstudio.core.auto_typing.backend_status(*, model_dir=None) -> dict`
 
-Structured status report - which model files were found, where, and whether torch is available for the Stage 2b GNN. The deployed flag models are the compact `flag_model_*.joblib` bundles.
+Structured status report — which model files were found, where, and
+whether torch is available for the GNN heads. Flag models are reported
+as the bundled `flag_model_*.joblib` files (one per cell-type class
+plus an all-classes fallback).
 
 #### `swcstudio.core.auto_typing_train.train_user_models(data_dir, output_dir, *, train_gnn=True, ...) -> TrainingResult`
 
-Train Stage 1 + Stage 2 (+ optional Stage 2b GNN) on a labeled SWC
-dataset and write the resulting model files to `output_dir`. End users
-typically invoke this via `swcstudio train auto-typing` on the CLI;
-the Python function exists for scripted training pipelines.
+Train the cell-type classifier and subtree-labeling models on a
+labeled SWC dataset and write the resulting model files to
+`output_dir`. End users typically invoke this via `swcstudio train
+auto-typing` on the CLI; the Python function exists for scripted
+training pipelines.
 
 #### `validation_index_clean_text(swc_text, *, config_overrides=None) -> dict`
 

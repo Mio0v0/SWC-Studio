@@ -57,14 +57,22 @@ Models are bundled inside the app — no separate download.
 Release executables are intended to be portable CPU builds; use pip or
 source install for GPU acceleration.
 
-The bundled auto-labeling model is the current v12 QC-label-flag
-pipeline: Stage 1 cell typing, Stage 2 subtree labeling, Stage 2b
-apical/basal GNN, Branch3 rescue, QC gate, and learned bad-label flag
-scoring. Compact flag scoring is available out of the box and is the
-only deployed flag mode in SWC-Studio. The first inference initializes
-the ML runtime and models; later in-process runs reuse cached model
-objects, and an applied GUI result is reused by the next validation
-refresh instead of repeating type-suspicion inference.
+Auto-labeling runs in three stages on every file:
+
+1. **QC gate** — checks whether the morphology is structurally valid
+   and within the trained distribution. Files that fail QC are rejected
+   with a specific reason (multi-soma, malformed rows, cycles, etc.) so
+   nothing is mislabeled silently.
+2. **Labeling model** — assigns each node a soma / axon / basal-dendrite
+   / apical-dendrite type. Pyramidal and interneuron cells are handled
+   in the same call; no manual cell-type selection is required.
+3. **Flag scoring** — surfaces the individual labels the model is least
+   confident about so a reviewer can focus attention. Flagged nodes
+   appear in the GUI issue panel and in the CLI JSON output.
+
+The first inference initializes the ML runtime and models; later
+in-process runs reuse cached objects, and an applied GUI label is
+reused by the next validation refresh instead of being recomputed.
 
 ### macOS system packages (Options 2 and 3)
 

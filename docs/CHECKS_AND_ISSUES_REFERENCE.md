@@ -204,40 +204,25 @@ auto-typing engine, implemented in:
 - `swcstudio/core/auto_typing/` (engine package)
 - `swcstudio/tools/batch_processing/configs/auto_typing.json` (user-editable runtime knobs)
 
-### Pipeline stages
+### Pipeline architecture
 
-| Stage | Implementation | Output |
+Auto-labeling runs three groups of work in sequence: a **QC gate**
+that decides whether to label at all, a **labeling model** that
+assigns the per-node types, and **flag scoring** that highlights low-
+confidence labels for review.
+
+| Step | Files | What it produces |
 |---|---|---|
-| QC gate | type-agnostic structural checks and distribution checks (`qc_gate.pkl`) | rejects malformed, disconnected, or out-of-distribution files before auto-labeling; unlabeled type-0 inputs can pass |
-| Stage 1 | sklearn ensemble over 49 whole-cell features (`cell_type_classifier.pkl`) | pyramidal vs interneuron |
-| Stage 2 | sklearn ensemble per primary subtree (`branch_classifier.pkl`) | axon / basal / apical per subtree |
-| Stage 2b | GraphSAGE GNN over the branch graph (`gnn_apical_basal.pt`) | apical-vs-basal re-decision on pyramidal dendrites |
-| Branch3 | conservative GraphSAGE rescue head (`gnn_branch3_rescue.pt`) | rescue difficult pyramidal apical/basal cases |
-| Stage 3 | topology refinement | soma-boundary constraints applied (one primary axon, one primary apical), short islands flipped |
-| Flag scoring | compact learned flag models (`flag_model_*.joblib`) | post-prediction per-cell bad-label flag score |
+| **QC gate** | `qc_gate.pkl` | Pass / reject decision plus a specific reason. Rejects malformed, disconnected, or out-of-distribution files before any labeling runs. Unlabeled type-0 inputs are allowed through. |
+| **Cell typing** | `cell_type_classifier.pkl` | Pyramidal vs interneuron. Uses a soft handoff: when confidence is low it runs subtree labeling for both cell types and picks the higher-confidence outcome. |
+| **Subtree labeling** | `branch_classifier.pkl` | Per-primary-subtree assignment as axon / basal / apical. |
+| **Apical/basal GNN** | `gnn_apical_basal.pt` | GraphSAGE re-decision over the branch graph for pyramidal dendrites. |
+| **Apical/basal rescue** | `gnn_branch3_rescue.pt` | Conservative GraphSAGE rescue head for the hardest pyramidal apical/basal cases. |
+| **Topology refinement** | — | Soma-boundary constraints applied (one primary axon, one primary apical), short islands flipped. |
+| **Flag scoring** | `flag_model_pyramidal.joblib`, `flag_model_interneuron.joblib`, `flag_model_all.joblib` | Per-node score of how likely each predicted label is wrong. Surface in the GUI issue panel and in the CLI JSON output. |
 
-Stage 1 uses a soft handoff: when its confidence is below threshold it
-runs Stages 2 + 3 for both cell types and picks the higher-confidence
-outcome.
-
-### Current deployed model files
-
-The bundled production model bundle contains the full QC-label-flag
-architecture:
-
-- `cell_type_classifier.pkl` - Stage 1 cell-type classifier
-- `branch_classifier.pkl` - Stage 2 subtree labeler
-- `gnn_apical_basal.pt` - Stage 2b apical/basal GNN
-- `gnn_branch3_rescue.pt` - Branch3 rescue head
-- `qc_gate.pkl` - runtime QC gate
-- `flag_model_pyramidal.joblib`, `flag_model_interneuron.joblib`,
-  `flag_model_all.joblib` - compact learned flaggers
-
-The deployed flagger is the fast compact mode. Older config files that
-name `baseline`, `auto`, or `complex` are accepted for backward
-compatibility, but they are mapped to compact scoring. SWC-Studio
-intentionally rejects research-only flag bundles that require unsupported
-disagreement features.
+`flag_feature_mode` controls flag-score features; both `compact` and
+`simple` map to the bundled fast flagger.
 
 ### Apical detection
 
@@ -275,11 +260,9 @@ over the bundled defaults.
 
 `flag_feature_mode` behavior:
 
-- `compact` uses only features already available from the v12 inference
-  pass.
-- `simple` is accepted as an alias for compact scoring.
-- Legacy `baseline`, `auto`, and `complex` values are treated as
-  `compact`.
+- `compact` is the bundled fast flagger and uses features the labeling
+  stage already computed.
+- `simple` is accepted as an alias for compact.
 
 ## How Checks Become GUI Issues
 

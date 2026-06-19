@@ -176,11 +176,13 @@ python -m swcstudio.gui.main
 ```
 
 `swcstudio models status` is worth running once after install: it
-prints the auto-typing engine's model search path and confirms the
-bundled v12 model files are reachable. You should see the core files
+prints the auto-labeling engine's model search path and confirms the
+bundled model files are reachable. You should see the labeling files
 `cell_type_classifier.pkl`, `branch_classifier.pkl`,
-`gnn_apical_basal.pt`, `gnn_branch3_rescue.pt`, and `qc_gate.pkl`
-listed as `[FOUND]`, plus flag model paths when flag scoring is bundled.
+`gnn_apical_basal.pt`, `gnn_branch3_rescue.pt`, the QC gate
+`qc_gate.pkl`, and the flag-scoring files `flag_model_pyramidal.joblib`,
+`flag_model_interneuron.joblib`, and `flag_model_all.joblib` listed as
+`[FOUND]`.
 
 `swcstudio gpu-status` is optional. It explains whether the active pip or
 source environment can use CUDA, and what is missing when it cannot. The
