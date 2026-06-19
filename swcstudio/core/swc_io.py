@@ -18,7 +18,7 @@ def _default_swc_plus_header() -> list[str]:
         "#     </FileHistory>",
         "#   </MetaData>",
         '#   <CustomTypes version="0.12">',
-        "#     <!-- Place customized Types here if you use TypeIDs >= 16 -->",
+        "#     <!-- No custom types defined for this file. Custom types (TypeIDs >= 16) would be listed here. -->",
         "#   </CustomTypes>",
         "# </SWCplus>",
     ]
