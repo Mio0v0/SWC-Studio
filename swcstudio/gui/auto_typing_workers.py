@@ -17,11 +17,13 @@ Two workers are provided:
 
 from __future__ import annotations
 
+import json
 import os
 import pickle
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 from typing import Any
 
@@ -145,11 +147,13 @@ class _AutoLabelBatchWorker(QObject):
         with tempfile.TemporaryDirectory(prefix="swcstudio-auto-label-batch-") as tmp:
             request_path = Path(tmp) / "request.pkl"
             output_path = Path(tmp) / "output.pkl"
+            progress_path = Path(tmp) / "progress.jsonl"
             request = {
                 "kind": "batch",
                 "folder": self._folder,
                 "options": self._options,
                 "config_overrides": self._config_overrides,
+                "progress_path": str(progress_path),
             }
             with request_path.open("wb") as stream:
                 pickle.dump(request, stream, protocol=pickle.HIGHEST_PROTOCOL)
@@ -159,30 +163,54 @@ class _AutoLabelBatchWorker(QObject):
             env.setdefault("OMP_NUM_THREADS", "1")
             env.setdefault("OPENBLAS_NUM_THREADS", "1")
             env.setdefault("MKL_NUM_THREADS", "1")
-            completed = subprocess.run(
+            process = subprocess.Popen(
                 _AutoLabelFileWorker._subprocess_command(
                     str(request_path), str(output_path)
                 ),
                 env=env,
-                capture_output=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
                 text=True,
-                check=False,
             )
-            if completed.returncode != 0:
-                detail = (completed.stderr or completed.stdout or "").strip()
-                if completed.returncode < 0:
+            progress_offset = 0
+            while process.poll() is None:
+                progress_offset = self._emit_new_progress(progress_path, progress_offset)
+                time.sleep(0.1)
+            progress_offset = self._emit_new_progress(progress_path, progress_offset)
+            stdout, stderr = process.communicate()
+
+            if process.returncode != 0:
+                detail = (stderr or stdout or "").strip()
+                if process.returncode < 0:
                     detail = (
                         f"batch auto-label subprocess terminated by signal "
-                        f"{-completed.returncode}"
+                        f"{-process.returncode}"
                         + (f": {detail}" if detail else "")
                     )
                 raise RuntimeError(
-                    detail or f"batch auto-label subprocess exited {completed.returncode}"
+                    detail or f"batch auto-label subprocess exited {process.returncode}"
                 )
             if not output_path.is_file():
                 raise RuntimeError("batch auto-label subprocess produced no result")
             with output_path.open("rb") as stream:
                 return pickle.load(stream)  # noqa: S301 - private child output
+
+    def _emit_new_progress(self, progress_path: Path, offset: int) -> int:
+        if not progress_path.is_file():
+            return offset
+        with progress_path.open("r", encoding="utf-8") as stream:
+            stream.seek(offset)
+            for line in stream:
+                try:
+                    payload = json.loads(line)
+                    self.progress.emit(
+                        int(payload["index"]),
+                        int(payload["total"]),
+                        str(payload["name"]),
+                    )
+                except (KeyError, TypeError, ValueError, json.JSONDecodeError):
+                    continue
+            return stream.tell()
 
     @Slot()
     def run(self) -> None:  # noqa: D401 - Qt slot

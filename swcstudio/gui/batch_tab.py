@@ -654,13 +654,6 @@ class BatchTabWidget(QWidget):
         )
 
         md = (self._batch_model_dir or "").strip() or None
-        ok, reason = is_available(model_dir=md)
-        if not ok:
-            self._set_status(
-                f"Auto-typing engine unavailable.\n{reason}",
-                self._batch_status_box,
-            )
-            return
         config_overrides: dict = {}
         if md:
             config_overrides["model_dir"] = md

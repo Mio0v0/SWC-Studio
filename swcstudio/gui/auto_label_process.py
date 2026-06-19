@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import pickle
 import sys
 from pathlib import Path
@@ -17,10 +18,23 @@ def run_files(request_path: str, output_path: str) -> None:
             run_folder as run_auto_typing_folder,
         )
 
+        progress_path = Path(request["progress_path"])
+
+        def _write_progress(index: int, total: int, name: str) -> None:
+            payload = {
+                "index": int(index),
+                "total": int(total),
+                "name": str(name),
+            }
+            with progress_path.open("a", encoding="utf-8") as stream:
+                stream.write(json.dumps(payload, ensure_ascii=False) + "\n")
+                stream.flush()
+
         result = run_auto_typing_folder(
             str(request["folder"]),
             options=request["options"],
             config_overrides=request.get("config_overrides"),
+            progress_callback=_write_progress,
         )
     else:
         from swcstudio.tools.validation.features.auto_typing import (

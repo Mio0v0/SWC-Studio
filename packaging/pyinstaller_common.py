@@ -48,6 +48,7 @@ def bundle_inputs() -> tuple[list, list, list[str]]:
     hiddenimports = (
         collect_submodules("vispy.app.backends")
         + collect_submodules("neurom", filter=_exclude_test_modules)
+        + collect_submodules("morphio", filter=_exclude_test_modules)
         + collect_submodules("sklearn", filter=_exclude_test_modules)
         + collect_submodules("scipy", filter=_exclude_test_modules)
         + collect_submodules("xgboost", filter=_exclude_xgboost_tests)

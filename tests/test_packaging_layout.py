@@ -77,6 +77,30 @@ class PackagingLayoutTests(unittest.TestCase):
                 self.assertEqual(bootstrap._bundled_app_dir(), runtime / "app")
                 self.assertEqual(bootstrap._bundled_models_dir(), runtime / "models")
 
+    def test_bootstrap_finds_macos_contents_resources_layout(self) -> None:
+        bootstrap = _load_script(
+            "swcstudio_bootstrap_macos_resources_test",
+            "packaging/swcstudio_bootstrap.py",
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            contents = Path(tmp) / "SWC-Studio.app" / "Contents"
+            executable = contents / "MacOS" / "SWC-Studio"
+            app_dir = contents / "Resources" / "app"
+            models_dir = contents / "Resources" / "models"
+            executable.parent.mkdir(parents=True)
+            executable.write_bytes(b"")
+            (app_dir / "swcstudio").mkdir(parents=True)
+            (app_dir / "swcstudio" / "__init__.py").write_text("", encoding="utf-8")
+            models_dir.mkdir(parents=True)
+            with (
+                mock.patch.object(bootstrap.sys, "frozen", True, create=True),
+                mock.patch.object(bootstrap.sys, "platform", "darwin"),
+                mock.patch.object(bootstrap.sys, "executable", str(executable)),
+                mock.patch.object(bootstrap.sys, "_MEIPASS", None, create=True),
+            ):
+                self.assertEqual(bootstrap._bundled_app_dir(), app_dir.resolve())
+                self.assertEqual(bootstrap._bundled_models_dir(), models_dir.resolve())
+
     def test_bootstrap_marks_modular_process_and_exports_models(self) -> None:
         bootstrap = _load_script(
             "swcstudio_bootstrap_main_test",

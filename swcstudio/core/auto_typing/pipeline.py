@@ -440,7 +440,13 @@ def _run_stage23(
 
     is_binary_b1 = bundle.get("kind") == "axon_dendrite_binary"
     branch_confs: list[float] = []
-    if use_subtree_stage2:
+    # Tier A assigns one owner label to each soma-child subtree. That is
+    # appropriate only when the reconstruction has multiple primary
+    # subtrees. In single-trunk files, axon and dendrites can diverge below
+    # the first soma child; propagating one Tier-A label would collapse the
+    # entire neuron to a single class.
+    use_subtree_owner_labels = use_subtree_stage2 and len(subtree_owner_map) >= 2
+    if use_subtree_owner_labels:
         # Stage 2 = Tier A's per-subtree predictions, propagated to all
         # branches in each primary subtree. Skips the per-branch Tier B
         # inference entirely. Rationale: branch-level features struggle to
@@ -564,7 +570,7 @@ def _run_stage23(
         _apply_gnn_override(
             node_labels, node_confidences, morph, gnn_state,
             apical_evidence=(
-                (is_binary_b1 or use_subtree_stage2)
+                (is_binary_b1 or use_subtree_owner_labels)
                 and apical_owner_root is not None
             ),
         )
@@ -606,7 +612,7 @@ def _run_stage23(
             final_labels, node_confidences, morph, gnn_state,
             update_confidences=False,
             apical_evidence=(
-                (is_binary_b1 or use_subtree_stage2)
+                (is_binary_b1 or use_subtree_owner_labels)
                 and apical_owner_root is not None
             ),
         )

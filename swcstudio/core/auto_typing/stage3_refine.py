@@ -879,14 +879,25 @@ def refine(
 
     elif cell_type == "pyramidal":
         # Pyramidal: full refinement pipeline
-        # 1. Primary subtree voting
-        labels, subtree_labels = _primary_subtree_voting(
-            nodes, labels, ml_confidences, parent_idx, children,
-            soma_indices, label_set,
-        )
+        primary_roots = [
+            ci
+            for si in soma_indices
+            for ci in children[si]
+            if ci not in soma_indices
+        ]
+
+        # Whole-subtree voting requires multiple soma-child subtrees. A
+        # single-trunk reconstruction can contain axon and dendrites below
+        # its only soma child, so voting would erase valid branch-level
+        # labels and turn the entire cell into one class.
+        if len(primary_roots) >= 2:
+            labels, subtree_labels = _primary_subtree_voting(
+                nodes, labels, ml_confidences, parent_idx, children,
+                soma_indices, label_set,
+            )
 
         # 2. Single-axon constraint
-        if 2 in label_set:
+        if 2 in label_set and subtree_labels:
             subtree_labels, labels = _enforce_single_class(
                 subtree_labels, nodes, children, labels, ml_confidences,
                 target_class=2, fallback_class=3,
@@ -895,7 +906,7 @@ def refine(
         # 3. Single-apical constraint — PCA-ranked picker first (uses cell's
         # own principal axis, robust to rotated coordinate frames), then the
         # confidence-based enforcer as a safety net.
-        if 4 in label_set:
+        if 4 in label_set and subtree_labels:
             subtree_labels, labels = _pick_apical_by_principal_axis(
                 subtree_labels, nodes, children, soma_indices, labels,
                 apical_label=4, fallback_label=3,

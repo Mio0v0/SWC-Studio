@@ -81,10 +81,8 @@ def _user_app_override_dir() -> Path:
 
 def _bundled_app_dir() -> Optional[Path]:
     """Return the replaceable bundled code root, if running frozen."""
-    # PyInstaller exposes _MEIPASS only when running frozen.
-    meipass = getattr(sys, "_MEIPASS", None)
-    if meipass:
-        candidate = Path(meipass) / "app"
+    for root in _runtime_resource_roots():
+        candidate = root / "app"
         if (candidate / "swcstudio" / "__init__.py").exists():
             return candidate
     return None
@@ -92,12 +90,36 @@ def _bundled_app_dir() -> Optional[Path]:
 
 def _bundled_models_dir() -> Optional[Path]:
     """Return the replaceable bundled model directory."""
-    meipass = getattr(sys, "_MEIPASS", None)
-    if meipass:
-        candidate = Path(meipass) / "models"
+    for root in _runtime_resource_roots():
+        candidate = root / "models"
         if candidate.is_dir():
             return candidate
     return None
+
+
+def _runtime_resource_roots() -> list[Path]:
+    """Candidate roots containing the modular ``app`` and ``models`` dirs."""
+    roots: list[Path] = []
+    meipass = getattr(sys, "_MEIPASS", None)
+    if meipass:
+        roots.append(Path(meipass))
+
+    if getattr(sys, "frozen", False):
+        executable = Path(sys.executable).resolve()
+        # macOS: SWC-Studio.app/Contents/MacOS/SWC-Studio
+        if sys.platform == "darwin" and executable.parent.name == "MacOS":
+            roots.append(executable.parent.parent / "Resources")
+        # Windows onedir: SWC-Studio.exe beside _internal/.
+        roots.extend((executable.parent, executable.parent / "_internal"))
+
+    deduped: list[Path] = []
+    seen: set[str] = set()
+    for root in roots:
+        key = str(root)
+        if key not in seen:
+            seen.add(key)
+            deduped.append(root)
+    return deduped
 
 
 def _source_repo_dir() -> Optional[Path]:

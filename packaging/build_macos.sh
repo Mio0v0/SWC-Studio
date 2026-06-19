@@ -19,7 +19,7 @@ echo "[SWC-Studio] venv:      ${VENV_DIR}"
 
 rm -rf "${ROOT_DIR}/build" "${ROOT_DIR}/dist"
 
-"${PYTHON_BIN}" -m venv "${VENV_DIR}"
+"${PYTHON_BIN}" -m venv --clear "${VENV_DIR}"
 # shellcheck source=/dev/null
 source "${VENV_DIR}/bin/activate"
 
@@ -33,6 +33,10 @@ RES_DIR="${APP_DIR}/Contents/Resources"
 python "${ROOT_DIR}/packaging/stage_modular_payload.py" \
   --source-root "${ROOT_DIR}" \
   --runtime-root "${RES_DIR}"
+
+# Staging the replaceable code/model layers happens after PyInstaller signs
+# the bundle, so apply a final local ad-hoc signature over the complete app.
+codesign --force --deep --sign - "${APP_DIR}"
 
 # Summary
 echo ""
