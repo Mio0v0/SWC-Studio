@@ -4,6 +4,7 @@ from __future__ import annotations
 import importlib
 import importlib.metadata
 import platform
+import subprocess
 import sys
 from pathlib import Path
 from typing import Any
@@ -105,6 +106,35 @@ def _load_model(short_name: str, path: Path) -> None:
     joblib.load(path)
 
 
+def _check_qapplication() -> dict[str, Any]:
+    # QApplication can only be constructed once per process and side-effects the
+    # Qt platform plugin loader, so we exercise it in a fresh subprocess.
+    # Defaults to the offscreen platform so doctor never pops a window, but
+    # still catches the case where Qt's plugin loader cannot start at all —
+    # e.g. PySide6 installed against a Qt that needs system libs the host
+    # is missing (libxcb-cursor on Linux, etc.).
+    script = (
+        "import os, sys\n"
+        "os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')\n"
+        "from PySide6.QtWidgets import QApplication\n"
+        "app = QApplication.instance() or QApplication([])\n"
+        "sys.stdout.write(app.platformName())\n"
+    )
+    try:
+        completed = subprocess.run(
+            [sys.executable, "-c", script],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+    except (subprocess.TimeoutExpired, OSError) as exc:
+        return {"ok": False, "platform": None, "error": f"{exc.__class__.__name__}: {exc}"}
+    if completed.returncode != 0:
+        stderr = completed.stderr.strip() or f"exit code {completed.returncode}"
+        return {"ok": False, "platform": None, "error": stderr}
+    return {"ok": True, "platform": completed.stdout.strip() or None, "error": None}
+
+
 def check_installation(*, load_models: bool = True) -> dict[str, Any]:
     """Return a JSON-serializable runtime, data-file, and model report."""
     dependencies = [
@@ -145,12 +175,26 @@ def check_installation(*, load_models: bool = True) -> dict[str, Any]:
                 row["error"] = f"{exc.__class__.__name__}: {exc}"
         models.append(row)
 
-    gui: dict[str, Any] = {"ok": False, "error": None}
+    gui: dict[str, Any] = {
+        "ok": False,
+        "error": None,
+        "qapplication_ok": None,
+        "qt_platform": None,
+        "qt_error": None,
+    }
     try:
         importlib.import_module("swcstudio.gui.main")
         gui["ok"] = True
     except Exception as exc:  # noqa: BLE001
         gui["error"] = f"{exc.__class__.__name__}: {exc}"
+
+    if gui["ok"]:
+        qt_report = _check_qapplication()
+        gui["qapplication_ok"] = qt_report["ok"]
+        gui["qt_platform"] = qt_report["platform"]
+        gui["qt_error"] = qt_report["error"]
+        if not qt_report["ok"]:
+            gui["ok"] = False
 
     python_ok = (3, 10) <= sys.version_info[:2] < (3, 13)
     ok = (
@@ -212,15 +256,33 @@ def format_installation_report(report: dict[str, Any]) -> str:
         lines.append(f"  [{state}] {row['filename']}: {detail}")
 
     gui = report["gui"]
+    import_state = "OK" if not gui.get("error") else "FAILED"
     lines.extend(
         [
             "",
             (
-                f"GUI import: {'OK' if gui['ok'] else 'FAILED'}"
-                + (f" ({gui['error']})" if gui["error"] else "")
+                f"GUI import: {import_state}"
+                + (f" ({gui['error']})" if gui.get("error") else "")
             ),
         ]
     )
+    qapp_ok = gui.get("qapplication_ok")
+    if qapp_ok is not None:
+        qt_platform = gui.get("qt_platform") or "unknown"
+        qt_error = gui.get("qt_error")
+        if qapp_ok:
+            lines.append(f"Qt platform plugin: OK ({qt_platform})")
+        else:
+            detail = qt_error or "unknown error"
+            lines.append(f"Qt platform plugin: FAILED ({detail})")
+            if sys.platform.startswith("linux"):
+                lines.append(
+                    "  Linux hint: install system Qt deps, e.g."
+                    " 'sudo apt-get install libegl1 libxkbcommon-x11-0"
+                    " libxcb-cursor0 libxcb-icccm4 libxcb-image0"
+                    " libxcb-keysyms1 libxcb-randr0 libxcb-render-util0"
+                    " libxcb-shape0 libxcb-xinerama0 libxcb-xkb1 libxkbcommon0'"
+                )
     if not report["ok"]:
         lines.extend(
             [

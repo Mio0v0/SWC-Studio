@@ -66,6 +66,34 @@ the ML runtime and models; later in-process runs reuse cached model
 objects, and an applied GUI result is reused by the next validation
 refresh instead of repeating type-suspicion inference.
 
+### Linux system packages (Options 2 and 3)
+
+`PySide6` and `vispy` are pip-installed, but the Qt platform plugin and
+OpenGL stack they depend on are **OS packages**, not Python wheels. On a
+fresh Debian/Ubuntu host install them before `pip install swcstudio`,
+otherwise launching the GUI fails with a Qt platform-plugin error:
+
+```bash
+sudo apt-get update
+sudo apt-get install -y \
+  libegl1 libgl1 libxkbcommon-x11-0 libxcb-cursor0 \
+  libxcb-icccm4 libxcb-image0 libxcb-keysyms1 \
+  libxcb-randr0 libxcb-render-util0 libxcb-shape0 \
+  libxcb-xinerama0 libxcb-xkb1 libxkbcommon0 \
+  libdbus-1-3 libfontconfig1
+```
+
+Fedora / RHEL: `sudo dnf install mesa-libGL mesa-libEGL libxkbcommon-x11
+xcb-util-cursor xcb-util-image xcb-util-keysyms xcb-util-renderutil
+xcb-util-wm dbus-libs fontconfig`. Arch: `sudo pacman -S libgl libxkbcommon
+xcb-util-cursor xcb-util-image xcb-util-keysyms xcb-util-renderutil
+xcb-util-wm dbus fontconfig`.
+
+macOS and Windows ship the equivalent libraries with the OS — no extra
+step is needed on those platforms. After installation, `swcstudio doctor`
+will report **Qt platform plugin: OK** when the system stack is healthy
+and otherwise print the `apt-get` hint above.
+
 ### Option 2 — Researcher, `pip install` (recommended for scripted workflows)
 
 The Python package is published on PyPI:
